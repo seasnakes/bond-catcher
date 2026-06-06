@@ -1,0 +1,6 @@
+{
+  "scripts": {
+    "start": "node server.js",
+    "update:stocks": "node scripts/update-a-share-list.js"
+  }
+}

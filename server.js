@@ -1,0 +1,1295 @@
+const http = require("node:http");
+const https = require("node:https");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const PORT = Number(process.env.PORT || 5173);
+const ROOT = __dirname;
+const LOCAL_A_SHARE_LIST_PATH = path.join(ROOT, "data", "a-share-list.json");
+const BOARD_STATE_PATH = path.join(ROOT, "data", "board-state.json");
+const EASTMONEY_SEARCH_TOKEN = "D43BF722C8E33BD69D955A7E7361F5D9";
+const EASTMONEY_SEARCH_TIMEOUT_MS = 2500;
+const DOMESTIC_INDEXES = [
+  { key: "sh000001", name: "上证指数", symbol: "sh000001", secid: "1.000001" },
+  { key: "sz399006", name: "创业板指", symbol: "sz399006", secid: "0.399006" },
+  { key: "sh000680", name: "科创综指", symbol: "sh000680", secid: "1.000680" },
+  {
+    key: "sh000832",
+    group: "转债",
+    name: "中证转债",
+    symbol: "sh000832",
+    secid: "1.000832",
+    source: "tencent",
+  },
+];
+const GLOBAL_INDEX_SYMBOLS = ["b_KOSPI", "int_nikkei", "rt_hkHSTECH"];
+const ACTIVE_MARKET_SYMBOLS = ["sh000001", "sz399106"];
+
+const MIME_TYPES = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+};
+
+const server = http.createServer(async (request, response) => {
+  const url = new URL(request.url, `http://${request.headers.host}`);
+
+  try {
+    if (url.pathname === "/api/quotes") {
+      await handleQuotes(url, response);
+      return;
+    }
+
+    if (url.pathname === "/api/indices") {
+      await handleIndices(response);
+      return;
+    }
+
+    if (url.pathname === "/api/sparks") {
+      await handleSparks(url, response);
+      return;
+    }
+
+    if (url.pathname === "/api/resolve") {
+      await handleResolve(url, response);
+      return;
+    }
+
+    if (url.pathname === "/api/search") {
+      await handleSearch(url, response);
+      return;
+    }
+
+    if (url.pathname === "/api/state") {
+      await handleState(request, response);
+      return;
+    }
+
+    await serveStatic(url.pathname, response);
+  } catch (error) {
+    console.error(
+      `[500] ${request.method || "GET"} ${url.pathname}${url.search}: ${
+        error instanceof Error ? error.message : "unknown error"
+      }`,
+    );
+    sendJson(response, 500, {
+      error: error instanceof Error ? error.message : "unknown error",
+    });
+  }
+});
+
+server.listen(PORT, () => {
+  console.log(`Finance board running at http://localhost:${PORT}`);
+});
+
+async function handleQuotes(url, response) {
+  const secids = (url.searchParams.get("secids") || "")
+    .split(",")
+    .map((value) => value.trim())
+    .map(normalizeSecidInput)
+    .filter(Boolean);
+
+  if (secids.length === 0) {
+    sendJson(response, 400, { error: "missing secids" });
+    return;
+  }
+
+  const quotes = [];
+  const failedGroups = [];
+  for (const group of chunk(secids, 80)) {
+    try {
+      const rows = await fetchSinaQuotes(group);
+      quotes.push(...rows);
+    } catch (error) {
+      failedGroups.push(group);
+      console.warn(
+        `Sina quote batch failed (${group.length} secids, first ${group[0]}): ${
+          error instanceof Error ? error.message : "unknown error"
+        }`,
+      );
+    }
+  }
+
+  sendJson(response, 200, {
+    source: "新浪实时",
+    time: new Date().toISOString(),
+    quotes,
+    failedGroups: failedGroups.length,
+  });
+}
+
+async function handleIndices(response) {
+  const indices = await fetchSinaGlobalIndices();
+
+  sendJson(response, 200, {
+    source: "新浪实时",
+    time: new Date().toISOString(),
+    indices,
+  });
+}
+
+async function handleSparks(url, response) {
+  const secids = Array.from(
+    new Set(
+      (url.searchParams.get("secids") || "")
+        .split(",")
+        .map((value) => value.trim())
+        .map(normalizeSecidInput)
+        .filter(Boolean),
+    ),
+  );
+
+  if (secids.length === 0) {
+    sendJson(response, 400, { error: "missing secids" });
+    return;
+  }
+
+  const sparks = await mapWithConcurrency(secids, 8, async (secid) => {
+    try {
+      return await fetchSecuritySparkline(secid);
+    } catch {
+      return null;
+    }
+  });
+
+  sendJson(response, 200, {
+    source: "腾讯今日分时优先",
+    time: new Date().toISOString(),
+    sparks: sparks.filter(Boolean),
+  });
+}
+
+async function handleResolve(url, response) {
+  const name = (url.searchParams.get("name") || "").trim();
+  if (!name) {
+    sendJson(response, 400, { error: "missing name" });
+    return;
+  }
+
+  const stock = await resolveStock(name);
+  if (!stock) {
+    sendJson(response, 404, { error: `未找到股票：${name}` });
+    return;
+  }
+
+  sendJson(response, 200, stock);
+}
+
+async function handleSearch(url, response) {
+  const query = (url.searchParams.get("q") || "").trim();
+  if (!query) {
+    sendJson(response, 200, { results: [] });
+    return;
+  }
+
+  const results = await searchStocks(query, 12);
+  sendJson(response, 200, { results });
+}
+
+async function handleState(request, response) {
+  if (request.method === "GET") {
+    try {
+      const raw = await fs.promises.readFile(BOARD_STATE_PATH, "utf8");
+      sendJson(response, 200, { exists: true, ...JSON.parse(raw) });
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        sendJson(response, 200, { exists: false });
+        return;
+      }
+      throw error;
+    }
+    return;
+  }
+
+  if (request.method === "POST") {
+    const body = await readJsonBody(request);
+    const currentState = await readBoardStateFile().catch(() => null);
+    if (
+      currentState?.updatedAt &&
+      (!body?.baseUpdatedAt || body.baseUpdatedAt !== currentState.updatedAt)
+    ) {
+      sendJson(response, 409, {
+        error: "页面数据已过期，请刷新后再编辑",
+        updatedAt: currentState.updatedAt,
+      });
+      return;
+    }
+
+    const state = normalizeBoardState(body);
+    await fs.promises.mkdir(path.dirname(BOARD_STATE_PATH), { recursive: true });
+    const temporaryPath = `${BOARD_STATE_PATH}.tmp`;
+    await fs.promises.writeFile(temporaryPath, `${JSON.stringify(state, null, 2)}\n`);
+    await fs.promises.rename(temporaryPath, BOARD_STATE_PATH);
+    sendJson(response, 200, {
+      ok: true,
+      updatedAt: state.updatedAt,
+      sectorCount: state.sectors.length,
+      stockCount: state.sectors.reduce((total, sector) => total + sector.stocks.length, 0),
+      stackCount: state.stackGroups.length,
+    });
+    return;
+  }
+
+  response.writeHead(405, {
+    "Content-Type": "text/plain; charset=utf-8",
+    Allow: "GET, POST",
+  });
+  response.end("Method not allowed");
+}
+
+async function readBoardStateFile() {
+  return JSON.parse(await fs.promises.readFile(BOARD_STATE_PATH, "utf8"));
+}
+
+async function fetchSinaQuotes(secids) {
+  return new Promise((resolve, reject) => {
+    const symbolBySecid = new Map(secids.map((secid) => [secid, secidToSinaSymbol(secid)]));
+    const secidBySymbol = new Map([...symbolBySecid].map(([secid, symbol]) => [symbol, secid]));
+    fetchSinaRaw([...symbolBySecid.values()])
+      .then((raw) => resolve(parseSinaResponse(raw, secidBySymbol)))
+      .catch(reject);
+  });
+}
+
+function fetchSinaRaw(symbols) {
+  return fetchText(
+    {
+      hostname: "hq.sinajs.cn",
+      path: `/list=${symbols.join(",")}`,
+      headers: {
+        Referer: "https://finance.sina.com.cn/",
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36",
+      },
+      timeout: 8000,
+    },
+    "latin1",
+  );
+}
+
+function parseSinaResponse(raw, secidBySymbol) {
+  const quotes = [];
+  const regex = /var hq_str_([a-z0-9_]+)="([^"]*)";/g;
+  let match;
+
+  while ((match = regex.exec(raw))) {
+    const symbol = match[1];
+    const secid = secidBySymbol.get(symbol);
+    if (!secid) continue;
+
+    const parts = match[2].split(",");
+    if (isHongKongSecid(secid)) {
+      const price = Number(parts[6]);
+      const change = Number(parts[8]);
+      if (!Number.isFinite(price) || !Number.isFinite(change)) continue;
+
+      quotes.push({
+        secid,
+        price,
+        change,
+        amount: Number(parts[11]) || 0,
+        date: String(parts[17] || "").replaceAll("/", "-"),
+        time: parts[18] || "",
+      });
+      continue;
+    }
+
+    const previousClose = Number(parts[2]);
+    const current = Number(parts[3]);
+    const price = Number.isFinite(current) && current > 0 ? current : previousClose;
+    const change =
+      Number.isFinite(price) && Number.isFinite(previousClose) && previousClose > 0
+        ? ((price - previousClose) / previousClose) * 100
+        : 0;
+
+    quotes.push({
+      secid,
+      price,
+      change,
+      amount: Number(parts[9]) || 0,
+      date: parts[30] || "",
+      time: parts[31] || "",
+      previousClose,
+    });
+  }
+
+  if (quotes.length === 0) {
+    throw new Error("Sina quote response is empty");
+  }
+
+  return quotes;
+}
+
+async function fetchSinaGlobalIndices() {
+  const sinaDomesticIndexes = DOMESTIC_INDEXES.filter((item) => item.source !== "tencent");
+  const tencentDomesticIndexes = DOMESTIC_INDEXES.filter((item) => item.source === "tencent");
+  const raw = await fetchSinaRaw([
+    ...sinaDomesticIndexes.map((item) => item.symbol),
+    ...GLOBAL_INDEX_SYMBOLS,
+  ]);
+  const rows = parseSinaVars(raw);
+  const sinaDomestic = await Promise.all(
+    sinaDomesticIndexes.map(async (config) => {
+      const quote = parseSinaDomesticIndex(rows.get(config.symbol), config);
+      if (!quote) return null;
+
+      try {
+        const spark = await withTimeout(fetchTencentMinuteSparkline(config.symbol, 90), 2500);
+        return {
+          ...quote,
+          points: spark.points,
+          sparkChange: spark.change,
+          sparkTime: spark.time,
+          sparkSource: "腾讯分时",
+        };
+      } catch {
+        try {
+          const spark = await withTimeout(fetchSinaSparkline(config.secid, 90), 2500);
+          return {
+            ...quote,
+            points: spark.points,
+            sparkChange: spark.change,
+            sparkTime: spark.time,
+            sparkSource: "新浪5分钟K线",
+          };
+        } catch {
+          return quote;
+        }
+      }
+    }),
+  );
+  const tencentDomestic = await Promise.all(
+    tencentDomesticIndexes.map((config) => fetchTencentIndex(config).catch(() => null)),
+  );
+
+  const indices = [...sinaDomestic, ...tencentDomestic].filter(Boolean);
+  const activeMarketValue = await withTimeout(fetchActiveMarketValue(), 3500).catch(() => null);
+  if (activeMarketValue) {
+    indices.push(activeMarketValue);
+  }
+
+  const kospi = rows.get("b_KOSPI");
+  if (kospi) {
+    const parts = kospi.split(",");
+    const price = Number(parts[1]);
+    const change = Number(parts[2]);
+    const percent = Number(parts[3]);
+    if ([price, change, percent].every(Number.isFinite)) {
+      indices.push({
+        key: "kospi",
+        name: "韩国KOSPI",
+        price,
+        change,
+        percent,
+      });
+    }
+  }
+
+  const nikkei = rows.get("int_nikkei");
+  if (nikkei) {
+    const parts = nikkei.split(",");
+    const price = Number(parts[1]);
+    const change = Number(parts[2]);
+    const percent = Number(parts[3]);
+    if ([price, change, percent].every(Number.isFinite)) {
+      indices.push({
+        key: "nikkei",
+        name: "日经225",
+        price,
+        change,
+        percent,
+      });
+    }
+  }
+
+  const hstech = rows.get("rt_hkHSTECH");
+  if (hstech) {
+    const parts = hstech.split(",");
+    const price = Number(parts[6]);
+    const change = Number(parts[7]);
+    const percent = Number(parts[8]);
+    if ([price, change, percent].every(Number.isFinite)) {
+      const quote = {
+        key: "hstech",
+        name: "恒生科技",
+        price,
+        change,
+        percent,
+      };
+      try {
+        const spark = await withTimeout(fetchTencentMinuteSparkline("hkHSTECH", 90), 2500);
+        indices.push({
+          ...quote,
+          points: spark.points,
+          sparkChange: spark.change,
+          sparkTime: spark.time,
+          sparkSource: "腾讯分时",
+        });
+      } catch {
+        indices.push(quote);
+      }
+    }
+  }
+
+  return indices;
+}
+
+function parseSinaDomesticIndex(raw, config) {
+  if (!raw) return null;
+
+  const parts = raw.split(",");
+  const previousClose = Number(parts[2]);
+  const current = Number(parts[3]);
+  const price = Number.isFinite(current) && current > 0 ? current : previousClose;
+  const change =
+    Number.isFinite(price) && Number.isFinite(previousClose) ? price - previousClose : 0;
+  const percent =
+    Number.isFinite(change) && Number.isFinite(previousClose) && previousClose > 0
+      ? (change / previousClose) * 100
+      : 0;
+
+  if (!Number.isFinite(price)) return null;
+
+  return {
+    key: config.key,
+    group: config.group || "A股",
+    name: config.name,
+    price,
+    change,
+    percent,
+    secid: config.secid,
+    time: `${parts[30] || ""} ${parts[31] || ""}`.trim(),
+  };
+}
+
+async function fetchTencentIndex(config) {
+  const raw = await fetchText({
+    hostname: "qt.gtimg.cn",
+    path: `/q=${encodeURIComponent(config.symbol)}`,
+    headers: {
+      Referer: "https://gu.qq.com/",
+      "User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36",
+    },
+    timeout: 8000,
+  });
+  const quote = parseTencentIndex(raw, config);
+  if (!quote) return null;
+
+  try {
+    const spark = await withTimeout(fetchTencentMinuteSparkline(config.symbol, 90), 2500);
+    return {
+      ...quote,
+      points: spark.points,
+      sparkChange: spark.change,
+      sparkTime: spark.time,
+      sparkSource: "腾讯分时",
+    };
+  } catch {
+    return quote;
+  }
+}
+
+function parseTencentIndex(raw, config) {
+  const body = raw.match(/="([^"]*)"/)?.[1];
+  if (!body) return null;
+
+  const parts = body.split("~");
+  const price = Number(parts[3]);
+  const change = Number(parts[31]);
+  const percent = Number(parts[32]);
+  if (![price, change, percent].every(Number.isFinite)) return null;
+
+  return {
+    key: config.key,
+    group: config.group || "A股",
+    name: config.name || parts[1],
+    price,
+    change,
+    percent,
+    secid: config.secid,
+    time: parts[30] || "",
+  };
+}
+
+async function fetchActiveMarketValue() {
+  const rows = await Promise.all(ACTIVE_MARKET_SYMBOLS.map(fetchTencentMinuteAmounts));
+  const maps = rows.map((items) => new Map(items.map((item) => [item.time, item.amount])));
+  const times = [...maps[0].keys()].filter((time) => maps.every((map) => map.has(time))).sort();
+  if (times.length < 3) return null;
+
+  const combined = times.map((time) => ({
+    time,
+    amount: maps.reduce((total, map) => total + map.get(time), 0),
+  }));
+  const amounts = combined
+    .map((item, index) => {
+      if (index === 0) return 0;
+      return Math.max(0, item.amount - combined[index - 1].amount);
+    })
+    .filter((value) => value > 0);
+  const activeSeries = smoothedAverage(amounts, 3, 1).map((value) => value / 100000000);
+  if (activeSeries.length < 2) return null;
+
+  const latest = activeSeries[activeSeries.length - 1];
+  const previous = activeSeries[activeSeries.length - 2];
+  const compass = await fetchCompassActiveMarketValue().catch(() => null);
+  const displayedValue = compass?.value ?? latest;
+  const displayedPercent = compass?.percent ?? (previous > 0 ? ((latest - previous) / previous) * 100 : 0);
+  const scale = compass?.value && latest > 0 ? compass.value / latest : 1;
+
+  return {
+    key: "active-market-value",
+    group: "指南针",
+    name: "活跃市值",
+    kind: "metric",
+    unit: compass ? "" : "亿",
+    price: displayedValue,
+    change: compass?.change ?? latest - previous,
+    percent: displayedPercent,
+    points: downsample(
+      activeSeries.map((value) => value * scale),
+      58,
+    ),
+    sparkTime: combined[combined.length - 1]?.time || "",
+    note: compass
+      ? "当前值来自 stock.svip886.com/api/indexes；曲线按沪深分钟成交额近似生成，非指南针官方接口"
+      : "按公开0AMV近似公式用沪深分钟成交额估算，非指南针官方数据",
+  };
+}
+
+async function fetchCompassActiveMarketValue() {
+  const raw = await fetchText({
+    hostname: "stock.svip886.com",
+    path: "/api/indexes",
+    headers: {
+      Referer: "https://github.com/svip886/koishi-plugin-stock",
+      "User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36",
+    },
+    timeout: 1200,
+  });
+  const match = raw.match(/活跃市值（0AMV）：([\d.]+)（([+-]?[\d.]+)%）/);
+  if (!match) return null;
+
+  const value = Number(match[1]);
+  const percent = Number(match[2]);
+  if (!Number.isFinite(value) || !Number.isFinite(percent)) return null;
+
+  return {
+    value,
+    percent,
+    change: value * (percent / 100),
+  };
+}
+
+async function fetchTencentMinuteAmounts(symbol) {
+  const raw = await fetchText({
+    hostname: "web.ifzq.gtimg.cn",
+    path: `/appstock/app/minute/query?code=${encodeURIComponent(symbol)}`,
+    headers: {
+      Referer: "https://gu.qq.com/",
+      "User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36",
+    },
+    timeout: 10000,
+  });
+  const json = JSON.parse(raw);
+  const dataNode = json?.data?.[symbol]?.data;
+  const date = dateKeyFromCompactDate(dataNode?.date);
+  const data = dataNode?.data;
+  if (!Array.isArray(data)) return [];
+
+  return data
+    .map((line) => {
+      const [time, price, volume, amount] = String(line).trim().split(/\s+/);
+      return {
+        date,
+        time,
+        price: Number(price),
+        volume: Number(volume),
+        amount: Number(amount),
+      };
+    })
+    .filter((item) => item.time && Number.isFinite(item.amount));
+}
+
+async function fetchTencentMinuteSparkline(symbol, limit = 58) {
+  const rows = await fetchTencentMinuteAmounts(symbol);
+  const points = downsample(
+    rows.map((item) => item.price).filter((value) => Number.isFinite(value) && value > 0),
+    limit,
+  );
+  if (points.length < 2) {
+    throw new Error(`empty tencent sparkline: ${symbol}`);
+  }
+
+  const first = points[0];
+  const last = points[points.length - 1];
+  return {
+    points,
+    change: first ? ((last - first) / first) * 100 : 0,
+    date: rows[rows.length - 1]?.date || currentChinaDateKey(),
+    time: rows[rows.length - 1]?.time || "",
+  };
+}
+
+async function fetchSecuritySparkline(secid) {
+  const symbol = secidToTencentSymbol(secid);
+  try {
+    const spark = await fetchTencentMinuteSparkline(symbol);
+    return {
+      ...spark,
+      secid,
+      source: "腾讯分时",
+    };
+  } catch {
+    try {
+      return await fetchEastmoneyMinuteSparkline(secid);
+    } catch {
+      return fetchSinaSparkline(secid);
+    }
+  }
+}
+
+function smoothedAverage(values, period, weight) {
+  const result = [];
+  let previous = values[0];
+
+  for (const value of values) {
+    previous = (weight * value + (period - weight) * previous) / period;
+    result.push(previous);
+  }
+
+  return result;
+}
+
+function parseSinaVars(raw) {
+  const rows = new Map();
+  const regex = /var hq_str_([A-Za-z0-9_]+)="([^"]*)";/g;
+  let match;
+
+  while ((match = regex.exec(raw))) {
+    rows.set(match[1], match[2]);
+  }
+
+  return rows;
+}
+
+async function fetchSinaSparkline(secid, limit = 58) {
+  const symbol = secidToSinaSymbol(secid);
+  const raw = await fetchText({
+    hostname: "money.finance.sina.com.cn",
+    path:
+      "/quotes_service/api/json_v2.php/CN_MarketData.getKLineData" +
+      `?symbol=${encodeURIComponent(symbol)}&scale=5&ma=no&datalen=48`,
+    headers: {
+      Referer: "https://finance.sina.com.cn/",
+      "User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36",
+    },
+    timeout: 10000,
+  });
+  const json = JSON.parse(raw);
+
+  if (!Array.isArray(json) || json.length < 2) {
+    throw new Error(`empty sparkline: ${secid}`);
+  }
+
+  const latestRows = latestDatedRows(json, (row) => dateKeyFromDateTime(row?.day));
+  if (latestRows.length < 2) {
+    throw new Error(`empty latest-day sparkline: ${secid}`);
+  }
+
+  const points = downsample(
+    latestRows
+      .map((row) => Number(row?.close))
+      .filter((value) => Number.isFinite(value) && value > 0),
+    limit,
+  );
+
+  if (points.length < 2) {
+    throw new Error(`invalid sparkline: ${secid}`);
+  }
+
+  const first = points[0];
+  const last = points[points.length - 1];
+
+  return {
+    secid,
+    points,
+    change: first ? ((last - first) / first) * 100 : 0,
+    date: dateKeyFromDateTime(latestRows[latestRows.length - 1]?.day),
+    time: latestRows[latestRows.length - 1]?.day || "",
+    source: "新浪5分钟K线",
+  };
+}
+
+async function fetchEastmoneyMinuteSparkline(secid) {
+  const raw = await fetchText({
+    hostname: "push2his.eastmoney.com",
+    path:
+      "/api/qt/stock/trends2/get" +
+      `?secid=${encodeURIComponent(secid)}` +
+      "&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13" +
+      "&fields2=f51,f52,f53,f54,f55,f56,f57,f58" +
+      "&iscr=0&iscca=0&ndays=1",
+    headers: {
+      Referer: "https://quote.eastmoney.com/",
+      "User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36",
+    },
+    timeout: 10000,
+  });
+  const trends = JSON.parse(raw)?.data?.trends;
+  if (!Array.isArray(trends) || trends.length < 2) {
+    throw new Error(`empty eastmoney sparkline: ${secid}`);
+  }
+
+  const latestTrends = latestDatedRows(trends, (line) => dateKeyFromDateTime(String(line).split(",")[0]));
+  if (latestTrends.length < 2) {
+    throw new Error(`empty latest-day eastmoney sparkline: ${secid}`);
+  }
+
+  const points = downsample(
+    latestTrends
+      .map((line) => Number(String(line).split(",")[2]))
+      .filter((value) => Number.isFinite(value) && value > 0),
+    58,
+  );
+  if (points.length < 2) {
+    throw new Error(`invalid eastmoney sparkline: ${secid}`);
+  }
+
+  const first = points[0];
+  const last = points[points.length - 1];
+  return {
+    secid,
+    points,
+    change: first ? ((last - first) / first) * 100 : 0,
+    date: dateKeyFromDateTime(String(latestTrends[latestTrends.length - 1] || "").split(",")[0]),
+    time: String(latestTrends[latestTrends.length - 1] || "").split(",")[0] || "",
+    source: "东方财富分时",
+  };
+}
+
+function latestDatedRows(rows, getDateKey) {
+  const datedRows = rows
+    .map((row) => ({ row, date: getDateKey(row) }))
+    .filter((item) => item.date);
+  if (datedRows.length === 0) return rows;
+
+  const latestDate = datedRows.reduce(
+    (latest, item) => (item.date > latest ? item.date : latest),
+    datedRows[0].date,
+  );
+  return datedRows.filter((item) => item.date === latestDate).map((item) => item.row);
+}
+
+function dateKeyFromDateTime(value) {
+  const match = String(value || "").match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (!match) return "";
+  return `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
+}
+
+function dateKeyFromCompactDate(value) {
+  const match = String(value || "").match(/^(\d{4})(\d{2})(\d{2})$/);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : "";
+}
+
+function currentChinaDateKey() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function downsample(values, limit) {
+  if (values.length <= limit) return values;
+  if (limit < 4) return [values[0], values[values.length - 1]].slice(0, limit);
+
+  const sampled = [values[0]];
+  const bucketCount = Math.max(1, Math.floor((limit - 2) / 2));
+  const bucketSize = (values.length - 2) / bucketCount;
+
+  for (let bucket = 0; bucket < bucketCount; bucket += 1) {
+    const start = 1 + Math.floor(bucket * bucketSize);
+    const end = Math.min(values.length - 1, 1 + Math.floor((bucket + 1) * bucketSize));
+    if (start >= end) continue;
+
+    let minIndex = start;
+    let maxIndex = start;
+    for (let index = start + 1; index < end; index += 1) {
+      if (values[index] < values[minIndex]) minIndex = index;
+      if (values[index] > values[maxIndex]) maxIndex = index;
+    }
+
+    if (minIndex === maxIndex) {
+      sampled.push(values[minIndex]);
+    } else if (minIndex < maxIndex) {
+      sampled.push(values[minIndex], values[maxIndex]);
+    } else {
+      sampled.push(values[maxIndex], values[minIndex]);
+    }
+  }
+
+  sampled.push(values[values.length - 1]);
+  while (sampled.length > limit) {
+    sampled.splice(sampled.length - 2, 1);
+  }
+
+  return sampled;
+}
+
+async function resolveStock(name) {
+  const query = String(name || "").trim();
+  const localExact = searchLocalStocks(query, 20).find(
+    (item) => item.name === query || item.code === codeFromInput(query),
+  );
+  if (localExact) return localExact;
+
+  const searchTerms = Array.from(new Set([query, codeFromInput(query)].filter(Boolean)));
+  let fallbackCandidate = null;
+  for (const term of searchTerms) {
+    const candidates = await searchStocks(term, 20);
+    fallbackCandidate ||= candidates[0] || null;
+    const exact =
+      candidates.find((item) => item.name === query || item.code === codeFromInput(query)) ||
+      candidates.find((item) => item.name.includes(query) || query.includes(item.name));
+    if (exact) return exact;
+  }
+
+  const directCodeStock = await resolveSinaCode(query);
+  return directCodeStock || fallbackCandidate;
+}
+
+async function searchStocks(keyword, limit = 10) {
+  const codeNeedle = codeFromInput(keyword);
+  if (/^hk/i.test(String(keyword).trim()) || /^\d{5}$/.test(codeNeedle)) {
+    const remoteResults = await fetchRemoteSearchStocks(codeNeedle || keyword, limit);
+    const hongKongResults = remoteResults.filter((item) => item.type === "HKStock");
+    if (hongKongResults.length > 0) return hongKongResults;
+  }
+
+  const localResults = searchLocalStocks(keyword, limit);
+  if (localResults.length > 0) return localResults;
+
+  return fetchRemoteSearchStocks(keyword, limit);
+}
+
+async function fetchRemoteSearchStocks(keyword, limit) {
+  try {
+    const raw = await fetchText({
+      hostname: "searchapi.eastmoney.com",
+      path:
+        `/api/suggest/get?input=${encodeURIComponent(keyword)}` +
+        `&type=14&token=${EASTMONEY_SEARCH_TOKEN}`,
+      headers: {
+        Referer: "https://quote.eastmoney.com/",
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36",
+      },
+      timeout: EASTMONEY_SEARCH_TIMEOUT_MS,
+    });
+    const rows = JSON.parse(raw)?.QuotationCodeTable?.Data;
+    return Array.isArray(rows) ? rows.map(normalizeSearchResult).filter(Boolean).slice(0, limit) : [];
+  } catch (error) {
+    console.warn("Eastmoney search failed.", error.message);
+    return [];
+  }
+}
+
+async function resolveSinaCode(input) {
+  const secid = normalizeSecidInput(input);
+  if (!isSupportedSecid(secid)) return null;
+
+  try {
+    const raw = await fetchSinaRaw([secidToSinaSymbol(secid)]);
+    const match = raw.match(/var hq_str_[a-z0-9_]+="([^"]*)";/);
+    const parts = match?.[1]?.split(",") || [];
+    const name = (isHongKongSecid(secid) ? parts[0] : parts[0])?.trim();
+    const code = secid.split(".")[1];
+    if (!name || name === "FAILED") return null;
+
+    return {
+      name,
+      code,
+      secid,
+      market: marketNameForSecid(secid),
+      type: typeForSecid(secid),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function normalizeSearchResult(row) {
+  const code = String(row?.Code || "").trim();
+  const name = String(row?.Name || "").trim();
+  const secid = normalizeSecidInput(row?.QuoteID);
+  const classify = String(row?.Classify || "");
+  const market = String(row?.SecurityTypeName || "");
+  if (!code || !name || !isSupportedSecid(secid)) return null;
+
+  const isBond = classify === "Bond" || market.includes("债") || isConvertibleBondCode(code);
+  const isFund = classify === "Fund" || /基金|ETF|LOF/.test(market) || /ETF|LOF|基金/.test(name);
+  const isHK = classify === "HK" || market.includes("港股") || isHongKongSecid(secid);
+  const isAStock =
+    classify === "AStock" || /沪A|深A|京A|科创板|创业板|北交所|A股/.test(market);
+  if (!isBond && !isFund && !isHK && !isAStock) return null;
+
+  return {
+    name,
+    code,
+    secid,
+    market,
+    type: isBond ? "Bond" : isHK ? "HKStock" : isFund ? "Fund" : "AStock",
+  };
+}
+
+let localSearchIndex = null;
+
+function searchLocalStocks(keyword, limit) {
+  const needle = String(keyword || "").trim().toLowerCase();
+  if (!needle) return [];
+  const codeNeedle = codeFromInput(needle);
+
+  return getLocalSearchIndex()
+    .filter(
+      (stock) =>
+        stock.name.toLowerCase().includes(needle) || (codeNeedle && stock.code.includes(codeNeedle)),
+    )
+    .sort((left, right) => {
+      return searchRank(left, keyword, codeNeedle) - searchRank(right, keyword, codeNeedle);
+    })
+    .slice(0, limit);
+}
+
+function searchRank(stock, keyword, codeNeedle) {
+  const query = String(keyword || "").trim().toLowerCase();
+  const name = stock.name.toLowerCase();
+  if (stock.code === codeNeedle || name === query) return 0;
+  if ((codeNeedle && stock.code.startsWith(codeNeedle)) || name.startsWith(query)) {
+    return 10 + name.length;
+  }
+  return 100 + name.indexOf(query) + name.length;
+}
+
+function getLocalSearchIndex() {
+  if (localSearchIndex) return localSearchIndex;
+
+  const source = fs.readFileSync(path.join(ROOT, "app.js"), "utf8");
+  const stockBySecid = new Map();
+  for (const stock of loadLocalAshareStocks()) {
+    addLocalSearchStock(stockBySecid, stock.name, stock.secid, stock.market, stock.type);
+  }
+
+  const seedText = source.match(/const SCREENSHOT_SECTOR_TEXT = `([\s\S]*?)`\.trim\(\);/)?.[1] || "";
+  seedText.split(/\r?\n/).forEach((line) => {
+    const [, name, code] = line.split("|").map((part) => part.trim());
+    addLocalSearchStock(stockBySecid, name, normalizeSecidInput(code));
+  });
+
+  source
+    .matchAll(/\["([^"]+)",\s*"([01]\.\d{6})"\]/g)
+    .forEach((match) => addLocalSearchStock(stockBySecid, match[1], match[2]));
+
+  localSearchIndex = [...stockBySecid.values()];
+  return localSearchIndex;
+}
+
+function loadLocalAshareStocks() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(LOCAL_A_SHARE_LIST_PATH, "utf8"));
+    return Array.isArray(parsed?.stocks) ? parsed.stocks : [];
+  } catch (error) {
+    console.warn(`Local A-share list unavailable: ${error.message}`);
+    return [];
+  }
+}
+
+function addLocalSearchStock(stockBySecid, name, secid, market, type) {
+  const code = String(secid || "").split(".").pop();
+  if (!name || !/^\d{6}$/.test(code) || stockBySecid.has(secid)) return;
+
+  stockBySecid.set(secid, {
+    name,
+    code,
+    secid,
+    market: market || marketNameForSecid(secid),
+    type: type || typeForSecid(secid),
+  });
+}
+
+function codeFromInput(input) {
+  return String(input || "")
+    .trim()
+    .replace(/^[a-z]+/i, "")
+    .split(".")
+    .pop()
+    .replace(/\D/g, "");
+}
+
+function marketNameForCode(code) {
+  if (isConvertibleBondCode(code)) return "转债";
+  if (code.startsWith("688")) return "科创板";
+  if (code.startsWith("300") || code.startsWith("301")) return "创业板";
+  if (code.startsWith("8") || code.startsWith("9")) return "北交所";
+  if (code.startsWith("6")) return "沪A";
+  return "深A";
+}
+
+function marketNameForSecid(secid) {
+  if (isHongKongSecid(secid)) return "港股";
+  const code = String(secid || "").split(".").pop() || "";
+  if (isFundCode(code)) return "ETF";
+  return marketNameForCode(code);
+}
+
+function typeForSecid(secid) {
+  const code = String(secid || "").split(".").pop() || "";
+  if (isHongKongSecid(secid)) return "HKStock";
+  if (isConvertibleBondCode(code)) return "Bond";
+  if (isFundCode(code)) return "Fund";
+  return "AStock";
+}
+
+function isSupportedSecid(secid) {
+  return /^[01]\.\d{6}$/.test(secid) || isHongKongSecid(secid);
+}
+
+function isHongKongSecid(secid) {
+  return /^116\.\d{5}$/.test(String(secid || ""));
+}
+
+function isFundCode(code) {
+  return /^(15|16|50|51|52|56|58)\d{4}$/.test(String(code || ""));
+}
+
+function isConvertibleBondCode(code) {
+  return /^(110|111|113|118|123|127|128)\d{3}$/.test(code);
+}
+
+function secidToSinaSymbol(secid) {
+  const [market, code] = secid.split(".");
+  if (!code) return secid;
+  if (market === "116") return `rt_hk${code.padStart(5, "0")}`;
+  if (market === "1") return `sh${code}`;
+  if (code.startsWith("8") || code.startsWith("9")) return `bj${code}`;
+  return `sz${code}`;
+}
+
+function secidToTencentSymbol(secid) {
+  const [market, code] = secid.split(".");
+  if (!code) return secid;
+  if (market === "116") return `hk${code.padStart(5, "0")}`;
+  return secidToSinaSymbol(secid);
+}
+
+function normalizeSecidInput(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  const hkPrefixed = text.replace(/^rt_hk/i, "116.").replace(/^hk/i, "116.");
+  if (/^116\.\d{1,5}$/.test(hkPrefixed)) {
+    const code = hkPrefixed.split(".")[1].padStart(5, "0");
+    return `116.${code}`;
+  }
+  if (/^\d{5}$/.test(hkPrefixed)) return `116.${hkPrefixed}`;
+
+  const prefixed = hkPrefixed.replace(/^sh/i, "1.").replace(/^(sz|bj)/i, "0.");
+  if (/^[01]\.\d{6}$/.test(prefixed)) return prefixed;
+  if (/^\d{6}$/.test(prefixed)) return `${marketFromCode(prefixed)}.${prefixed}`;
+  return prefixed;
+}
+
+function marketFromCode(code) {
+  if (/^(5|6|110|111|113|118)/.test(code)) return "1";
+  return "0";
+}
+
+function chunk(items, size) {
+  const chunks = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function fetchText(options, encoding = "utf8") {
+  return new Promise((resolve, reject) => {
+    const req = https.get(options, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        if (res.statusCode && res.statusCode >= 400) {
+          reject(new Error(`HTTP ${res.statusCode}`));
+          return;
+        }
+
+        resolve(Buffer.concat(chunks).toString(encoding));
+      });
+    });
+
+    if (options.timeout) {
+      req.setTimeout(options.timeout);
+    }
+    req.on("timeout", () => {
+      req.destroy(new Error("request timeout"));
+    });
+    req.on("error", reject);
+  });
+}
+
+function withTimeout(promise, timeoutMs) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`operation timeout after ${timeoutMs}ms`)), timeoutMs),
+    ),
+  ]);
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
+function readJsonBody(request, limitBytes = 2 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+
+    request.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > limitBytes) {
+        request.destroy(new Error("request body too large"));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on("end", () => {
+      try {
+        const raw = Buffer.concat(chunks).toString("utf8");
+        resolve(raw.trim() ? JSON.parse(raw) : {});
+      } catch (error) {
+        reject(error);
+      }
+    });
+    request.on("error", reject);
+  });
+}
+
+function normalizeBoardState(raw) {
+  const sectors = normalizeBoardSectors(raw?.sectors);
+  const sectorNames = new Set(sectors.map((sector) => sector.name));
+  const stackGroups = Array.isArray(raw?.stackGroups)
+    ? raw.stackGroups
+        .map((group) => {
+          const names = uniqueStrings(group?.sectorNames).filter((name) => sectorNames.has(name));
+          return {
+            name: String(group?.name || "").trim(),
+            sectorNames: names,
+            expandedSectorNames: uniqueStrings(group?.expandedSectorNames).filter((name) =>
+              names.includes(name),
+            ),
+          };
+        })
+        .filter((group) => group.name)
+    : [];
+
+  return {
+    version: String(raw?.version || "server-state-v1"),
+    updatedAt: new Date().toISOString(),
+    sectors,
+    stackGroups,
+  };
+}
+
+function normalizeBoardSectors(sectors) {
+  if (!Array.isArray(sectors)) return [];
+
+  return sectors
+    .map((sector) => ({
+      name: String(sector?.name || "").trim(),
+      stocks: Array.isArray(sector?.stocks)
+        ? sector.stocks
+            .map((stock) => ({
+              name: String(stock?.name || "").trim(),
+              secid: normalizeSecidInput(stock?.secid),
+            }))
+            .filter((stock) => stock.name && stock.secid)
+        : [],
+    }))
+    .filter((sector) => sector.name);
+}
+
+function uniqueStrings(values) {
+  if (!Array.isArray(values)) return [];
+
+  const seen = new Set();
+  return values
+    .map((value) => String(value || "").trim())
+    .filter((value) => {
+      if (!value || seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    });
+}
+
+function serveStatic(pathname, response) {
+  return new Promise((resolve, reject) => {
+    const cleanPath = pathname === "/" ? "/index.html" : pathname;
+    const filePath = path.normalize(path.join(ROOT, cleanPath));
+
+    if (!filePath.startsWith(ROOT)) {
+      response.writeHead(403);
+      response.end("Forbidden");
+      resolve();
+      return;
+    }
+
+    fs.readFile(filePath, (error, content) => {
+      if (error) {
+        response.writeHead(error.code === "ENOENT" ? 404 : 500, {
+          "Content-Type": "text/plain; charset=utf-8",
+        });
+        response.end(error.code === "ENOENT" ? "Not found" : "Server error");
+        resolve();
+        return;
+      }
+
+      response.writeHead(200, {
+        "Content-Type": MIME_TYPES[path.extname(filePath)] || "application/octet-stream",
+        "Cache-Control": "no-store",
+      });
+      response.end(content);
+      resolve();
+    });
+  });
+}
+
+function sendJson(response, status, payload) {
+  response.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+  });
+  response.end(JSON.stringify(payload));
+}

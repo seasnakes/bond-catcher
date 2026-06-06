@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>A股/转债实时板块表</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="market-bar" aria-label="行情控制">
+        <div class="brand">
+          <h1>A股/转债实时板块表</h1>
+          <p id="marketStatus">正在连接实时行情...</p>
+        </div>
+        <section class="global-indices" aria-label="市场指数">
+          <span class="indices-title">指数</span>
+          <div id="globalIndices" class="index-list"></div>
+        </section>
+        <div class="controls">
+          <label class="search-box">
+            <span>搜索</span>
+            <input id="searchInput" type="search" placeholder="板块 / 股票 / 转债" autocomplete="off" />
+          </label>
+          <label class="select-box">
+            <span>排序</span>
+            <select id="sortSelect">
+              <option value="hot">默认</option>
+              <option value="change">涨幅</option>
+              <option value="name">名称</option>
+            </select>
+          </label>
+          <label class="select-box">
+            <span>范围</span>
+            <select id="rangeSelect">
+              <option value="all">全部</option>
+              <option value="up">上涨</option>
+              <option value="down">下跌</option>
+            </select>
+          </label>
+          <label class="toggle-box" title="显示或隐藏每只股票/转债的分时缩略走势">
+            <span>K线</span>
+            <input id="sparkToggle" type="checkbox" />
+          </label>
+          <button id="refreshButton" class="icon-button" type="button" title="立即刷新" aria-label="立即刷新">
+            ↻
+          </button>
+          <button id="editListButton" class="text-button" type="button">编辑</button>
+          <button id="addSectorButton" class="text-button add-sector-button" type="button" title="新建板块">
+            +板块
+          </button>
+          <button id="addStackButton" class="text-button add-stack-button" type="button" title="新建叠组">
+            +叠组
+          </button>
+          <button id="bulkEditButton" class="text-button" type="button" title="批量编辑监控列表">列表</button>
+        </div>
+      </header>
+
+      <section id="boardGrid" class="board-grid" aria-live="polite"></section>
+
+      <dialog id="editorDialog" class="editor-dialog">
+        <form id="editorForm" method="dialog">
+          <header class="editor-head">
+            <h2>编辑监控列表</h2>
+            <button id="closeEditorButton" class="icon-button" type="button" aria-label="关闭">×</button>
+          </header>
+          <p class="editor-hint">每行：板块|名称|代码；不填代码会按名称查找。例：白酒|贵州茅台|600519、可转债|韦尔转债|113616</p>
+          <textarea id="stockListEditor" spellcheck="false"></textarea>
+          <p id="editorMessage" class="editor-message"></p>
+          <footer class="editor-actions">
+            <button id="resetListButton" class="text-button" type="button">恢复默认</button>
+            <button class="text-button" value="cancel" type="button" id="cancelEditorButton">取消</button>
+            <button class="text-button primary" value="default" type="submit">保存</button>
+          </footer>
+        </form>
+      </dialog>
+
+      <dialog id="addStockDialog" class="editor-dialog add-stock-dialog">
+        <form id="addStockForm" method="dialog">
+          <header class="editor-head">
+            <h2 id="addStockTitle">添加标的</h2>
+            <button id="closeAddStockButton" class="icon-button" type="button" aria-label="关闭">×</button>
+          </header>
+          <label class="add-stock-field">
+            <span>搜索</span>
+            <input id="addStockInput" type="search" placeholder="输入代码 / 名称 / 股票 / ETF / 港股 / 转债" autocomplete="off" />
+          </label>
+          <div id="addStockSuggestions" class="suggestion-list" aria-live="polite"></div>
+          <p id="addStockMessage" class="editor-message"></p>
+          <footer class="editor-actions">
+            <button class="text-button" value="cancel" type="button" id="cancelAddStockButton">取消</button>
+            <button class="text-button primary" value="default" type="submit">添加</button>
+          </footer>
+        </form>
+      </dialog>
+    </main>
+
+    <template id="cardTemplate">
+      <article class="sector-card">
+        <header class="sector-head">
+          <span class="sector-name"></span>
+          <span class="sector-change"></span>
+        </header>
+        <div class="stock-list"></div>
+      </article>
+    </template>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>
