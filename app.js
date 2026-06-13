@@ -1205,42 +1205,46 @@ function renderAfterBackgroundUpdate() {
 }
 
 function removeSector(sectorName) {
-  state.sectors = normalizeSectors(state.sectors.filter((sector) => sector.name !== sectorName));
-  if (state.renamingSectorName === sectorName) {
-    state.renamingSectorName = "";
-  }
-  state.stackGroups = state.stackGroups.map((group) => {
-    const sectorNames = group.sectorNames.filter((name) => name !== sectorName);
-    return {
-      ...group,
-      sectorNames,
-      expandedSectorNames: group.expandedSectorNames.filter((name) => name !== sectorName),
-    };
+  preserveViewportAnchor(boardItemSelector(sectorName), () => {
+    state.sectors = normalizeSectors(state.sectors.filter((sector) => sector.name !== sectorName));
+    if (state.renamingSectorName === sectorName) {
+      state.renamingSectorName = "";
+    }
+    state.stackGroups = state.stackGroups.map((group) => {
+      const sectorNames = group.sectorNames.filter((name) => name !== sectorName);
+      return {
+        ...group,
+        sectorNames,
+        expandedSectorNames: group.expandedSectorNames.filter((name) => name !== sectorName),
+      };
+    });
+    state.sectors.forEach((sector, index) => {
+      sector.index = index;
+    });
+    saveSectors(state.sectors);
+    saveStackGroups();
+    state.hydrated = hydrateSectors(state.quotes);
+    render();
   });
-  state.sectors.forEach((sector, index) => {
-    sector.index = index;
-  });
-  saveSectors(state.sectors);
-  saveStackGroups();
-  state.hydrated = hydrateSectors(state.quotes);
-  render();
   updateStatus();
 }
 
 function removeStock(sectorName, secid) {
-  state.sectors = normalizeSectors(
-    state.sectors.map((sector) =>
-      sector.name === sectorName
-        ? { ...sector, stocks: sector.stocks.filter((stock) => stock.secid !== secid) }
-        : sector,
-    ),
-  );
-  state.sectors.forEach((sector, index) => {
-    sector.index = index;
+  preserveViewportAnchor(sectorCardSelector(sectorName), () => {
+    state.sectors = normalizeSectors(
+      state.sectors.map((sector) =>
+        sector.name === sectorName
+          ? { ...sector, stocks: sector.stocks.filter((stock) => stock.secid !== secid) }
+          : sector,
+      ),
+    );
+    state.sectors.forEach((sector, index) => {
+      sector.index = index;
+    });
+    saveSectors(state.sectors);
+    state.hydrated = hydrateSectors(state.quotes);
+    render();
   });
-  saveSectors(state.sectors);
-  state.hydrated = hydrateSectors(state.quotes);
-  render();
   updateStatus();
 }
 

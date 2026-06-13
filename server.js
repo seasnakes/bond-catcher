@@ -23,7 +23,6 @@ const DOMESTIC_INDEXES = [
   },
 ];
 const GLOBAL_INDEX_SYMBOLS = ["b_KOSPI", "int_nikkei", "rt_hkHSTECH"];
-const ACTIVE_MARKET_SYMBOLS = ["sh000001", "sz399106"];
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -366,10 +365,6 @@ async function fetchSinaGlobalIndices() {
   );
 
   const indices = [...sinaDomestic, ...tencentDomestic].filter(Boolean);
-  const activeMarketValue = await withTimeout(fetchActiveMarketValue(), 3500).catch(() => null);
-  if (activeMarketValue) {
-    indices.push(activeMarketValue);
-  }
 
   const kospi = rows.get("b_KOSPI");
   if (kospi) {
@@ -512,77 +507,6 @@ function parseTencentIndex(raw, config) {
     percent,
     secid: config.secid,
     time: parts[30] || "",
-  };
-}
-
-async function fetchActiveMarketValue() {
-  const rows = await Promise.all(ACTIVE_MARKET_SYMBOLS.map(fetchTencentMinuteAmounts));
-  const maps = rows.map((items) => new Map(items.map((item) => [item.time, item.amount])));
-  const times = [...maps[0].keys()].filter((time) => maps.every((map) => map.has(time))).sort();
-  if (times.length < 3) return null;
-
-  const combined = times.map((time) => ({
-    time,
-    amount: maps.reduce((total, map) => total + map.get(time), 0),
-  }));
-  const amounts = combined
-    .map((item, index) => {
-      if (index === 0) return 0;
-      return Math.max(0, item.amount - combined[index - 1].amount);
-    })
-    .filter((value) => value > 0);
-  const activeSeries = smoothedAverage(amounts, 3, 1).map((value) => value / 100000000);
-  if (activeSeries.length < 2) return null;
-
-  const latest = activeSeries[activeSeries.length - 1];
-  const previous = activeSeries[activeSeries.length - 2];
-  const compass = await fetchCompassActiveMarketValue().catch(() => null);
-  const displayedValue = compass?.value ?? latest;
-  const displayedPercent = compass?.percent ?? (previous > 0 ? ((latest - previous) / previous) * 100 : 0);
-  const scale = compass?.value && latest > 0 ? compass.value / latest : 1;
-
-  return {
-    key: "active-market-value",
-    group: "指南针",
-    name: "活跃市值",
-    kind: "metric",
-    unit: compass ? "" : "亿",
-    price: displayedValue,
-    change: compass?.change ?? latest - previous,
-    percent: displayedPercent,
-    points: downsample(
-      activeSeries.map((value) => value * scale),
-      58,
-    ),
-    sparkTime: combined[combined.length - 1]?.time || "",
-    note: compass
-      ? "当前值来自 stock.svip886.com/api/indexes；曲线按沪深分钟成交额近似生成，非指南针官方接口"
-      : "按公开0AMV近似公式用沪深分钟成交额估算，非指南针官方数据",
-  };
-}
-
-async function fetchCompassActiveMarketValue() {
-  const raw = await fetchText({
-    hostname: "stock.svip886.com",
-    path: "/api/indexes",
-    headers: {
-      Referer: "https://github.com/svip886/koishi-plugin-stock",
-      "User-Agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36",
-    },
-    timeout: 1200,
-  });
-  const match = raw.match(/活跃市值（0AMV）：([\d.]+)（([+-]?[\d.]+)%）/);
-  if (!match) return null;
-
-  const value = Number(match[1]);
-  const percent = Number(match[2]);
-  if (!Number.isFinite(value) || !Number.isFinite(percent)) return null;
-
-  return {
-    value,
-    percent,
-    change: value * (percent / 100),
   };
 }
 
