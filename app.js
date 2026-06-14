@@ -2208,15 +2208,6 @@ function renderIndexSparkline(item) {
 
   let points = Array.isArray(item.points) ? item.points : [];
   if (points.length < 2) {
-    const price = Number(item.price);
-    if (!Number.isFinite(price) || price <= 0) {
-      return box;
-    }
-    points = flatSparklinePoints(price);
-    box.title = "暂无分时数据，按当前值占位";
-  }
-
-  if (points.length < 2) {
     return box;
   }
 
