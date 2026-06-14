@@ -652,7 +652,7 @@ function formatUnixTime(seconds, timeZone) {
 
 async function fetchTencentMinuteAmounts(symbol) {
   const raw = await fetchText({
-    hostname: "web.ifzq.gtimg.cn",
+    hostname: "ifzq.gtimg.cn",
     path: `/appstock/app/minute/query?code=${encodeURIComponent(symbol)}`,
     headers: {
       Referer: "https://gu.qq.com/",
