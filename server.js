@@ -9,6 +9,7 @@ const LOCAL_A_SHARE_LIST_PATH = path.join(ROOT, "data", "a-share-list.json");
 const BOARD_STATE_PATH = path.join(ROOT, "data", "board-state.json");
 const EASTMONEY_SEARCH_TOKEN = "D43BF722C8E33BD69D955A7E7361F5D9";
 const EASTMONEY_SEARCH_TIMEOUT_MS = 2500;
+const GLOBAL_INDEX_SPARK_CACHE_MS = 60_000;
 const DOMESTIC_INDEXES = [
   { key: "sh000001", name: "上证指数", symbol: "sh000001", secid: "1.000001" },
   { key: "sz399006", name: "创业板指", symbol: "sz399006", secid: "0.399006" },
@@ -22,7 +23,8 @@ const DOMESTIC_INDEXES = [
     source: "tencent",
   },
 ];
-const GLOBAL_INDEX_SYMBOLS = ["b_KOSPI", "int_nikkei", "rt_hkHSTECH"];
+const GLOBAL_INDEX_SYMBOLS = ["b_KOSPI", "b_NKY", "int_nikkei", "rt_hkHSTECH"];
+const globalIndexSparkCache = new Map();
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -373,30 +375,42 @@ async function fetchSinaGlobalIndices() {
     const change = Number(parts[2]);
     const percent = Number(parts[3]);
     if ([price, change, percent].every(Number.isFinite)) {
-      indices.push({
+      const quote = {
         key: "kospi",
         name: "韩国KOSPI",
         price,
         change,
         percent,
-      });
+      };
+      indices.push(
+        await withGlobalIndexSparkline(quote, {
+          yahooSymbol: "^KS11",
+          eastmoneySecid: "100.KS11",
+        }).catch(() => quote),
+      );
     }
   }
 
-  const nikkei = rows.get("int_nikkei");
+  const nikkei = rows.get("b_NKY") || rows.get("int_nikkei");
   if (nikkei) {
     const parts = nikkei.split(",");
     const price = Number(parts[1]);
     const change = Number(parts[2]);
     const percent = Number(parts[3]);
     if ([price, change, percent].every(Number.isFinite)) {
-      indices.push({
+      const quote = {
         key: "nikkei",
         name: "日经225",
         price,
         change,
         percent,
-      });
+      };
+      indices.push(
+        await withGlobalIndexSparkline(quote, {
+          yahooSymbol: "^N225",
+          eastmoneySecid: "100.N225",
+        }).catch(() => quote),
+      );
     }
   }
 
@@ -508,6 +522,103 @@ function parseTencentIndex(raw, config) {
     secid: config.secid,
     time: parts[30] || "",
   };
+}
+
+async function withGlobalIndexSparkline(quote, config) {
+  let spark;
+  try {
+    spark = await withTimeout(fetchCachedYahooIndexSparkline(config.yahooSymbol, 90), 3000);
+  } catch {
+    spark = await withTimeout(fetchEastmoneyMinuteSparkline(config.eastmoneySecid, 90), 3000);
+  }
+
+  return {
+    ...quote,
+    points: spark.points,
+    sparkChange: spark.change,
+    sparkTime: spark.time,
+    sparkSource: spark.source,
+  };
+}
+
+async function fetchCachedYahooIndexSparkline(symbol, limit = 90) {
+  const key = `${symbol}:${limit}`;
+  const cached = globalIndexSparkCache.get(key);
+  if (cached && Date.now() - cached.fetchedAt < GLOBAL_INDEX_SPARK_CACHE_MS) {
+    return cached.spark;
+  }
+
+  const spark = await fetchYahooIndexSparkline(symbol, limit);
+  globalIndexSparkCache.set(key, {
+    fetchedAt: Date.now(),
+    spark,
+  });
+  return spark;
+}
+
+async function fetchYahooIndexSparkline(symbol, limit = 90) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  let response;
+  try {
+    response = await fetch(
+      "https://query2.finance.yahoo.com" +
+        `/v8/finance/chart/${encodeURIComponent(symbol)}` +
+        "?range=1d&interval=1m&includePrePost=false",
+      {
+        headers: {
+          accept: "application/json,text/plain,*/*",
+          "user-agent": "Mozilla/5.0",
+        },
+        signal: controller.signal,
+      },
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!response.ok) {
+    throw new Error(`Yahoo index sparkline HTTP ${response.status}: ${symbol}`);
+  }
+
+  const result = (await response.json())?.chart?.result?.[0];
+  const closes = result?.indicators?.quote?.[0]?.close;
+  if (!Array.isArray(closes)) {
+    throw new Error(`empty yahoo index sparkline: ${symbol}`);
+  }
+
+  const points = downsample(
+    closes.filter((value) => Number.isFinite(value) && value > 0),
+    limit,
+  );
+  if (points.length < 2) {
+    throw new Error(`invalid yahoo index sparkline: ${symbol}`);
+  }
+
+  const first = points[0];
+  const last = points[points.length - 1];
+  const timestamps = Array.isArray(result?.timestamp) ? result.timestamp : [];
+  const lastTimestamp = timestamps[timestamps.length - 1];
+
+  return {
+    points,
+    change: first ? ((last - first) / first) * 100 : 0,
+    time: formatUnixTime(lastTimestamp, result?.meta?.exchangeTimezoneName),
+    source: "Yahoo分时",
+  };
+}
+
+function formatUnixTime(seconds, timeZone) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value <= 0) return "";
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: timeZone || "Asia/Shanghai",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(value * 1000));
+  const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${map.hour || ""}:${map.minute || ""}`;
 }
 
 async function fetchTencentMinuteAmounts(symbol) {
@@ -652,7 +763,7 @@ async function fetchSinaSparkline(secid, limit = 58) {
   };
 }
 
-async function fetchEastmoneyMinuteSparkline(secid) {
+async function fetchEastmoneyMinuteSparkline(secid, limit = 58) {
   const raw = await fetchText({
     hostname: "push2his.eastmoney.com",
     path:
@@ -682,7 +793,7 @@ async function fetchEastmoneyMinuteSparkline(secid) {
     latestTrends
       .map((line) => Number(String(line).split(",")[2]))
       .filter((value) => Number.isFinite(value) && value > 0),
-    58,
+    limit,
   );
   if (points.length < 2) {
     throw new Error(`invalid eastmoney sparkline: ${secid}`);
