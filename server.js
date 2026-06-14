@@ -438,7 +438,18 @@ async function fetchSinaGlobalIndices() {
           sparkSource: "腾讯分时",
         });
       } catch {
-        indices.push(quote);
+        try {
+          const spark = await withTimeout(fetchYahooChartSparkline("HSTECH.HK", 90, "Yahoo分时"), 3000);
+          indices.push({
+            ...quote,
+            points: spark.points,
+            sparkChange: spark.change,
+            sparkTime: spark.time,
+            sparkSource: spark.source,
+          });
+        } catch {
+          indices.push(quote);
+        }
       }
     }
   }
@@ -557,6 +568,24 @@ async function fetchCachedYahooIndexSparkline(symbol, limit = 90) {
 }
 
 async function fetchYahooIndexSparkline(symbol, limit = 90) {
+  return fetchYahooChartSparkline(symbol, limit, "Yahoo分时");
+}
+
+async function fetchYahooHongKongSparkline(secid, limit = 58) {
+  const code = secid.split(".")[1];
+  if (!code) {
+    throw new Error(`invalid hong kong secid: ${secid}`);
+  }
+
+  const yahooCode = code.replace(/^0+/, "") || code;
+  const spark = await fetchYahooChartSparkline(`${yahooCode}.HK`, limit, "Yahoo港股分时");
+  return {
+    ...spark,
+    secid,
+  };
+}
+
+async function fetchYahooChartSparkline(symbol, limit, source) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10000);
   let response;
@@ -604,7 +633,7 @@ async function fetchYahooIndexSparkline(symbol, limit = 90) {
     points,
     change: first ? ((last - first) / first) * 100 : 0,
     time: formatUnixTime(lastTimestamp, result?.meta?.exchangeTimezoneName),
-    source: "Yahoo分时",
+    source,
   };
 }
 
@@ -682,6 +711,14 @@ async function fetchSecuritySparkline(secid) {
       source: "腾讯分时",
     };
   } catch {
+    if (isHongKongSecid(secid)) {
+      try {
+        return await fetchYahooHongKongSparkline(secid);
+      } catch {
+        // Continue through the existing mainland fallback chain.
+      }
+    }
+
     try {
       return await fetchEastmoneyMinuteSparkline(secid);
     } catch {

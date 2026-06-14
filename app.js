@@ -2206,7 +2206,17 @@ function renderIndexSparkline(item) {
   const source = item.sparkSource || "今日分时";
   box.title = item.sparkTime ? `${source}：${item.sparkTime}` : source;
 
-  if (!Array.isArray(item.points) || item.points.length < 2) {
+  let points = Array.isArray(item.points) ? item.points : [];
+  if (points.length < 2) {
+    const price = Number(item.price);
+    if (!Number.isFinite(price) || price <= 0) {
+      return box;
+    }
+    points = flatSparklinePoints(price);
+    box.title = "暂无分时数据，按当前值占位";
+  }
+
+  if (points.length < 2) {
     return box;
   }
 
@@ -2216,7 +2226,7 @@ function renderIndexSparkline(item) {
 
   const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
   path.setAttribute("class", `spark-${tone}`);
-  path.setAttribute("d", sparklinePath(item.points, 68, 18));
+  path.setAttribute("d", sparklinePath(points, 68, 18));
   svg.append(path);
   box.append(svg);
   return box;
@@ -2900,7 +2910,16 @@ function renderSparkline(stock) {
   const source = spark?.source || "今日分时";
   box.title = spark?.time ? `${source}：${spark.time}` : source;
 
-  if (!spark?.points || spark.points.length < 2) {
+  let points = spark?.points || [];
+  if (points.length < 2 && !pending) {
+    const price = Number(stock.price);
+    if (Number.isFinite(price) && price > 0) {
+      points = flatSparklinePoints(price);
+      box.title = "暂无分时数据，按当前价占位";
+    }
+  }
+
+  if (!points.length || points.length < 2) {
     return box;
   }
 
@@ -2910,10 +2929,14 @@ function renderSparkline(stock) {
 
   const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
   path.setAttribute("class", `spark-${tone}`);
-  path.setAttribute("d", sparklinePath(spark.points, 58, 16));
+  path.setAttribute("d", sparklinePath(points, 58, 16));
   svg.append(path);
   box.append(svg);
   return box;
+}
+
+function flatSparklinePoints(value) {
+  return Array.from({ length: 12 }, () => value);
 }
 
 function sparklinePath(points, width, height) {
