@@ -4,7 +4,7 @@
 ![Frontend](https://img.shields.io/badge/Frontend-Vanilla%20JS-F7DF1E?logo=javascript&logoColor=black)
 ![Realtime](https://img.shields.io/badge/Realtime-A股%20%2F%20可转债-d73a49)
 ![Storage](https://img.shields.io/badge/Storage-local%20JSON-5865F2)
-![License](https://img.shields.io/badge/License-Private-lightgrey)
+![License](https://img.shields.io/badge/License-MIT-green)
 
 一个给盘中盯板块、盯转债用的本地实时行情看板。界面按短线板块池风格设计：小卡片、高密度、红涨绿跌、涨跌幅条按方向和幅度显示，适合快速扫板块强弱和转债活跃度。
 
@@ -99,3 +99,7 @@ ETF|科创50ETF|588000
 - 这是本地自用看板，不是交易系统，也不提供投资建议。
 - 盘中自动刷新，收盘和非交易时段会降低不必要的请求。
 - 浏览器本地存储只作兜底；后端可用时以 `data/board-state.json` 为准。
+
+## License
+
+MIT
