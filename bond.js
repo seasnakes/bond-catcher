@@ -68,7 +68,7 @@ const nodes = {
 };
 
 const panelDefinitions = [
-  { key: "price", label: "价格 / 紫线", weight: 0.36 },
+  { key: "price", label: "价格", weight: 0.36 },
   { key: "amount", label: "分钟成交额", weight: 0.13 },
   { key: "dark", label: "暗盘资金", weight: 0.16 },
   { key: "macd", label: "MACD", weight: 0.17 },
@@ -144,11 +144,14 @@ function renderPayload(payload) {
   nodes.name.textContent = displayName;
   nodes.code.textContent = payload.code;
   nodes.latestPrice.textContent = formatNumber(payload.latest_price, 3);
-  nodes.latestChange.textContent = `${Number(payload.change_from_first) > 0 ? "+" : ""}${formatNumber(
-    payload.change_from_first,
+  const displayedReturn = Number.isFinite(Number(payload.daily_return))
+    ? Number(payload.daily_return)
+    : Number(payload.change_from_first);
+  nodes.latestChange.textContent = `${displayedReturn > 0 ? "+" : ""}${formatNumber(
+    displayedReturn,
     2,
   )}%`;
-  nodes.latestChange.className = toneClass(payload.change_from_first);
+  nodes.latestChange.className = toneClass(displayedReturn);
   nodes.barCount.textContent = `${payload.bar_count}${payload.complete_session ? " / 241" : ""}`;
   nodes.latestMinute.textContent = payload.latest_minute || "-";
   nodes.totalAmount.textContent = formatAmount(payload.total_amount);
@@ -345,11 +348,22 @@ function drawPanels(context, geometry, rows) {
       row.high,
       row.intraday_average,
       row.purple,
-      row.purple_ma27,
+      state.payload?.previous_close,
     ]),
     { padding: 0.06 },
   );
-  drawLine(context, rows, pricePanel, priceDomain, "close", "#1d2921", 1.3);
+  drawHighLowBand(context, rows, pricePanel, priceDomain);
+  if (Number(state.payload?.previous_close) > 0) {
+    drawHorizontalLine(
+      context,
+      pricePanel,
+      priceDomain,
+      Number(state.payload.previous_close),
+      "#7d8998",
+      [4, 4],
+    );
+  }
+  drawLine(context, rows, pricePanel, priceDomain, "close", "#1f5fbf", 1.55);
   drawLine(
     context,
     rows,
@@ -359,16 +373,16 @@ function drawPanels(context, geometry, rows) {
     "#e2a51a",
     1.35,
   );
+  drawLine(context, rows, pricePanel, priceDomain, "purple", "#c6ccd6", 1.05, [2, 3]);
   drawConditionalLine(
     context,
     rows,
     pricePanel,
     priceDomain,
     "purple",
-    (row) => (row.purple_rising ? "#8738c9" : "#159447"),
+    (row) => (row.purple_rising ? "#d638c2" : "#139a55"),
     1.8,
   );
-  drawLine(context, rows, pricePanel, priceDomain, "purple_ma27", "#8e9691", 0.9, [4, 3]);
 
   const amountDomain = domain(rows.map((row) => row.amount), { includeZero: true, padding: 0.05 });
   drawBars(context, rows, amountPanel, amountDomain, (row) =>
@@ -380,7 +394,7 @@ function drawPanels(context, geometry, rows) {
     { includeZero: true, padding: 0.08 },
   );
   drawBars(context, rows, darkPanel, darkDomain, (row) =>
-    row.dark_state === "inflow" ? "rgba(223,36,52,.72)" : "rgba(21,148,71,.72)",
+    row.dark_state === "inflow" ? "rgba(154,44,53,.72)" : "rgba(63,120,181,.72)",
     (row) => (row.dark_state === "inflow" ? row.dark_buy : row.dark_sell),
   );
   drawZeroLine(context, darkPanel, darkDomain);
@@ -426,6 +440,28 @@ function drawPanels(context, geometry, rows) {
     macd: macdDomain,
     visible: visibleDomain,
   };
+}
+
+function drawHighLowBand(context, rows, panel, range) {
+  if (rows.length < 2) return;
+  context.save();
+  context.fillStyle = "rgba(31,95,191,.08)";
+  context.beginPath();
+  rows.forEach((row, index) => {
+    const x = xFor(index, panel, rows.length);
+    const y = yFor(row.high, panel, range);
+    if (index === 0) context.moveTo(x, y);
+    else context.lineTo(x, y);
+  });
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    context.lineTo(
+      xFor(index, panel, rows.length),
+      yFor(rows[index].low, panel, range),
+    );
+  }
+  context.closePath();
+  context.fill();
+  context.restore();
 }
 
 function drawHalfHourSeparators(context, panels, rows) {
@@ -568,6 +604,22 @@ function drawAxes(context, geometry, rows, domains) {
       const y = panel.y + panel.height * ratio;
       context.textAlign = "right";
       context.fillText(formatAxis(value, panel.key), panel.x - 6, y);
+      if (panel.key === "price" && Number(state.payload?.previous_close) > 0) {
+        const returnValue = (value / Number(state.payload.previous_close) - 1) * 100;
+        context.fillStyle = "#596579";
+        context.textAlign = "left";
+        context.fillText(
+          `${returnValue > 0 ? "+" : ""}${returnValue.toFixed(1)}%`,
+          panel.x + panel.width + 6,
+          y,
+        );
+        context.fillStyle = "#586355";
+      }
+    }
+    if (panel.key === "price" && Number(state.payload?.previous_close) > 0) {
+      context.fillStyle = "#596579";
+      context.textAlign = "right";
+      context.fillText("当日涨跌幅", panel.x + panel.width - 6, panel.y + 10);
     }
   });
 
@@ -655,6 +707,7 @@ function showTooltip(event) {
   nodes.tooltip.innerHTML = `
     <strong>${row.time}　${formatNumber(row.close, 3)}</strong>
     开 ${formatNumber(row.open, 3)}　高 ${formatNumber(row.high, 3)}　低 ${formatNumber(row.low, 3)}<br>
+    涨跌幅 ${formatMinuteReturn(row.close)}<br>
     紫线 ${formatNumber(row.purple, 3)}　成交额 ${formatAmount(row.amount)}<br>
     均价≈ ${formatNumber(row.intraday_average, 3)}<br>
     暗盘 ${row.dark_state === "inflow" ? "流入" : "流出"}　MACD ${formatNumber(row.macd, 4)}<br>
@@ -670,6 +723,13 @@ function showTooltip(event) {
   nodes.tooltip.style.left = `${Math.max(8, Math.min(maxLeft, left))}px`;
   nodes.tooltip.style.top = `${Math.max(8, Math.min(maxTop, top))}px`;
   drawChart();
+}
+
+function formatMinuteReturn(price) {
+  const previousClose = Number(state.payload?.previous_close);
+  if (!(previousClose > 0) || !Number.isFinite(Number(price))) return "-";
+  const value = (Number(price) / previousClose - 1) * 100;
+  return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
 nodes.canvas.addEventListener("pointermove", showTooltip);

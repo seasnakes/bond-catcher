@@ -178,6 +178,34 @@ def resolve_name(
     return str(row["name"]) if row else ""
 
 
+def previous_close_for_date(
+    trading_date: str,
+    stored_code: str,
+) -> tuple[float | None, str | None]:
+    databases = available_databases()
+    current_index = next(
+        (index for index, path in enumerate(databases) if path.stem == trading_date),
+        -1,
+    )
+    if current_index < 0:
+        return None, None
+    for database in databases[current_index + 1 :]:
+        with connect_read_only(database) as connection:
+            row = connection.execute(
+                """
+                SELECT close
+                FROM minute_observations
+                WHERE trading_date=? AND code=?
+                ORDER BY minute_ms DESC
+                LIMIT 1
+                """,
+                (database.stem, stored_code),
+            ).fetchone()
+        if row and float(row["close"]) > 0:
+            return float(row["close"]), database.stem
+    return None, None
+
+
 def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
     code = normalize_code(code_input)
     stored_code = monitor_code(code)
@@ -295,6 +323,15 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
 
     first = rows[0]
     latest = rows[-1]
+    previous_close, previous_close_date = previous_close_for_date(
+        trading_date,
+        stored_code,
+    )
+    daily_return = (
+        (latest["close"] / previous_close - 1) * 100
+        if previous_close and previous_close > 0
+        else None
+    )
     health = api_health()
     database_updated_at = datetime.fromtimestamp(
         database.stat().st_mtime
@@ -316,7 +353,10 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
             "full_session": len(rows) >= 241,
             "intraday_average_quality": "estimated_from_minute_amount_and_close",
             "first_price": first["open"],
+            "previous_close": previous_close,
+            "previous_close_date": previous_close_date,
             "latest_price": latest["close"],
+            "daily_return": daily_return,
             "change_from_first": (
                 (latest["close"] / first["open"] - 1) * 100
                 if first["open"]

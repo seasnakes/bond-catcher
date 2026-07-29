@@ -225,7 +225,7 @@ h1 small {
 }
 
 .legend-price {
-  background: #18221c;
+  background: #1f5fbf;
 }
 
 .legend-average {
@@ -233,15 +233,15 @@ h1 small {
 }
 
 .legend-purple {
-  background: var(--purple);
+  background: #d638c2;
 }
 
 .legend-green {
-  background: var(--green);
+  background: #139a55;
 }
 
-.legend-ma {
-  border-top: 1px dashed #8b9490;
+.legend-previous {
+  border-top: 1px dashed #7d8998;
 }
 
 .chart-legend .legend-note {
