@@ -224,9 +224,18 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
 
     rows: list[dict[str, Any]] = []
     cumulative_amount = 0.0
+    cumulative_estimated_units = 0.0
     for index, row in enumerate(minute_rows):
         amount = float(row["amount"])
         cumulative_amount += amount
+        close = float(row["close"])
+        if amount > 0 and close > 0:
+            cumulative_estimated_units += amount / close
+        intraday_average = (
+            cumulative_amount / cumulative_estimated_units
+            if cumulative_estimated_units > 0
+            else close
+        )
         visible = indicators["visible_funds"][index]
         rows.append(
             {
@@ -238,6 +247,7 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
                 "close": float(row["close"]),
                 "amount": amount,
                 "cumulative_amount": cumulative_amount,
+                "intraday_average": intraday_average,
                 "purple": indicators["purple"][index],
                 "purple_ma27": indicators["purple_ma27"][index],
                 "purple_rising": (
@@ -285,11 +295,17 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
 
     first = rows[0]
     latest = rows[-1]
+    health = api_health()
+    database_updated_at = datetime.fromtimestamp(
+        database.stat().st_mtime
+    ).isoformat(timespec="seconds")
     return clean_json(
         {
             "ok": True,
             "mode": "read_only",
             "formula_source": str(MONITOR_ROOT / "shortline_monitor.py"),
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "database_updated_at": database_updated_at,
             "code": code,
             "monitor_code": stored_code,
             "name": name,
@@ -298,6 +314,7 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
             "bar_count": len(rows),
             "complete_session": len(rows) >= 240,
             "full_session": len(rows) >= 241,
+            "intraday_average_quality": "estimated_from_minute_amount_and_close",
             "first_price": first["open"],
             "latest_price": latest["close"],
             "change_from_first": (
@@ -307,6 +324,13 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
             ),
             "total_amount": cumulative_amount,
             "latest_minute": latest["time"],
+            "realtime": {
+                "monitor_alive": bool(health["monitor_alive"]),
+                "is_latest_trading_date": (
+                    trading_date == health["latest_trading_date"]
+                ),
+                "refresh_interval_seconds": 5,
+            },
             "rows": rows,
             "events": events,
         }

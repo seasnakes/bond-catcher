@@ -127,14 +127,7 @@ async function loadBond(options = {}) {
     state.payload = payload;
     state.selectedIndex = Math.max(0, payload.rows.length - 1);
     renderPayload(payload);
-    setStatus(
-      payload.full_session
-        ? "完整241分钟 · 只读"
-        : payload.complete_session
-          ? "可用交易日 · 只读"
-          : "盘中更新 · 只读",
-      "is-live",
-    );
+    setStatus(statusText(payload), "is-live");
     scheduleRefresh();
   } catch (error) {
     if (requestId !== state.requestId) return;
@@ -163,11 +156,20 @@ function renderPayload(payload) {
   renderDates(payload.available_dates, payload.trading_date);
   renderEvents(payload.events);
   nodes.dataFootnote.textContent = payload.full_session
-    ? "当前为完整交易日数据；指标由分钟行情推导，普通行情不等同于Level-2逐笔。"
+    ? "当前为完整交易日数据；黄色均价线按分钟成交额估算，普通行情不等同于Level-2逐笔。"
     : payload.complete_session
-      ? "当前分钟数据可用于指标分析，但尚未达到241根完整回放；普通行情不等同于Level-2逐笔。"
-      : "当前为盘中数据；指标在来源分钟收盘后计算，普通行情不等同于Level-2逐笔。";
+      ? "当前分钟数据可用于指标分析，但尚未达到241根完整回放；黄色均价线按分钟成交额估算。"
+      : "当前为盘中数据；页面每5秒读取一次，分钟指标在来源分钟形成后稳定，黄色均价线按分钟成交额估算。";
   drawChart();
+}
+
+function statusText(payload) {
+  if (payload.realtime?.monitor_alive && payload.realtime?.is_latest_trading_date) {
+    return `实时刷新 · ${payload.realtime.refresh_interval_seconds || 5}秒 · 只读`;
+  }
+  if (payload.full_session) return "完整241分钟 · 只读";
+  if (payload.complete_session) return "可用交易日 · 只读";
+  return "历史/静态数据 · 只读";
 }
 
 function renderDates(dates, selected) {
@@ -228,7 +230,12 @@ function escapeHtml(value) {
 
 function scheduleRefresh() {
   window.clearTimeout(state.refreshTimer);
-  if (!state.payload || state.payload.complete_session) return;
+  if (
+    !state.payload?.realtime?.monitor_alive ||
+    !state.payload?.realtime?.is_latest_trading_date
+  ) {
+    return;
+  }
   state.refreshTimer = window.setTimeout(() => loadBond({ date: state.payload.trading_date }), 5000);
 }
 
@@ -333,10 +340,25 @@ function drawPanels(context, geometry, rows) {
   }
 
   const priceDomain = domain(
-    rows.flatMap((row) => [row.low, row.high, row.purple, row.purple_ma27]),
+    rows.flatMap((row) => [
+      row.low,
+      row.high,
+      row.intraday_average,
+      row.purple,
+      row.purple_ma27,
+    ]),
     { padding: 0.06 },
   );
   drawLine(context, rows, pricePanel, priceDomain, "close", "#1d2921", 1.3);
+  drawLine(
+    context,
+    rows,
+    pricePanel,
+    priceDomain,
+    "intraday_average",
+    "#e2a51a",
+    1.35,
+  );
   drawConditionalLine(
     context,
     rows,
@@ -395,6 +417,7 @@ function drawPanels(context, geometry, rows) {
   drawLine(context, rows, visiblePanel, visibleDomain, "visible_funds_aa", "#8e2434", 1.0);
   drawHorizontalLine(context, visiblePanel, visibleDomain, 100, "#b13d49", [4, 3]);
   drawVisibleCrosses(context, rows, visiblePanel, visibleDomain);
+  drawHalfHourSeparators(context, geometry.panels, rows);
 
   return {
     price: priceDomain,
@@ -403,6 +426,43 @@ function drawPanels(context, geometry, rows) {
     macd: macdDomain,
     visible: visibleDomain,
   };
+}
+
+function drawHalfHourSeparators(context, panels, rows) {
+  if (!panels.length || !rows.length) return;
+  const firstPanel = panels[0];
+  const lastPanel = panels.at(-1);
+  const top = firstPanel.y;
+  const bottom = lastPanel.y + lastPanel.height;
+  const boundaries = [];
+  rows.forEach((row, index) => {
+    const time = String(row.time || "");
+    if (index === 0 || !/:(00|30)$/.test(time)) return;
+    const x = xFor(index, firstPanel, rows.length);
+    const previous = boundaries.at(-1);
+    if (previous && x - previous.x < 14) {
+      previous.x = (previous.x + x) / 2;
+      previous.label = `${previous.label}/${time}`;
+      return;
+    }
+    boundaries.push({ x, label: time });
+  });
+  context.save();
+  context.strokeStyle = "rgba(93, 105, 94, .38)";
+  context.lineWidth = 0.8;
+  context.setLineDash([4, 4]);
+  context.fillStyle = "#7a8478";
+  context.font = '9px Arial, "Microsoft YaHei", sans-serif';
+  context.textAlign = "center";
+  context.textBaseline = "bottom";
+  boundaries.forEach(({ x, label }) => {
+    context.beginPath();
+    context.moveTo(x, top);
+    context.lineTo(x, bottom);
+    context.stroke();
+    context.fillText(label, x, firstPanel.y + firstPanel.height - 4);
+  });
+  context.restore();
 }
 
 function drawLine(context, rows, panel, range, key, color, width, dash = []) {
@@ -596,6 +656,7 @@ function showTooltip(event) {
     <strong>${row.time}　${formatNumber(row.close, 3)}</strong>
     开 ${formatNumber(row.open, 3)}　高 ${formatNumber(row.high, 3)}　低 ${formatNumber(row.low, 3)}<br>
     紫线 ${formatNumber(row.purple, 3)}　成交额 ${formatAmount(row.amount)}<br>
+    均价≈ ${formatNumber(row.intraday_average, 3)}<br>
     暗盘 ${row.dark_state === "inflow" ? "流入" : "流出"}　MACD ${formatNumber(row.macd, 4)}<br>
     明盘资金 ${formatNumber(row.visible_funds, 2)}
     ${nearbyEvents.length ? `<br>信号：${nearbyEvents.map((item) => escapeHtml(EVENT_LABELS[item.event_type] || item.event_type)).join("、")}` : ""}

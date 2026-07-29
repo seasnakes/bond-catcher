@@ -228,6 +228,10 @@ h1 small {
   background: #18221c;
 }
 
+.legend-average {
+  background: #e2a51a;
+}
+
 .legend-purple {
   background: var(--purple);
 }
