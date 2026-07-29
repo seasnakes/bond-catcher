@@ -2,7 +2,7 @@ const http = require("node:http");
 const https = require("node:https");
 const fs = require("node:fs");
 const path = require("node:path");
-const { execFile } = require("node:child_process");
+const { execFile, spawn } = require("node:child_process");
 
 const PORT = Number(process.env.PORT || 5173);
 const ROOT = __dirname;
@@ -16,6 +16,13 @@ const TDX_OPEN_ENABLED = process.env.TDX_OPEN_ENABLED !== "0";
 const TDX_VM_NAME = process.env.TDX_VM_NAME || "Windows 11";
 const TDX_PRLCTL_PATH = process.env.TDX_PRLCTL_PATH || "/usr/local/bin/prlctl";
 const TDX_OPEN_TIMEOUT_MS = Number(process.env.TDX_OPEN_TIMEOUT_MS || 5000);
+const MINIQMT_API_HOST = process.env.MINIQMT_API_HOST || "127.0.0.1";
+const MINIQMT_API_PORT = Number(process.env.MINIQMT_API_PORT || 18890);
+const MINIQMT_API_AUTOSTART = process.env.MINIQMT_API_AUTOSTART !== "0";
+const MINIQMT_PYTHON =
+  process.env.MINIQMT_PYTHON || "/Users/seasnake/miniconda3/bin/python3";
+const MINIQMT_API_SCRIPT = path.join(ROOT, "scripts", "miniqmt-dashboard-api.py");
+let miniqmtApiProcess = null;
 const DOMESTIC_INDEXES = [
   { key: "sh000001", name: "上证指数", symbol: "sh000001", secid: "1.000001" },
   { key: "sz399006", name: "创业板指", symbol: "sz399006", secid: "0.399006" },
@@ -65,6 +72,21 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (url.pathname === "/api/miniqmt/health") {
+      await handleMiniQmtApi("/health", response);
+      return;
+    }
+
+    if (url.pathname === "/api/miniqmt/bond") {
+      const query = new URLSearchParams();
+      for (const key of ["code", "date"]) {
+        const value = url.searchParams.get(key);
+        if (value) query.set(key, value);
+      }
+      await handleMiniQmtApi(`/bond?${query}`, response);
+      return;
+    }
+
     if (url.pathname === "/api/sparks") {
       await handleSparks(url, response);
       return;
@@ -100,7 +122,15 @@ const server = http.createServer(async (request, response) => {
 
 server.listen(PORT, () => {
   console.log(`Finance board running at http://localhost:${PORT}`);
+  void ensureMiniQmtApi();
 });
+
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.once(signal, () => {
+    stopMiniQmtApi();
+    server.close(() => process.exit(0));
+  });
+}
 
 async function handleQuotes(url, response) {
   const secids = (url.searchParams.get("secids") || "")
@@ -221,6 +251,107 @@ async function handleOpenTdx(request, response) {
     code,
     vm: TDX_VM_NAME,
     result,
+  });
+}
+
+async function handleMiniQmtApi(pathname, response) {
+  try {
+    const payload = await fetchLocalJson(pathname, 12_000);
+    sendJson(response, 200, payload);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "MiniQMT API unavailable";
+    const status = /\bHTTP 4\d\d\b/.test(message) ? Number(message.match(/HTTP (\d+)/)?.[1]) : 503;
+    sendJson(response, status, {
+      error: message,
+      service: "miniqmt-dashboard",
+    });
+  }
+}
+
+async function ensureMiniQmtApi() {
+  if (!MINIQMT_API_AUTOSTART) return;
+  try {
+    await fetchLocalJson("/health", 1200);
+    console.log(`MiniQMT dashboard API already available on ${MINIQMT_API_HOST}:${MINIQMT_API_PORT}`);
+    return;
+  } catch {
+    // The read-only helper is started below.
+  }
+  if (miniqmtApiProcess || !fs.existsSync(MINIQMT_API_SCRIPT)) return;
+  miniqmtApiProcess = spawn(
+    MINIQMT_PYTHON,
+    [MINIQMT_API_SCRIPT, "--host", MINIQMT_API_HOST, "--port", String(MINIQMT_API_PORT)],
+    {
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        NO_PROXY: mergeNoProxy(process.env.NO_PROXY),
+        no_proxy: mergeNoProxy(process.env.no_proxy),
+      },
+      stdio: ["ignore", "inherit", "inherit"],
+    },
+  );
+  miniqmtApiProcess.once("error", (error) => {
+    console.warn(`MiniQMT dashboard API failed to start: ${error.message}`);
+    miniqmtApiProcess = null;
+  });
+  miniqmtApiProcess.once("exit", (code, signal) => {
+    if (code && code !== 0) {
+      console.warn(`MiniQMT dashboard API exited: code=${code} signal=${signal || ""}`);
+    }
+    miniqmtApiProcess = null;
+  });
+}
+
+function stopMiniQmtApi() {
+  if (!miniqmtApiProcess || miniqmtApiProcess.killed) return;
+  miniqmtApiProcess.kill("SIGTERM");
+  miniqmtApiProcess = null;
+}
+
+function mergeNoProxy(value) {
+  const entries = new Set(
+    String(value || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean),
+  );
+  for (const item of ["127.0.0.1", "localhost", "::1"]) entries.add(item);
+  return [...entries].join(",");
+}
+
+function fetchLocalJson(pathname, timeout = 5000) {
+  return new Promise((resolve, reject) => {
+    const request = http.get(
+      {
+        hostname: MINIQMT_API_HOST,
+        port: MINIQMT_API_PORT,
+        path: pathname,
+        timeout,
+        headers: { Accept: "application/json" },
+      },
+      (result) => {
+        const chunks = [];
+        result.on("data", (chunk) => chunks.push(chunk));
+        result.on("end", () => {
+          const raw = Buffer.concat(chunks).toString("utf8");
+          let payload;
+          try {
+            payload = raw ? JSON.parse(raw) : {};
+          } catch {
+            reject(new Error("MiniQMT API returned invalid JSON"));
+            return;
+          }
+          if (result.statusCode && result.statusCode >= 400) {
+            reject(new Error(`HTTP ${result.statusCode}: ${payload?.error || "MiniQMT API error"}`));
+            return;
+          }
+          resolve(payload);
+        });
+      },
+    );
+    request.on("timeout", () => request.destroy(new Error("MiniQMT API timeout")));
+    request.on("error", reject);
   });
 }
 

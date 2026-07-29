@@ -1,0 +1,629 @@
+const EVENT_LABELS = {
+  accelerate_up: "涨速加速",
+  accelerate_down: "跌速加速",
+  urgent_up: "急速拉升",
+  urgent_down: "急速下跌",
+  sudden_rise: "快速拉升",
+  sudden_fall: "快速下跌",
+  suspected_large_buy: "疑似连续大单买入",
+  suspected_large_sell: "疑似连续大单卖出",
+  visible_bid_large_order: "五档大买单",
+  visible_ask_large_order: "五档大卖单",
+  visible_book_support: "五档买盘支撑",
+  visible_book_pressure: "五档卖盘压制",
+  macd_underwater_golden_cross: "MACD水下金叉",
+  underwater_golden_cross_purple_confirmed: "水下金叉·紫线确认",
+  purple_line_pullback_reclaim: "回调紫线后收回",
+  dark_funds_inflow_start: "暗盘资金转入",
+  dark_funds_outflow_start: "暗盘资金转出",
+  dark_funds_inflow_accelerating: "暗盘流入增强",
+  dark_funds_outflow_accelerating: "暗盘流出增强",
+  visible_funds_inflow_start: "明盘资金转入",
+  visible_funds_strong_inflow: "明盘资金强流入",
+  visible_funds_inflow_weakening: "明盘流入减弱",
+  visible_funds_outflow: "明盘资金流出",
+  visible_funds_strong_exit: "明盘资金强流出",
+  high_pullback: "高位回落",
+  low_rebound: "低位反弹",
+  interval_volume: "区间放量",
+  strong_interval_volume: "区间强放量",
+  new_high_acceleration: "创新高加速",
+  new_low_acceleration: "创新低加速",
+  platform_dive: "平台跳水",
+  pole_jump: "旱地拔葱",
+  near_up_limit: "接近涨停",
+  open_high: "高开",
+  open_low: "低开",
+  volume_surge: "分钟放量",
+};
+
+const params = new URLSearchParams(window.location.search);
+const requestedCode = String(params.get("code") || "").replace(/\D/g, "");
+const requestedName = params.get("name") || "";
+const state = {
+  payload: null,
+  selectedIndex: -1,
+  refreshTimer: 0,
+  resizeTimer: 0,
+  requestId: 0,
+};
+
+const nodes = {
+  name: document.querySelector("#bondName"),
+  code: document.querySelector("#bondCode"),
+  latestPrice: document.querySelector("#latestPrice"),
+  latestChange: document.querySelector("#latestChange"),
+  barCount: document.querySelector("#barCount"),
+  latestMinute: document.querySelector("#latestMinute"),
+  totalAmount: document.querySelector("#totalAmount"),
+  eventCount: document.querySelector("#eventCount"),
+  dateSelect: document.querySelector("#dateSelect"),
+  refreshButton: document.querySelector("#refreshButton"),
+  connectionStatus: document.querySelector("#connectionStatus"),
+  chartWrap: document.querySelector("#chartWrap"),
+  canvas: document.querySelector("#indicatorChart"),
+  tooltip: document.querySelector("#chartTooltip"),
+  eventList: document.querySelector("#eventList"),
+  dataFootnote: document.querySelector("#dataFootnote"),
+};
+
+const panelDefinitions = [
+  { key: "price", label: "价格 / 紫线", weight: 0.36 },
+  { key: "amount", label: "分钟成交额", weight: 0.13 },
+  { key: "dark", label: "暗盘资金", weight: 0.16 },
+  { key: "macd", label: "MACD", weight: 0.17 },
+  { key: "visible", label: "明盘资金", weight: 0.18 },
+];
+
+function formatNumber(value, digits = 2) {
+  return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "-";
+}
+
+function formatAmount(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  if (Math.abs(number) >= 1e8) return `${(number / 1e8).toFixed(2)}亿`;
+  if (Math.abs(number) >= 1e4) return `${(number / 1e4).toFixed(1)}万`;
+  return `${number.toFixed(0)}元`;
+}
+
+function toneClass(value) {
+  if (Number(value) > 0) return "is-up";
+  if (Number(value) < 0) return "is-down";
+  return "";
+}
+
+function setStatus(text, tone = "") {
+  nodes.connectionStatus.textContent = text;
+  nodes.connectionStatus.className = `status-pill${tone ? ` ${tone}` : ""}`;
+}
+
+async function fetchJson(url, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.error || `HTTP ${response.status}`);
+    return payload;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function loadBond(options = {}) {
+  if (!requestedCode) {
+    setStatus("缺少转债代码", "is-error");
+    return;
+  }
+  const requestId = (state.requestId += 1);
+  const date = options.date ?? nodes.dateSelect.value ?? params.get("date") ?? "";
+  setStatus("正在读取MiniQMT");
+  try {
+    const query = new URLSearchParams({ code: requestedCode });
+    if (date) query.set("date", date);
+    const payload = await fetchJson(`/api/miniqmt/bond?${query}`, 12000);
+    if (requestId !== state.requestId) return;
+    state.payload = payload;
+    state.selectedIndex = Math.max(0, payload.rows.length - 1);
+    renderPayload(payload);
+    setStatus(
+      payload.full_session
+        ? "完整241分钟 · 只读"
+        : payload.complete_session
+          ? "可用交易日 · 只读"
+          : "盘中更新 · 只读",
+      "is-live",
+    );
+    scheduleRefresh();
+  } catch (error) {
+    if (requestId !== state.requestId) return;
+    setStatus(error.message || "MiniQMT读取失败", "is-error");
+    nodes.eventList.innerHTML = `<div class="empty-events">${escapeHtml(
+      error.message || "MiniQMT读取失败",
+    )}</div>`;
+  }
+}
+
+function renderPayload(payload) {
+  const displayName = payload.name || requestedName || "可转债";
+  document.title = `${displayName} ${payload.code} · MiniQMT分时指标`;
+  nodes.name.textContent = displayName;
+  nodes.code.textContent = payload.code;
+  nodes.latestPrice.textContent = formatNumber(payload.latest_price, 3);
+  nodes.latestChange.textContent = `${Number(payload.change_from_first) > 0 ? "+" : ""}${formatNumber(
+    payload.change_from_first,
+    2,
+  )}%`;
+  nodes.latestChange.className = toneClass(payload.change_from_first);
+  nodes.barCount.textContent = `${payload.bar_count}${payload.complete_session ? " / 241" : ""}`;
+  nodes.latestMinute.textContent = payload.latest_minute || "-";
+  nodes.totalAmount.textContent = formatAmount(payload.total_amount);
+  nodes.eventCount.textContent = String(payload.events.length);
+  renderDates(payload.available_dates, payload.trading_date);
+  renderEvents(payload.events);
+  nodes.dataFootnote.textContent = payload.full_session
+    ? "当前为完整交易日数据；指标由分钟行情推导，普通行情不等同于Level-2逐笔。"
+    : payload.complete_session
+      ? "当前分钟数据可用于指标分析，但尚未达到241根完整回放；普通行情不等同于Level-2逐笔。"
+      : "当前为盘中数据；指标在来源分钟收盘后计算，普通行情不等同于Level-2逐笔。";
+  drawChart();
+}
+
+function renderDates(dates, selected) {
+  const current = nodes.dateSelect.value;
+  nodes.dateSelect.replaceChildren();
+  for (const date of dates || []) {
+    const option = document.createElement("option");
+    option.value = date;
+    option.textContent = `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`;
+    option.selected = date === selected;
+    nodes.dateSelect.append(option);
+  }
+  if (!selected && current) nodes.dateSelect.value = current;
+}
+
+function renderEvents(events) {
+  nodes.eventList.replaceChildren();
+  if (!events.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-events";
+    empty.textContent = "该交易日暂无已记录信号";
+    nodes.eventList.append(empty);
+    return;
+  }
+  for (const event of [...events].reverse()) {
+    const row = document.createElement("article");
+    row.className = `event-row ${toneClass(event.direction === "up" ? 1 : event.direction === "down" ? -1 : 0)}`;
+    const time = document.createElement("span");
+    time.className = "event-time";
+    time.textContent = String(event.event_time || "").slice(11, 19);
+    const type = document.createElement("span");
+    type.className = "event-type";
+    type.textContent = EVENT_LABELS[event.event_type] || event.event_type;
+    type.title = event.event_type;
+    const price = document.createElement("span");
+    price.className = "event-price";
+    price.textContent = formatNumber(event.price, 3);
+    const score = document.createElement("span");
+    score.className = "event-score";
+    score.textContent = Number.isFinite(Number(event.speed_1m))
+      ? `1分钟 ${Number(event.speed_1m) > 0 ? "+" : ""}${formatNumber(event.speed_1m, 2)}%`
+      : `评分 ${formatNumber(event.score, 2)}`;
+    const confidence = document.createElement("span");
+    confidence.className = "event-confidence";
+    confidence.textContent = event.confidence;
+    row.append(time, type, price, score, confidence);
+    nodes.eventList.append(row);
+  }
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function scheduleRefresh() {
+  window.clearTimeout(state.refreshTimer);
+  if (!state.payload || state.payload.complete_session) return;
+  state.refreshTimer = window.setTimeout(() => loadBond({ date: state.payload.trading_date }), 5000);
+}
+
+function chartGeometry(canvas) {
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  const left = width < 700 ? 48 : 68;
+  const right = width < 700 ? 48 : 72;
+  const top = 10;
+  const bottom = 28;
+  const gap = 7;
+  const usable = height - top - bottom - gap * (panelDefinitions.length - 1);
+  let cursor = top;
+  const panels = panelDefinitions.map((definition) => {
+    const panelHeight = usable * definition.weight;
+    const panel = {
+      ...definition,
+      x: left,
+      y: cursor,
+      width: width - left - right,
+      height: panelHeight,
+    };
+    cursor += panelHeight + gap;
+    return panel;
+  });
+  return { width, height, left, right, top, bottom, panels };
+}
+
+function finiteValues(values) {
+  return values.map(Number).filter(Number.isFinite);
+}
+
+function domain(values, options = {}) {
+  const finite = finiteValues(values);
+  if (!finite.length) return [-1, 1];
+  let min = Math.min(...finite);
+  let max = Math.max(...finite);
+  if (options.includeZero) {
+    min = Math.min(0, min);
+    max = Math.max(0, max);
+  }
+  if (options.includeValue !== undefined) {
+    min = Math.min(Number(options.includeValue), min);
+    max = Math.max(Number(options.includeValue), max);
+  }
+  const range = max - min || Math.max(Math.abs(max) * 0.02, 1);
+  const pad = range * (options.padding ?? 0.08);
+  return [min - pad, max + pad];
+}
+
+function xFor(index, panel, length) {
+  return panel.x + (length <= 1 ? 0 : (index / (length - 1)) * panel.width);
+}
+
+function yFor(value, panel, range) {
+  const [min, max] = range;
+  return panel.y + panel.height - ((Number(value) - min) / (max - min || 1)) * panel.height;
+}
+
+function setupCanvas() {
+  const ratio = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  const width = nodes.canvas.clientWidth;
+  const height = nodes.canvas.clientHeight;
+  nodes.canvas.width = Math.round(width * ratio);
+  nodes.canvas.height = Math.round(height * ratio);
+  const context = nodes.canvas.getContext("2d");
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  return context;
+}
+
+function drawChart() {
+  const rows = state.payload?.rows || [];
+  if (!rows.length) return;
+  const context = setupCanvas();
+  const geometry = chartGeometry(nodes.canvas);
+  context.clearRect(0, 0, geometry.width, geometry.height);
+  context.font = '11px Arial, "Microsoft YaHei", sans-serif';
+  context.lineJoin = "round";
+  context.lineCap = "round";
+  const domains = drawPanels(context, geometry, rows);
+  drawEvents(context, geometry.panels[0], rows, domains.price);
+  drawAxes(context, geometry, rows, domains);
+  if (state.selectedIndex >= 0) drawCrosshair(context, geometry, rows, state.selectedIndex);
+}
+
+function drawPanels(context, geometry, rows) {
+  const [pricePanel, amountPanel, darkPanel, macdPanel, visiblePanel] = geometry.panels;
+  for (const panel of geometry.panels) {
+    context.fillStyle = "#ffffff";
+    context.fillRect(panel.x, panel.y, panel.width, panel.height);
+    context.strokeStyle = "#dfe5da";
+    context.lineWidth = 1;
+    context.strokeRect(panel.x + 0.5, panel.y + 0.5, panel.width - 1, panel.height - 1);
+    for (let line = 1; line < 4; line += 1) {
+      const y = panel.y + (panel.height * line) / 4;
+      context.strokeStyle = "#edf0ea";
+      context.beginPath();
+      context.moveTo(panel.x, y);
+      context.lineTo(panel.x + panel.width, y);
+      context.stroke();
+    }
+  }
+
+  const priceDomain = domain(
+    rows.flatMap((row) => [row.low, row.high, row.purple, row.purple_ma27]),
+    { padding: 0.06 },
+  );
+  drawLine(context, rows, pricePanel, priceDomain, "close", "#1d2921", 1.3);
+  drawConditionalLine(
+    context,
+    rows,
+    pricePanel,
+    priceDomain,
+    "purple",
+    (row) => (row.purple_rising ? "#8738c9" : "#159447"),
+    1.8,
+  );
+  drawLine(context, rows, pricePanel, priceDomain, "purple_ma27", "#8e9691", 0.9, [4, 3]);
+
+  const amountDomain = domain(rows.map((row) => row.amount), { includeZero: true, padding: 0.05 });
+  drawBars(context, rows, amountPanel, amountDomain, (row) =>
+    row.close >= row.open ? "rgba(223,36,52,.68)" : "rgba(21,148,71,.68)",
+  );
+
+  const darkDomain = domain(
+    rows.flatMap((row) => [row.dark_buy, row.dark_sell]),
+    { includeZero: true, padding: 0.08 },
+  );
+  drawBars(context, rows, darkPanel, darkDomain, (row) =>
+    row.dark_state === "inflow" ? "rgba(223,36,52,.72)" : "rgba(21,148,71,.72)",
+    (row) => (row.dark_state === "inflow" ? row.dark_buy : row.dark_sell),
+  );
+  drawZeroLine(context, darkPanel, darkDomain);
+
+  const macdDomain = domain(
+    rows.flatMap((row) => [row.macd, row.dif, row.dea]),
+    { includeZero: true, padding: 0.08 },
+  );
+  drawBars(
+    context,
+    rows,
+    macdPanel,
+    macdDomain,
+    (row) => (row.macd >= 0 ? "rgba(223,36,52,.55)" : "rgba(21,148,71,.55)"),
+    (row) => row.macd,
+  );
+  drawLine(context, rows, macdPanel, macdDomain, "dif", "#32275f", 1.15);
+  drawLine(context, rows, macdPanel, macdDomain, "dea", "#d08a18", 1.05);
+  drawZeroLine(context, macdPanel, macdDomain);
+
+  const visibleDomain = domain(
+    rows.flatMap((row) => [row.visible_funds, row.visible_funds_aa]),
+    { includeZero: true, includeValue: 100, padding: 0.05 },
+  );
+  drawBars(
+    context,
+    rows,
+    visiblePanel,
+    visibleDomain,
+    (row) =>
+      row.visible_funds >= 100 ? "rgba(164,19,32,.82)" : "rgba(239,113,119,.72)",
+    (row) => row.visible_funds,
+  );
+  drawLine(context, rows, visiblePanel, visibleDomain, "visible_funds_aa", "#8e2434", 1.0);
+  drawHorizontalLine(context, visiblePanel, visibleDomain, 100, "#b13d49", [4, 3]);
+  drawVisibleCrosses(context, rows, visiblePanel, visibleDomain);
+
+  return {
+    price: priceDomain,
+    amount: amountDomain,
+    dark: darkDomain,
+    macd: macdDomain,
+    visible: visibleDomain,
+  };
+}
+
+function drawLine(context, rows, panel, range, key, color, width, dash = []) {
+  context.save();
+  context.strokeStyle = color;
+  context.lineWidth = width;
+  context.setLineDash(dash);
+  context.beginPath();
+  let started = false;
+  rows.forEach((row, index) => {
+    const value = Number(row[key]);
+    if (!Number.isFinite(value)) {
+      started = false;
+      return;
+    }
+    const x = xFor(index, panel, rows.length);
+    const y = yFor(value, panel, range);
+    if (!started) {
+      context.moveTo(x, y);
+      started = true;
+    } else {
+      context.lineTo(x, y);
+    }
+  });
+  context.stroke();
+  context.restore();
+}
+
+function drawConditionalLine(context, rows, panel, range, key, colorForRow, width) {
+  context.save();
+  context.lineWidth = width;
+  for (let index = 1; index < rows.length; index += 1) {
+    const previous = Number(rows[index - 1][key]);
+    const value = Number(rows[index][key]);
+    if (!Number.isFinite(previous) || !Number.isFinite(value)) continue;
+    context.strokeStyle = colorForRow(rows[index]);
+    context.beginPath();
+    context.moveTo(xFor(index - 1, panel, rows.length), yFor(previous, panel, range));
+    context.lineTo(xFor(index, panel, rows.length), yFor(value, panel, range));
+    context.stroke();
+  }
+  context.restore();
+}
+
+function drawBars(context, rows, panel, range, colorForRow, valueForRow = (row) => row.amount) {
+  const barWidth = Math.max(1, Math.min(5, (panel.width / rows.length) * 0.72));
+  const zeroY = yFor(0, panel, range);
+  rows.forEach((row, index) => {
+    const value = Number(valueForRow(row));
+    if (!Number.isFinite(value)) return;
+    const x = xFor(index, panel, rows.length) - barWidth / 2;
+    const valueY = yFor(value, panel, range);
+    context.fillStyle = colorForRow(row);
+    context.fillRect(x, Math.min(zeroY, valueY), barWidth, Math.max(1, Math.abs(zeroY - valueY)));
+  });
+}
+
+function drawHorizontalLine(context, panel, range, value, color, dash = []) {
+  const y = yFor(value, panel, range);
+  context.save();
+  context.strokeStyle = color;
+  context.lineWidth = 0.8;
+  context.setLineDash(dash);
+  context.beginPath();
+  context.moveTo(panel.x, y);
+  context.lineTo(panel.x + panel.width, y);
+  context.stroke();
+  context.restore();
+}
+
+function drawZeroLine(context, panel, range) {
+  drawHorizontalLine(context, panel, range, 0, "#9ca69b");
+}
+
+function drawVisibleCrosses(context, rows, panel, range) {
+  context.fillStyle = "#ad1d2a";
+  for (let index = 1; index < rows.length; index += 1) {
+    const previous = Number(rows[index - 1].visible_funds);
+    const current = Number(rows[index].visible_funds);
+    if (!(previous < 100 && current >= 100)) continue;
+    const x = xFor(index, panel, rows.length);
+    const y = yFor(current, panel, range) - 4;
+    context.beginPath();
+    context.moveTo(x, y - 4);
+    context.lineTo(x - 3.5, y + 2);
+    context.lineTo(x + 3.5, y + 2);
+    context.closePath();
+    context.fill();
+  }
+}
+
+function drawAxes(context, geometry, rows, domains) {
+  context.fillStyle = "#657064";
+  context.font = '10px Arial, "Microsoft YaHei", sans-serif';
+  context.textBaseline = "middle";
+  geometry.panels.forEach((panel) => {
+    const range = domains[panel.key];
+    context.fillStyle = "#586355";
+    context.textAlign = "left";
+    context.fillText(panel.label, panel.x + 6, panel.y + 10);
+    for (const ratio of [0, 0.5, 1]) {
+      const value = range[1] - (range[1] - range[0]) * ratio;
+      const y = panel.y + panel.height * ratio;
+      context.textAlign = "right";
+      context.fillText(formatAxis(value, panel.key), panel.x - 6, y);
+    }
+  });
+
+  const lastPanel = geometry.panels.at(-1);
+  const labels = [0, Math.floor((rows.length - 1) / 4), Math.floor((rows.length - 1) / 2), Math.floor(((rows.length - 1) * 3) / 4), rows.length - 1];
+  context.textBaseline = "top";
+  labels.forEach((index, labelIndex) => {
+    const x = xFor(index, lastPanel, rows.length);
+    context.textAlign = labelIndex === 0 ? "left" : labelIndex === labels.length - 1 ? "right" : "center";
+    context.fillText(rows[index]?.time || "", x, lastPanel.y + lastPanel.height + 7);
+  });
+}
+
+function formatAxis(value, key) {
+  if (key === "amount") return formatAmount(value).replace("元", "");
+  if (key === "price") return Number(value).toFixed(2);
+  return Math.abs(value) >= 100 ? Number(value).toFixed(0) : Number(value).toFixed(2);
+}
+
+function drawEvents(context, panel, rows, priceDomain) {
+  const events = state.payload?.events || [];
+  if (!events.length) return;
+  const indexByTime = new Map(rows.map((row, index) => [row.time, index]));
+  const lanes = new Map();
+  for (const event of events) {
+    const sourceTime = String(event.details?.source_bar_time || event.event_time || "").slice(11, 16);
+    const index = indexByTime.get(sourceTime);
+    if (index === undefined) continue;
+    const lane = lanes.get(index) || 0;
+    lanes.set(index, lane + 1);
+    const x = xFor(index, panel, rows.length);
+    const up = event.direction !== "down";
+    const anchor = Number(event.price) || Number(rows[index].close);
+    const y = yFor(anchor, panel, priceDomain) + (up ? -9 - lane * 7 : 9 + lane * 7);
+    context.fillStyle = up ? "#df2434" : "#159447";
+    context.beginPath();
+    if (up) {
+      context.moveTo(x, y - 4);
+      context.lineTo(x - 3.5, y + 3);
+      context.lineTo(x + 3.5, y + 3);
+    } else {
+      context.moveTo(x, y + 4);
+      context.lineTo(x - 3.5, y - 3);
+      context.lineTo(x + 3.5, y - 3);
+    }
+    context.closePath();
+    context.fill();
+  }
+}
+
+function drawCrosshair(context, geometry, rows, index) {
+  const panel = geometry.panels[0];
+  const x = xFor(index, panel, rows.length);
+  context.save();
+  context.strokeStyle = "rgba(48,61,51,.42)";
+  context.lineWidth = 0.8;
+  context.setLineDash([3, 3]);
+  context.beginPath();
+  context.moveTo(x, geometry.panels[0].y);
+  context.lineTo(x, geometry.panels.at(-1).y + geometry.panels.at(-1).height);
+  context.stroke();
+  context.restore();
+}
+
+function selectedIndexFromPointer(event) {
+  const rows = state.payload?.rows || [];
+  if (!rows.length) return -1;
+  const geometry = chartGeometry(nodes.canvas);
+  const panel = geometry.panels[0];
+  const rect = nodes.canvas.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const ratio = Math.max(0, Math.min(1, (x - panel.x) / panel.width));
+  return Math.round(ratio * (rows.length - 1));
+}
+
+function showTooltip(event) {
+  const index = selectedIndexFromPointer(event);
+  if (index < 0) return;
+  state.selectedIndex = index;
+  const row = state.payload.rows[index];
+  const nearbyEvents = state.payload.events.filter((item) => {
+    const source = String(item.details?.source_bar_time || item.event_time || "").slice(11, 16);
+    return source === row.time;
+  });
+  nodes.tooltip.innerHTML = `
+    <strong>${row.time}　${formatNumber(row.close, 3)}</strong>
+    开 ${formatNumber(row.open, 3)}　高 ${formatNumber(row.high, 3)}　低 ${formatNumber(row.low, 3)}<br>
+    紫线 ${formatNumber(row.purple, 3)}　成交额 ${formatAmount(row.amount)}<br>
+    暗盘 ${row.dark_state === "inflow" ? "流入" : "流出"}　MACD ${formatNumber(row.macd, 4)}<br>
+    明盘资金 ${formatNumber(row.visible_funds, 2)}
+    ${nearbyEvents.length ? `<br>信号：${nearbyEvents.map((item) => escapeHtml(EVENT_LABELS[item.event_type] || item.event_type)).join("、")}` : ""}
+  `;
+  nodes.tooltip.hidden = false;
+  const wrapRect = nodes.chartWrap.getBoundingClientRect();
+  const left = event.clientX - wrapRect.left + 14;
+  const top = event.clientY - wrapRect.top + 12;
+  const maxLeft = nodes.chartWrap.clientWidth - nodes.tooltip.offsetWidth - 8;
+  const maxTop = nodes.chartWrap.clientHeight - nodes.tooltip.offsetHeight - 8;
+  nodes.tooltip.style.left = `${Math.max(8, Math.min(maxLeft, left))}px`;
+  nodes.tooltip.style.top = `${Math.max(8, Math.min(maxTop, top))}px`;
+  drawChart();
+}
+
+nodes.canvas.addEventListener("pointermove", showTooltip);
+nodes.canvas.addEventListener("pointerleave", () => {
+  nodes.tooltip.hidden = true;
+  state.selectedIndex = -1;
+  drawChart();
+});
+nodes.refreshButton.addEventListener("click", () => loadBond({ date: nodes.dateSelect.value }));
+nodes.dateSelect.addEventListener("change", () => loadBond({ date: nodes.dateSelect.value }));
+window.addEventListener("resize", () => {
+  window.clearTimeout(state.resizeTimer);
+  state.resizeTimer = window.setTimeout(drawChart, 100);
+});
+
+nodes.name.textContent = requestedName || "可转债";
+nodes.code.textContent = requestedCode;
+loadBond();

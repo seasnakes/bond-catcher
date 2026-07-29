@@ -2158,6 +2158,14 @@ function quoteUrl(secid) {
   return `https://quote.eastmoney.com/unify/r/${secid}`;
 }
 
+function miniQmtBondUrl(stock) {
+  const query = new URLSearchParams({
+    code: codeForEditor(stock.secid),
+    name: stock.name,
+  });
+  return `./bond.html?${query}`;
+}
+
 async function openQuoteInTdx(stock) {
   flashStatus(`正在通达信打开 ${stock.name}...`);
   try {
@@ -2814,9 +2822,13 @@ function renderStockRow(stock, sectorName) {
   row.dataset.secid = stock.secid;
   row.draggable = state.editMode;
   if (!state.editMode) {
-    row.href = quoteUrl(stock.secid);
-    row.target = "_blank";
-    row.rel = "noreferrer";
+    if (isConvertibleBondSecid(stock.secid)) {
+      row.href = miniQmtBondUrl(stock);
+    } else {
+      row.href = quoteUrl(stock.secid);
+      row.target = "_blank";
+      row.rel = "noreferrer";
+    }
   }
   const priceLabel = session.phase === "auction" ? "集合竞价参考价" : "最新价";
   row.title = `${stock.name} ${codeForEditor(stock.secid)} ${priceLabel} ${formatPrice(stock.price, stock.secid)} 涨跌幅 ${formatPercent(
@@ -2830,6 +2842,10 @@ function renderStockRow(stock, sectorName) {
     }
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
+    if (isConvertibleBondSecid(stock.secid)) {
+      window.location.href = miniQmtBondUrl(stock);
+      return;
+    }
     openQuoteInTdx(stock);
   });
   row.addEventListener("dragstart", (event) => {

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MiniQMT 分时指标</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./bond.css" />
+  </head>
+  <body>
+    <main class="indicator-shell">
+      <header class="indicator-header">
+        <a class="back-link" href="./">← 返回看板</a>
+        <div class="instrument-heading">
+          <div>
+            <span class="eyebrow">MINIQMT · 只读</span>
+            <h1><span id="bondName">可转债</span> <small id="bondCode"></small></h1>
+          </div>
+          <div class="price-summary">
+            <strong id="latestPrice">-</strong>
+            <span id="latestChange">-</span>
+          </div>
+        </div>
+        <div class="indicator-controls">
+          <label>
+            <span>交易日</span>
+            <select id="dateSelect"></select>
+          </label>
+          <button id="refreshButton" type="button">立即刷新</button>
+          <span id="connectionStatus" class="status-pill">正在连接</span>
+        </div>
+      </header>
+
+      <section class="metrics" aria-label="数据摘要">
+        <article><span>分钟数</span><strong id="barCount">-</strong></article>
+        <article><span>最新分钟</span><strong id="latestMinute">-</strong></article>
+        <article><span>累计成交额</span><strong id="totalAmount">-</strong></article>
+        <article><span>今日信号</span><strong id="eventCount">-</strong></article>
+      </section>
+
+      <section class="chart-card">
+        <div class="chart-legend">
+          <span><i class="legend-price"></i>价格</span>
+          <span><i class="legend-purple"></i>紫线</span>
+          <span><i class="legend-green"></i>绿线</span>
+          <span><i class="legend-ma"></i>紫线MA27</span>
+          <span class="legend-note">移动鼠标查看分钟详情</span>
+        </div>
+        <div id="chartWrap" class="chart-wrap">
+          <canvas id="indicatorChart" aria-label="MiniQMT五栏分时指标图"></canvas>
+          <div id="chartTooltip" class="chart-tooltip" hidden></div>
+        </div>
+      </section>
+
+      <section class="events-card">
+        <header>
+          <div>
+            <span class="eyebrow">INTRADAY EVENTS</span>
+            <h2>当日信号</h2>
+          </div>
+          <span id="dataFootnote">指标由已收盘分钟推导，普通行情不等同于Level-2逐笔。</span>
+        </header>
+        <div id="eventList" class="event-list"></div>
+      </section>
+    </main>
+    <script src="./bond.js" defer></script>
+  </body>
+</html>

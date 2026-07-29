@@ -1,6 +1,7 @@
 {
   "scripts": {
     "start": "node server.js",
+    "miniqmt:api": "/Users/seasnake/miniconda3/bin/python3 scripts/miniqmt-dashboard-api.py",
     "update:stocks": "node scripts/update-a-share-list.js",
     "sync:tdx-sectors": "node scripts/sync-tdx-sectors.js"
   }
