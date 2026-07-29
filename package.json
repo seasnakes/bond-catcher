@@ -1,6 +1,7 @@
 {
   "scripts": {
     "start": "node server.js",
-    "update:stocks": "node scripts/update-a-share-list.js"
+    "update:stocks": "node scripts/update-a-share-list.js",
+    "sync:tdx-sectors": "node scripts/sync-tdx-sectors.js"
   }
 }

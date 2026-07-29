@@ -2,14 +2,20 @@ const http = require("node:http");
 const https = require("node:https");
 const fs = require("node:fs");
 const path = require("node:path");
+const { execFile } = require("node:child_process");
 
 const PORT = Number(process.env.PORT || 5173);
 const ROOT = __dirname;
 const LOCAL_A_SHARE_LIST_PATH = path.join(ROOT, "data", "a-share-list.json");
 const BOARD_STATE_PATH = path.join(ROOT, "data", "board-state.json");
 const EASTMONEY_SEARCH_TOKEN = "D43BF722C8E33BD69D955A7E7361F5D9";
+const EASTMONEY_TRENDS_TOKEN = "fa5fd1943c7b386f172d6893dbfba10b";
 const EASTMONEY_SEARCH_TIMEOUT_MS = 2500;
 const GLOBAL_INDEX_SPARK_CACHE_MS = 60_000;
+const TDX_OPEN_ENABLED = process.env.TDX_OPEN_ENABLED !== "0";
+const TDX_VM_NAME = process.env.TDX_VM_NAME || "Windows 11";
+const TDX_PRLCTL_PATH = process.env.TDX_PRLCTL_PATH || "/usr/local/bin/prlctl";
+const TDX_OPEN_TIMEOUT_MS = Number(process.env.TDX_OPEN_TIMEOUT_MS || 5000);
 const DOMESTIC_INDEXES = [
   { key: "sh000001", name: "上证指数", symbol: "sh000001", secid: "1.000001" },
   { key: "sz399006", name: "创业板指", symbol: "sz399006", secid: "0.399006" },
@@ -46,6 +52,16 @@ const server = http.createServer(async (request, response) => {
 
     if (url.pathname === "/api/indices") {
       await handleIndices(response);
+      return;
+    }
+
+    if (url.pathname === "/api/auction") {
+      await handleAuction(url, response);
+      return;
+    }
+
+    if (url.pathname === "/api/open-tdx") {
+      await handleOpenTdx(request, response);
       return;
     }
 
@@ -129,6 +145,82 @@ async function handleIndices(response) {
     source: "新浪实时",
     time: new Date().toISOString(),
     indices,
+  });
+}
+
+async function handleAuction(url, response) {
+  const secids = Array.from(
+    new Set(
+      (url.searchParams.get("secids") || "")
+        .split(",")
+        .map((value) => value.trim())
+        .map(normalizeSecidInput)
+        .filter((secid) => /^[01]\.\d{6}$/.test(secid)),
+    ),
+  );
+
+  if (secids.length === 0) {
+    sendJson(response, 400, { error: "missing secids" });
+    return;
+  }
+
+  const limitedSecids = secids.slice(0, 120);
+  let source = "通达信价量";
+  let results;
+  try {
+    results = await fetchTdxAuctionBatch(limitedSecids);
+  } catch (error) {
+    source = "东方财富分时竞价";
+    console.warn(
+      `Tdx auction batch failed, using Eastmoney fallback: ${
+        error instanceof Error ? error.message : "unknown error"
+      }`,
+    );
+    results = await fetchEastmoneyAuctionBatch(limitedSecids);
+  }
+
+  const auctions = results.filter((item) => !item.error);
+  const failed = results.filter((item) => item.error);
+
+  sendJson(response, 200, {
+    source,
+    time: new Date().toISOString(),
+    requested: secids.length,
+    returned: limitedSecids.length,
+    truncated: secids.length > limitedSecids.length,
+    auctions,
+    failed,
+  });
+}
+
+async function handleOpenTdx(request, response) {
+  if (request.method !== "POST") {
+    response.writeHead(405, {
+      "Content-Type": "text/plain; charset=utf-8",
+      Allow: "POST",
+    });
+    response.end("Method not allowed");
+    return;
+  }
+
+  if (!TDX_OPEN_ENABLED) {
+    sendJson(response, 503, { error: "通达信跳转未启用" });
+    return;
+  }
+
+  const body = await readJsonBody(request, 8 * 1024);
+  const code = normalizeTdxOpenCode(body?.code || body?.secid);
+  if (!code) {
+    sendJson(response, 400, { error: "通达信跳转仅支持 6 位 A股/ETF/转债代码" });
+    return;
+  }
+
+  const result = await openTdxCode(code);
+  sendJson(response, 200, {
+    ok: true,
+    code,
+    vm: TDX_VM_NAME,
+    result,
   });
 }
 
@@ -803,12 +895,7 @@ async function fetchSinaSparkline(secid, limit = 58) {
 async function fetchEastmoneyMinuteSparkline(secid, limit = 58) {
   const raw = await fetchText({
     hostname: "push2his.eastmoney.com",
-    path:
-      "/api/qt/stock/trends2/get" +
-      `?secid=${encodeURIComponent(secid)}` +
-      "&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13" +
-      "&fields2=f51,f52,f53,f54,f55,f56,f57,f58" +
-      "&iscr=0&iscca=0&ndays=1",
+    path: eastmoneyTrendsPath(secid),
     headers: {
       Referer: "https://quote.eastmoney.com/",
       "User-Agent":
@@ -846,6 +933,253 @@ async function fetchEastmoneyMinuteSparkline(secid, limit = 58) {
     time: String(latestTrends[latestTrends.length - 1] || "").split(",")[0] || "",
     source: "东方财富分时",
   };
+}
+
+async function fetchEastmoneyAuction(secid) {
+  const raw = await fetchText({
+    hostname: "push2his.eastmoney.com",
+    path: eastmoneyTrendsPath(secid),
+    headers: {
+      Referer: "https://quote.eastmoney.com/",
+      "User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36",
+    },
+    timeout: 10000,
+  });
+  const data = JSON.parse(raw)?.data;
+  const trends = data?.trends;
+  if (!Array.isArray(trends) || trends.length === 0) {
+    throw new Error(`empty eastmoney auction: ${secid}`);
+  }
+
+  const latestTrends = latestDatedRows(trends, (line) => dateKeyFromDateTime(String(line).split(",")[0]));
+  const rows = latestTrends.map(parseEastmoneyTrendLine).filter((row) => isAuctionMinute(row.time));
+  if (rows.length === 0) {
+    throw new Error(`empty auction rows: ${secid}`);
+  }
+
+  const latest = rows
+    .filter((row) => Number.isFinite(row.price) && row.price > 0)
+    .at(-1);
+  const previousClose = Number(data?.preClose || data?.prePrice);
+  const change =
+    latest && Number.isFinite(previousClose) && previousClose > 0
+      ? ((latest.price - previousClose) / previousClose) * 100
+      : 0;
+
+  return {
+    secid,
+    code: data?.code || secid.split(".")[1],
+    name: data?.name || "",
+    date: rows[rows.length - 1]?.date || "",
+    previousClose: Number.isFinite(previousClose) ? previousClose : null,
+    latest: latest
+      ? {
+          time: latest.time,
+          price: latest.price,
+          change,
+        }
+      : null,
+    rows,
+  };
+}
+
+async function fetchEastmoneyAuctionBatch(secids) {
+  return mapWithConcurrency(secids, 8, async (secid) => {
+    try {
+      return await fetchEastmoneyAuction(secid);
+    } catch (error) {
+      return {
+        secid,
+        error: error instanceof Error ? error.message : "unknown error",
+      };
+    }
+  });
+}
+
+async function fetchTdxAuctionBatch(secids) {
+  const stockList = secids.map(secidToTdxStockCode);
+  const psStockList = stockList.map((code) => `'${code}'`).join(",");
+  const script = [
+    `$body = @{ id=1; method='get_pricevol'; params=@{ stock_list=@(${psStockList}) } } | ConvertTo-Json -Depth 6`,
+    "$result = Invoke-RestMethod -Uri 'http://127.0.0.1:17709/' -Method Post -ContentType 'application/json' -Body $body",
+    "$result | ConvertTo-Json -Depth 10",
+  ].join("; ");
+  const { stdout } = await execFileAsync(
+    TDX_PRLCTL_PATH,
+    ["exec", TDX_VM_NAME, "--current-user", "powershell", "-NoProfile", "-Command", script],
+    {
+      timeout: Number.isFinite(TDX_OPEN_TIMEOUT_MS) ? Math.max(TDX_OPEN_TIMEOUT_MS, 8000) : 8000,
+      maxBuffer: 4 * 1024 * 1024,
+    },
+  );
+
+  const result = parseLastJsonObject(stdout);
+  const errorId = String(result?.result?.ErrorId ?? result?.ErrorId ?? "");
+  if (errorId && errorId !== "0") {
+    throw new Error(`通达信返回错误：${errorId}`);
+  }
+
+  const values = result?.result?.Value || result?.Value;
+  if (!values || typeof values !== "object") {
+    throw new Error("通达信价量返回为空");
+  }
+
+  const { date, time } = currentChinaDateTimeParts();
+  return secids.map((secid, index) => {
+    const tdxCode = stockList[index];
+    const row = values[tdxCode];
+    if (!row) {
+      return {
+        secid,
+        error: `missing tdx pricevol: ${tdxCode}`,
+      };
+    }
+
+    const previousClose = Number(row.LastClose);
+    const now = Number(row.Now);
+    const price = Number.isFinite(now) && now > 0 ? now : previousClose;
+    const change =
+      Number.isFinite(price) && Number.isFinite(previousClose) && previousClose > 0
+        ? ((price - previousClose) / previousClose) * 100
+        : 0;
+    const volume = Number(row.Volume);
+    const latest = {
+      time,
+      price,
+      change,
+      volume: Number.isFinite(volume) ? volume : 0,
+    };
+
+    return {
+      secid,
+      code: secid.split(".")[1],
+      tdxCode,
+      date,
+      previousClose: Number.isFinite(previousClose) ? previousClose : null,
+      latest,
+      rows: [latest],
+    };
+  });
+}
+
+function eastmoneyTrendsPath(secid) {
+  return (
+    "/api/qt/stock/trends2/get" +
+    "?fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13" +
+    "&fields2=f51,f52,f53,f54,f55,f56,f57,f58" +
+    `&ut=${EASTMONEY_TRENDS_TOKEN}` +
+    "&ndays=1" +
+    `&secid=${encodeURIComponent(secid)}`
+  );
+}
+
+function parseEastmoneyTrendLine(line) {
+  const [dateTime, open, close, high, low, volume, amount, average] = String(line).split(",");
+  const [date, time] = String(dateTime || "").trim().split(/\s+/);
+  return {
+    date: date || "",
+    time: time || "",
+    open: Number(open),
+    price: Number(close),
+    high: Number(high),
+    low: Number(low),
+    volume: Number(volume),
+    amount: Number(amount),
+    average: Number(average),
+  };
+}
+
+function isAuctionMinute(time) {
+  return typeof time === "string" && time >= "09:15" && time <= "09:25";
+}
+
+function secidToTdxStockCode(secid) {
+  const [market, code] = String(secid || "").split(".");
+  if (!code) return secid;
+  if (/^[89]/.test(code)) return `${code}.BJ`;
+  if (market === "1") return `${code}.SH`;
+  return `${code}.SZ`;
+}
+
+function currentChinaDateTimeParts() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    date: `${map.year}-${map.month}-${map.day}`,
+    time: `${map.hour}:${map.minute}:${map.second}`,
+  };
+}
+
+function normalizeTdxOpenCode(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const secid = normalizeSecidInput(text);
+  const code = /^[01]\.\d{6}$/.test(secid) ? secid.split(".")[1] : text.replace(/^(sh|sz|bj)/i, "");
+  return /^\d{6}$/.test(code) ? code : "";
+}
+
+async function openTdxCode(code) {
+  const url = `http://www.treeid/code_${code}`;
+  const script = [
+    `$body = @{ id=1; method='exec_to_tdx'; params=@{ url='${url}' } } | ConvertTo-Json -Depth 5`,
+    "$result = Invoke-RestMethod -Uri 'http://127.0.0.1:17709/' -Method Post -ContentType 'application/json' -Body $body",
+    "$result | ConvertTo-Json -Depth 8",
+  ].join("; ");
+
+  const { stdout } = await execFileAsync(
+    TDX_PRLCTL_PATH,
+    ["exec", TDX_VM_NAME, "--current-user", "powershell", "-NoProfile", "-Command", script],
+    {
+      timeout: Number.isFinite(TDX_OPEN_TIMEOUT_MS) ? TDX_OPEN_TIMEOUT_MS : 5000,
+      maxBuffer: 1024 * 1024,
+    },
+  );
+  const result = parseLastJsonObject(stdout);
+  const errorId = String(result?.result?.ErrorId ?? result?.ErrorId ?? "");
+  if (errorId && errorId !== "0") {
+    throw new Error(`通达信返回错误：${errorId}`);
+  }
+  return result;
+}
+
+function execFileAsync(file, args, options) {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, options, (error, stdout, stderr) => {
+      if (error) {
+        const detail = String(stderr || stdout || error.message || "").trim();
+        reject(new Error(detail || error.message));
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+function parseLastJsonObject(output) {
+  const text = String(output || "").trim();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start < 0 || end <= start) return {};
+    try {
+      return JSON.parse(text.slice(start, end + 1));
+    } catch {
+      return {};
+    }
+  }
 }
 
 function latestDatedRows(rows, getDateKey) {

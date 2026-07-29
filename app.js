@@ -762,6 +762,7 @@ const state = {
   bondRefreshTimer: 0,
 };
 let serverPersistTimer = 0;
+let temporaryStatusTimer = 0;
 
 const grid = document.querySelector("#boardGrid");
 const statusNode = document.querySelector("#marketStatus");
@@ -2157,6 +2158,25 @@ function quoteUrl(secid) {
   return `https://quote.eastmoney.com/unify/r/${secid}`;
 }
 
+async function openQuoteInTdx(stock) {
+  flashStatus(`正在通达信打开 ${stock.name}...`);
+  try {
+    await postJson("/api/open-tdx", { secid: stock.secid, code: codeForEditor(stock.secid) }, 7000);
+    flashStatus(`已发送到通达信：${stock.name}`);
+  } catch (error) {
+    console.warn("Tdx open failed, falling back to Eastmoney.", error);
+    flashStatus(`通达信打开失败，已打开东方财富：${stock.name}`, 3500);
+    const opened = window.open(quoteUrl(stock.secid), "_blank", "noreferrer");
+    if (!opened) window.location.href = quoteUrl(stock.secid);
+  }
+}
+
+function flashStatus(message, timeoutMs = 2200) {
+  window.clearTimeout(temporaryStatusTimer);
+  statusNode.textContent = message;
+  temporaryStatusTimer = window.setTimeout(updateStatus, timeoutMs);
+}
+
 function renderIndices() {
   globalIndicesNode.replaceChildren();
 
@@ -2804,7 +2824,13 @@ function renderStockRow(stock, sectorName) {
     true,
   )}`;
   row.addEventListener("click", (event) => {
-    if (state.editMode) event.preventDefault();
+    if (state.editMode) {
+      event.preventDefault();
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    openQuoteInTdx(stock);
   });
   row.addEventListener("dragstart", (event) => {
     if (!state.editMode) return;
