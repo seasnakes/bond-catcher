@@ -253,7 +253,7 @@ h1 small {
 .chart-wrap {
   position: relative;
   width: 100%;
-  height: clamp(560px, 72vh, 850px);
+  height: clamp(620px, 76vh, 900px);
   overflow: hidden;
   border: 1px solid #e0e5db;
   background: #fff;
@@ -381,7 +381,7 @@ h1 small {
   }
 
   .chart-wrap {
-    height: 650px;
+    height: 720px;
   }
 
   .chart-legend {

@@ -70,8 +70,8 @@ const nodes = {
 const panelDefinitions = [
   { key: "price", label: "价格", weight: 0.36 },
   { key: "amount", label: "分钟成交额", weight: 0.13 },
-  { key: "dark", label: "暗盘资金", weight: 0.16 },
   { key: "macd", label: "MACD", weight: 0.17 },
+  { key: "dark", label: "暗盘资金", weight: 0.16 },
   { key: "visible", label: "明盘资金", weight: 0.18 },
 ];
 
@@ -249,7 +249,7 @@ function chartGeometry(canvas) {
   const right = width < 700 ? 48 : 72;
   const top = 10;
   const bottom = 28;
-  const gap = 7;
+  const gap = 12;
   const usable = height - top - bottom - gap * (panelDefinitions.length - 1);
   let cursor = top;
   const panels = panelDefinitions.map((definition) => {
@@ -325,7 +325,7 @@ function drawChart() {
 }
 
 function drawPanels(context, geometry, rows) {
-  const [pricePanel, amountPanel, darkPanel, macdPanel, visiblePanel] = geometry.panels;
+  const [pricePanel, amountPanel, macdPanel, darkPanel, visiblePanel] = geometry.panels;
   for (const panel of geometry.panels) {
     context.fillStyle = "#ffffff";
     context.fillRect(panel.x, panel.y, panel.width, panel.height);
@@ -599,7 +599,7 @@ function drawAxes(context, geometry, rows, domains) {
     context.fillStyle = "#586355";
     context.textAlign = "left";
     context.fillText(panel.label, panel.x + 6, panel.y + 10);
-    for (const ratio of [0, 0.5, 1]) {
+    for (const ratio of [0.15, 0.5, 0.85]) {
       const value = range[1] - (range[1] - range[0]) * ratio;
       const y = panel.y + panel.height * ratio;
       context.textAlign = "right";
