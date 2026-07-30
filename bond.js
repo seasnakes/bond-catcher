@@ -566,6 +566,17 @@ function dailyChartGeometry(canvas) {
   };
 }
 
+function dailySlotCount(rows) {
+  const selectedRange = Number(nodes.dailyRangeSelect.value) || 120;
+  const requestedCount = Number(state.dailyPayload?.requested_count) || selectedRange;
+  return Math.max(rows.length, selectedRange, requestedCount);
+}
+
+function dailyXFor(index, panel, slotCount) {
+  const slotWidth = panel.width / Math.max(1, slotCount);
+  return panel.x + slotWidth * (index + 0.5);
+}
+
 function movingAverage(rows, period) {
   let sum = 0;
   return rows.map((row, index) => {
@@ -589,6 +600,8 @@ function drawDailyChart() {
   const context = setupCanvas();
   const geometry = dailyChartGeometry(nodes.canvas);
   const [pricePanel, amountPanel] = geometry.panels;
+  const slotCount = dailySlotCount(chartRows);
+  const slotWidth = pricePanel.width / slotCount;
   context.clearRect(0, 0, geometry.width, geometry.height);
   context.font = '11px Arial, "Microsoft YaHei", sans-serif';
   context.lineJoin = "round";
@@ -617,9 +630,9 @@ function drawDailyChart() {
     includeZero: true,
     padding: 0.03,
   });
-  const candleWidth = Math.max(1.5, Math.min(9, (pricePanel.width / chartRows.length) * 0.62));
+  const candleWidth = Math.max(1.5, Math.min(9, slotWidth * 0.62));
   chartRows.forEach((row, index) => {
-    const x = xFor(index, pricePanel, chartRows.length);
+    const x = dailyXFor(index, pricePanel, slotCount);
     const openY = yFor(row.open, pricePanel, priceDomain);
     const closeY = yFor(row.close, pricePanel, priceDomain);
     const highY = yFor(row.high, pricePanel, priceDomain);
@@ -667,17 +680,23 @@ function drawDailyChart() {
       context.fillText(formatAxis(value, key), panel.x - 6, y);
     }
   }
-  const labels = [0, Math.floor((chartRows.length - 1) / 4), Math.floor((chartRows.length - 1) / 2), Math.floor(((chartRows.length - 1) * 3) / 4), chartRows.length - 1];
+  const labels = [...new Set([
+    0,
+    Math.floor((chartRows.length - 1) / 4),
+    Math.floor((chartRows.length - 1) / 2),
+    Math.floor(((chartRows.length - 1) * 3) / 4),
+    chartRows.length - 1,
+  ])];
   context.textBaseline = "top";
   labels.forEach((index, labelIndex) => {
-    const x = xFor(index, amountPanel, chartRows.length);
+    const x = dailyXFor(index, amountPanel, slotCount);
     context.textAlign = labelIndex === 0 ? "left" : labelIndex === labels.length - 1 ? "right" : "center";
     context.fillText(displayDailyDate(chartRows[index]?.date).slice(5), x, amountPanel.y + amountPanel.height + 7);
   });
 
   if (state.selectedIndex >= 0) {
     const index = Math.max(0, Math.min(chartRows.length - 1, state.selectedIndex));
-    const x = xFor(index, pricePanel, chartRows.length);
+    const x = dailyXFor(index, pricePanel, slotCount);
     context.save();
     context.strokeStyle = "rgba(48,61,51,.48)";
     context.setLineDash([3, 3]);
@@ -1066,13 +1085,26 @@ function selectedIndexFromPointer(event) {
   const panel = geometry.panels[0];
   const rect = nodes.canvas.getBoundingClientRect();
   const x = event.clientX - rect.left;
+  if (state.view === "daily") {
+    const slotCount = dailySlotCount(rows);
+    const slotWidth = panel.width / slotCount;
+    const index = Math.floor((x - panel.x) / slotWidth);
+    return index >= 0 && index < rows.length ? index : -1;
+  }
   const ratio = Math.max(0, Math.min(1, (x - panel.x) / panel.width));
   return Math.round(ratio * (rows.length - 1));
 }
 
 function showTooltip(event) {
   const index = selectedIndexFromPointer(event);
-  if (index < 0) return;
+  if (index < 0) {
+    if (!nodes.tooltip.hidden || state.selectedIndex >= 0) {
+      nodes.tooltip.hidden = true;
+      state.selectedIndex = -1;
+      drawChart();
+    }
+    return;
+  }
   state.selectedIndex = index;
   if (state.view === "daily") {
     showDailyTooltip(event, index);
