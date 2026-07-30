@@ -2198,7 +2198,10 @@ function updateSignalMonitorStatus(payload = null, error = null) {
   }
   const time = String(payload.generated_at || "").slice(11, 19);
   const dateNote = payload.data_is_stale ? ` · 数据日 ${payload.trading_date}` : "";
-  const sourceNote = `固定监控 ${state.signalCodeCount} 只`;
+  const activeCount = Number(payload.active_monitor_code_count || 0);
+  const sourceNote = activeCount && activeCount !== state.signalCodeCount
+    ? `名单 ${state.signalCodeCount} 只 · QMT有效 ${activeCount} 只`
+    : `固定监控 ${state.signalCodeCount} 只`;
   signalMonitorStatus.textContent = payload.monitor_alive
     ? `实时 · ${time} · ${sourceNote} · 展示 ${state.signalEvents.length} 条${dateNote}`
     : `监控已停止 · ${sourceNote} · 展示 ${state.signalEvents.length} 条${dateNote}`;

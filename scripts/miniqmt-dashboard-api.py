@@ -496,6 +496,14 @@ def events_payload(
         events.reverse()
 
     health = api_health()
+    active_monitor_code_count = int(
+        (
+            health.get("status", {})
+            .get("indicator_warmup", {})
+            .get("requested_codes")
+        )
+        or 0
+    )
     latest_id = max((event["id"] for event in events), default=safe_after_id)
     return clean_json(
         {
@@ -507,6 +515,7 @@ def events_payload(
             "monitor_alive": bool(health["monitor_alive"]),
             "data_is_stale": trading_date != health["calendar_date"],
             "monitored_code_count": len(monitored_codes),
+            "active_monitor_code_count": active_monitor_code_count,
             "latest_id": latest_id,
             "events": events,
         }
