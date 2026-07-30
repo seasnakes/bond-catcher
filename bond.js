@@ -162,7 +162,10 @@ async function loadBond(options = {}) {
   try {
     const query = new URLSearchParams({ code: requestedCode });
     if (date) query.set("date", date);
-    const payload = await fetchJson(`/api/miniqmt/bond?${query}`, 12000);
+    const payload = await fetchJson(
+      `/api/miniqmt/bond?${query}`,
+      date ? 120000 : 12000,
+    );
     if (requestId !== state.requestId) return;
     state.payload = payload;
     state.selectedIndex = Math.max(0, payload.rows.length - 1);
@@ -198,6 +201,7 @@ function setView(view, options = {}) {
     window.history.replaceState(window.history.state, "", url);
   }
 
+  if (options.load === false) return;
   if (state.view === "daily") {
     if (state.dailyPayload && !options.force) renderDailyPayload(state.dailyPayload);
     else void loadDaily();
@@ -207,6 +211,25 @@ function setView(view, options = {}) {
     scheduleRefresh();
   } else {
     void loadBond();
+  }
+}
+
+async function openDailyIntraday(index) {
+  const row = state.dailyPayload?.rows?.[index];
+  const tradingDate = String(row?.date || "");
+  if (!/^\d{8}$/.test(tradingDate)) return;
+  state.manualDate = true;
+  const url = new URL(window.location.href);
+  url.searchParams.delete("view");
+  url.searchParams.set("date", tradingDate);
+  window.history.replaceState(window.history.state, "", url);
+  setView("intraday", { updateUrl: false, load: false });
+  setStatus(`正在读取 ${displayDailyDate(tradingDate)} 分时`);
+  nodes.refreshButton.disabled = true;
+  try {
+    await loadBond({ date: tradingDate });
+  } finally {
+    nodes.refreshButton.disabled = false;
   }
 }
 
@@ -300,7 +323,7 @@ function renderPayload(payload) {
   renderDataAlert(payload);
   renderEvents(payload.events);
   nodes.dataFootnote.textContent = payload.full_session
-    ? "当前为完整交易日数据；黄色均价线按分钟成交额估算，普通行情不等同于Level-2逐笔。"
+    ? `${payload.source || "MiniQMT"} · 当前为完整交易日数据；黄色均价线按分钟成交额估算，普通行情不等同于Level-2逐笔。`
     : payload.complete_session
       ? "当前分钟数据可用于指标分析，但尚未达到241根完整回放；黄色均价线按分钟成交额估算。"
       : `当前为盘中数据；页面每${payload.realtime?.refresh_interval_seconds || 2}秒读取一次，分钟指标在来源分钟形成后稳定，黄色均价线按分钟成交额估算。`;
@@ -1110,6 +1133,13 @@ function formatMinuteReturn(price) {
 }
 
 nodes.canvas.addEventListener("pointermove", showTooltip);
+nodes.canvas.addEventListener("dblclick", (event) => {
+  if (state.view !== "daily") return;
+  const index = selectedIndexFromPointer(event);
+  if (index < 0) return;
+  event.preventDefault();
+  void openDailyIntraday(index);
+});
 nodes.canvas.addEventListener("pointerleave", () => {
   nodes.tooltip.hidden = true;
   state.selectedIndex = -1;

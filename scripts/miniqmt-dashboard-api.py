@@ -67,6 +67,8 @@ FOCUS_EVENT_TYPES = {
 }
 DAILY_CACHE_TTL_SECONDS = 300
 DAILY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+INTRADAY_CACHE_TTL_SECONDS = 300
+INTRADAY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 def load_monitor_module() -> Any:
@@ -436,34 +438,147 @@ def previous_close_for_date(
     return None, None
 
 
+def historical_minute_rows(
+    stored_code: str,
+    trading_date: str,
+) -> tuple[list[dict[str, Any]], float | None, str | None, str]:
+    if not re.fullmatch(r"\d{8}", trading_date):
+        raise ValueError("历史分时日期必须为YYYYMMDD")
+    cache_key = f"{stored_code}:{trading_date}"
+    cached = INTRADAY_CACHE.get(cache_key)
+    if cached and time.monotonic() - cached[0] < INTRADAY_CACHE_TTL_SECONDS:
+        cached_payload = cached[1]
+        return (
+            list(cached_payload["rows"]),
+            finite_or_none(cached_payload.get("previous_close")),
+            cached_payload.get("previous_close_date"),
+            "MiniQMT 1m · 缓存",
+        )
+
+    bridge = MONITOR.BridgeClient(
+        f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}",
+        timeout=30.0,
+    )
+    download_error = ""
+    try:
+        bridge.download_minute_bars([stored_code], trading_date, timeout=90.0)
+    except Exception as error:
+        download_error = f"{type(error).__name__}: {error}"
+    payload = bridge.get(
+        "/api/market/market_data_ex",
+        {
+            "stocks": stored_code,
+            "period": "1m",
+            "start_time": f"{trading_date}093000",
+            "end_time": f"{trading_date}150000",
+            "count": "-1",
+            "dividend_type": "none",
+            "fill_data": "false",
+        },
+        timeout=60.0,
+    )
+    raw_rows = list((payload.get("data") or {}).get(stored_code) or [])
+    rows: list[dict[str, Any]] = []
+    previous_close = None
+    for raw in raw_rows:
+        compact_time = str(raw.get("index") or "")
+        if not compact_time.startswith(trading_date):
+            continue
+        open_price = finite_or_none(raw.get("open"))
+        high = finite_or_none(raw.get("high"))
+        low = finite_or_none(raw.get("low"))
+        close = finite_or_none(raw.get("close"))
+        if not all(
+            value is not None and value > 0
+            for value in (open_price, high, low, close)
+        ):
+            continue
+        if previous_close is None:
+            previous_close = finite_or_none(raw.get("preClose"))
+        try:
+            minute_time = datetime.strptime(
+                compact_time[:14],
+                "%Y%m%d%H%M%S",
+            ).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+        rows.append(
+            {
+                "minute_ms": int(raw.get("time") or 0),
+                "minute_time": minute_time,
+                "open": open_price,
+                "high": high,
+                "low": low,
+                "close": close,
+                "amount": finite_or_none(raw.get("amount")) or 0,
+            }
+        )
+    rows.sort(key=lambda row: (row["minute_ms"], row["minute_time"]))
+    if not rows:
+        detail = f"；下载错误：{download_error}" if download_error else ""
+        raise LookupError(f"{stored_code} 在 {trading_date} 没有分钟数据{detail}")
+
+    cached_payload = {
+        "rows": rows,
+        "previous_close": previous_close,
+        "previous_close_date": None,
+    }
+    INTRADAY_CACHE[cache_key] = (time.monotonic(), cached_payload)
+    return rows, previous_close, None, "MiniQMT 1m"
+
+
 def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
     code = normalize_code(code_input)
     stored_code = monitor_code(code)
-    database = database_for_date(date_input)
-    trading_date = database.stem
-    with connect_read_only(database) as connection:
-        minute_rows = connection.execute(
-            """
-            SELECT minute_ms,minute_time,open,high,low,close,amount
-            FROM minute_observations
-            WHERE trading_date=? AND code=?
-            ORDER BY minute_ms
-            """,
-            (trading_date, stored_code),
-        ).fetchall()
-        event_rows = connection.execute(
-            """
-            SELECT id,event_time_ms,event_time,event_type,direction,price,tier,
-                   speed_1m,speed_3m,speed_5m,amount_1m,confidence,score,
-                   details_json
-            FROM qmt_events
-            WHERE trading_date=? AND code=?
-            ORDER BY event_time_ms,id
-            """,
-            (trading_date, stored_code),
-        ).fetchall()
-        name = resolve_name(connection, trading_date, stored_code)
+    if date_input and not re.fullmatch(r"\d{8}", date_input):
+        raise ValueError("历史分时日期必须为YYYYMMDD")
+    database = None
+    trading_date = date_input
+    minute_rows: list[Any] = []
+    event_rows: list[Any] = []
+    name = ""
+    minute_source = "本地监控数据库"
+    previous_close = None
+    previous_close_date = None
 
+    try:
+        database = database_for_date(date_input)
+        trading_date = database.stem
+        with connect_read_only(database) as connection:
+            minute_rows = connection.execute(
+                """
+                SELECT minute_ms,minute_time,open,high,low,close,amount
+                FROM minute_observations
+                WHERE trading_date=? AND code=?
+                ORDER BY minute_ms
+                """,
+                (trading_date, stored_code),
+            ).fetchall()
+            event_rows = connection.execute(
+                """
+                SELECT id,event_time_ms,event_time,event_type,direction,price,tier,
+                       speed_1m,speed_3m,speed_5m,amount_1m,confidence,score,
+                       details_json
+                FROM qmt_events
+                WHERE trading_date=? AND code=?
+                ORDER BY event_time_ms,id
+                """,
+                (trading_date, stored_code),
+            ).fetchall()
+            name = resolve_name(connection, trading_date, stored_code)
+    except FileNotFoundError:
+        if not date_input:
+            raise
+
+    if not minute_rows and date_input:
+        (
+            minute_rows,
+            previous_close,
+            previous_close_date,
+            minute_source,
+        ) = historical_minute_rows(stored_code, date_input)
+        trading_date = date_input
+        event_rows = []
     if not minute_rows:
         raise LookupError(f"{code} 在 {trading_date} 没有分钟数据")
 
@@ -553,19 +668,25 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
 
     first = rows[0]
     latest = rows[-1]
-    previous_close, previous_close_date = previous_close_for_date(
-        trading_date,
-        stored_code,
-    )
+    if previous_close is None:
+        previous_close, previous_close_date = previous_close_for_date(
+            trading_date,
+            stored_code,
+        )
     daily_return = (
         (latest["close"] / previous_close - 1) * 100
         if previous_close and previous_close > 0
         else None
     )
     health = api_health()
-    database_updated_at = datetime.fromtimestamp(
-        database.stat().st_mtime
-    ).isoformat(timespec="seconds")
+    database_updated_at = (
+        datetime.fromtimestamp(database.stat().st_mtime).isoformat(timespec="seconds")
+        if database is not None
+        else datetime.now().isoformat(timespec="seconds")
+    )
+    available_dates = [path.stem for path in available_databases()]
+    if trading_date not in available_dates:
+        available_dates.insert(0, trading_date)
     return clean_json(
         {
             "ok": True,
@@ -576,8 +697,9 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
             "code": code,
             "monitor_code": stored_code,
             "name": name,
+            "source": minute_source,
             "trading_date": trading_date,
-            "available_dates": [path.stem for path in available_databases()],
+            "available_dates": available_dates,
             "bar_count": len(rows),
             "complete_session": len(rows) >= 240,
             "full_session": len(rows) >= 241,
