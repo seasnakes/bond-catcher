@@ -378,7 +378,7 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
                 "is_today": trading_date == health["calendar_date"],
                 "data_is_stale": trading_date != health["calendar_date"],
                 "auto_follow_latest": not bool(date_input),
-                "refresh_interval_seconds": 5,
+                "refresh_interval_seconds": 2,
             },
             "rows": rows,
             "events": events,

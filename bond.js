@@ -169,7 +169,7 @@ function renderPayload(payload) {
     ? "当前为完整交易日数据；黄色均价线按分钟成交额估算，普通行情不等同于Level-2逐笔。"
     : payload.complete_session
       ? "当前分钟数据可用于指标分析，但尚未达到241根完整回放；黄色均价线按分钟成交额估算。"
-      : "当前为盘中数据；页面每5秒读取一次，分钟指标在来源分钟形成后稳定，黄色均价线按分钟成交额估算。";
+      : `当前为盘中数据；页面每${payload.realtime?.refresh_interval_seconds || 2}秒读取一次，分钟指标在来源分钟形成后稳定，黄色均价线按分钟成交额估算。`;
   drawChart();
 }
 
@@ -178,7 +178,7 @@ function statusText(payload) {
     return "等待今日数据 · 自动重试";
   }
   if (payload.realtime?.monitor_alive && payload.realtime?.is_latest_trading_date) {
-    return `实时刷新 · ${payload.realtime.refresh_interval_seconds || 5}秒 · 只读`;
+    return `实时刷新 · ${payload.realtime.refresh_interval_seconds || 2}秒 · 只读`;
   }
   if (payload.full_session) return "完整241分钟 · 只读";
   if (payload.complete_session) return "可用交易日 · 只读";
@@ -285,7 +285,7 @@ function scheduleRefresh() {
   const date = state.manualDate ? state.payload.trading_date : "";
   state.refreshTimer = window.setTimeout(
     () => loadBond({ date }),
-    (realtime?.refresh_interval_seconds || 5) * 1000,
+    (realtime?.refresh_interval_seconds || 2) * 1000,
   );
 }
 
