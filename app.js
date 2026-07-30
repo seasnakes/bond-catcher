@@ -3,6 +3,8 @@ const EASTMONEY_FIELDS = "f1,f2,f3,f4,f6,f12,f13,f14,f152";
 const UPDATE_INTERVAL_MS = 15000;
 const AUCTION_UPDATE_INTERVAL_MS = 3000;
 const BOND_UPDATE_INTERVAL_MS = 5000;
+const SIGNAL_UPDATE_INTERVAL_MS = 2000;
+const SIGNAL_EVENT_LIMIT = 80;
 const STOCK_LIST_STORAGE_KEY = "finance-board-stock-list-v1";
 const STOCK_LIST_VERSION_STORAGE_KEY = "finance-board-stock-list-version-v1";
 const STACK_GROUP_STORAGE_KEY = "finance-board-stack-groups-v1";
@@ -12,6 +14,45 @@ const SPARKLINE_BATCH_SIZE = 24;
 const SPARKLINE_REFRESH_MS = 2 * 60 * 1000;
 const ADD_SEARCH_DEBOUNCE_MS = 220;
 const ACTIVE_DEFAULT_SECTOR_VERSION = "screenshot-2026-05-18-v1";
+const SIGNAL_EVENT_LABELS = {
+  accelerate_up: "涨速加速",
+  accelerate_down: "跌速加速",
+  urgent_up: "急速拉升",
+  urgent_down: "急速下跌",
+  sudden_rise: "快速拉升",
+  sudden_fall: "快速下跌",
+  suspected_large_buy: "疑似连续大单买入",
+  suspected_large_sell: "疑似连续大单卖出",
+  visible_bid_large_order: "五档大买单",
+  visible_ask_large_order: "五档大卖单",
+  visible_book_support: "五档买盘支撑",
+  visible_book_pressure: "五档卖盘压制",
+  macd_underwater_golden_cross: "MACD水下金叉",
+  underwater_golden_cross_purple_confirmed: "水下金叉·紫线确认",
+  purple_line_pullback_reclaim: "回调紫线后收回",
+  dark_funds_inflow_start: "暗盘资金转入",
+  dark_funds_outflow_start: "暗盘资金转出",
+  dark_funds_inflow_accelerating: "暗盘流入增强",
+  dark_funds_outflow_accelerating: "暗盘流出增强",
+  visible_funds_inflow_start: "明盘资金转入",
+  visible_funds_strong_inflow: "明盘资金强流入",
+  visible_funds_inflow_weakening: "明盘流入减弱",
+  visible_funds_outflow: "明盘资金流出",
+  visible_funds_strong_exit: "明盘资金强流出",
+  high_pullback: "高位回落",
+  low_rebound: "低位反弹",
+  interval_volume: "区间放量",
+  strong_interval_volume: "区间强放量",
+  new_high_acceleration: "创新高加速",
+  new_low_acceleration: "创新低加速",
+  platform_dive: "平台跳水",
+  pole_jump: "旱地拔葱",
+  near_up_limit: "接近涨停",
+  at_up_limit: "触及涨停",
+  open_high: "高开",
+  open_low: "低开",
+  volume_surge: "分钟放量",
+};
 
 // Kept as a broad starter-pool reference; the active default is rebuilt from the screenshot text below.
 const LEGACY_DEFAULT_SECTORS = [
@@ -760,6 +801,12 @@ const state = {
   nextRefreshAt: Date.now() + UPDATE_INTERVAL_MS,
   mainRefreshTimer: 0,
   bondRefreshTimer: 0,
+  signalEvents: [],
+  signalLatestId: 0,
+  signalScope: "focus",
+  signalPaused: false,
+  signalLoading: false,
+  signalTimer: 0,
 };
 let serverPersistTimer = 0;
 let temporaryStatusTimer = 0;
@@ -772,6 +819,11 @@ const sortSelect = document.querySelector("#sortSelect");
 const rangeSelect = document.querySelector("#rangeSelect");
 const sparkToggle = document.querySelector("#sparkToggle");
 const refreshButton = document.querySelector("#refreshButton");
+const signalMonitor = document.querySelector(".signal-monitor");
+const signalMonitorStatus = document.querySelector("#signalMonitorStatus");
+const signalScope = document.querySelector("#signalScope");
+const signalPauseButton = document.querySelector("#signalPauseButton");
+const signalFeed = document.querySelector("#signalFeed");
 const editListButton = document.querySelector("#editListButton");
 const addSectorButton = document.querySelector("#addSectorButton");
 const addStackButton = document.querySelector("#addStackButton");
@@ -2018,6 +2070,166 @@ function scheduleBondRefresh() {
   }, delay);
 }
 
+function scheduleSignalRefresh(delayMs = null) {
+  window.clearTimeout(state.signalTimer);
+  const session = marketSession();
+  const delay = delayMs ?? (session.canAutoRefresh ? SIGNAL_UPDATE_INTERVAL_MS : 30000);
+  state.signalTimer = window.setTimeout(async () => {
+    if (!document.hidden && !state.signalPaused) {
+      await refreshSignalFeed();
+    }
+    scheduleSignalRefresh();
+  }, Math.max(500, delay));
+}
+
+function signalMetric(event) {
+  const speed = Number(event.speed_1m);
+  if (Number.isFinite(speed)) {
+    const percent = speed * 100;
+    return `1分钟 ${percent > 0 ? "+" : ""}${percent.toFixed(2)}%`;
+  }
+  const amount = Number(event.amount_1m);
+  if (!Number.isFinite(amount)) return `评分 ${Number(event.score || 0).toFixed(1)}`;
+  if (Math.abs(amount) >= 1e8) return `${(amount / 1e8).toFixed(2)}亿`;
+  if (Math.abs(amount) >= 1e4) return `${(amount / 1e4).toFixed(1)}万`;
+  return `${amount.toFixed(0)}元`;
+}
+
+function signalTierLabel(tier) {
+  return {
+    high: "高活跃",
+    mid: "中活跃",
+    low: "低活跃",
+  }[tier] || tier || "-";
+}
+
+function renderSignalFeed(newIds = new Set()) {
+  signalFeed.replaceChildren();
+  if (state.signalEvents.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "signal-empty";
+    empty.textContent = state.signalLoading
+      ? "正在读取MiniQMT盘中信号…"
+      : "当前筛选范围内暂无信号";
+    signalFeed.append(empty);
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  for (const event of state.signalEvents) {
+    const query = new URLSearchParams({
+      code: event.code,
+      name: event.name || "可转债",
+    });
+    const row = document.createElement("a");
+    row.className = `signal-row ${
+      event.direction === "up" ? "is-up" : event.direction === "down" ? "is-down" : ""
+    }${newIds.has(event.id) ? " is-new" : ""}`;
+    row.href = `./bond.html?${query}`;
+    row.title = [
+      SIGNAL_EVENT_LABELS[event.event_type] || event.event_type,
+      event.confidence,
+      event.source_bar_time ? `来源分钟 ${event.source_bar_time}` : "",
+    ].filter(Boolean).join(" · ");
+
+    const time = document.createElement("span");
+    time.className = "signal-time";
+    time.textContent = String(event.event_time || "").slice(11, 19);
+
+    const bond = document.createElement("span");
+    bond.className = "signal-bond";
+    bond.textContent = event.name || event.code;
+    const code = document.createElement("small");
+    code.className = "signal-code";
+    code.textContent = event.code;
+    bond.append(code);
+
+    const type = document.createElement("span");
+    type.className = "signal-type";
+    type.textContent = SIGNAL_EVENT_LABELS[event.event_type] || event.event_type;
+
+    const price = document.createElement("span");
+    price.className = "signal-price";
+    price.textContent = Number(event.price).toFixed(3);
+
+    const metric = document.createElement("span");
+    metric.className = "signal-metric";
+    metric.textContent = signalMetric(event);
+
+    const tier = document.createElement("span");
+    tier.className = "signal-tier";
+    tier.textContent = signalTierLabel(event.tier);
+    row.append(time, bond, type, price, metric, tier);
+    fragment.append(row);
+  }
+  signalFeed.append(fragment);
+}
+
+function updateSignalMonitorStatus(payload = null, error = null) {
+  signalMonitor.classList.toggle("is-live", Boolean(payload?.monitor_alive) && !state.signalPaused);
+  signalMonitor.classList.toggle("is-error", Boolean(error));
+  if (state.signalPaused) {
+    signalMonitorStatus.textContent = `已暂停 · 保留 ${state.signalEvents.length} 条`;
+    return;
+  }
+  if (error) {
+    signalMonitorStatus.textContent = "连接失败 · 将自动重试";
+    return;
+  }
+  if (!payload) {
+    signalMonitorStatus.textContent = "正在连接";
+    return;
+  }
+  const time = String(payload.generated_at || "").slice(11, 19);
+  const dateNote = payload.data_is_stale ? ` · 数据日 ${payload.trading_date}` : "";
+  signalMonitorStatus.textContent = payload.monitor_alive
+    ? `实时 · ${time} · 展示 ${state.signalEvents.length} 条${dateNote}`
+    : `监控已停止 · 展示 ${state.signalEvents.length} 条${dateNote}`;
+}
+
+async function refreshSignalFeed(options = {}) {
+  if (state.signalLoading) return;
+  if (options.reset) {
+    state.signalLatestId = 0;
+    state.signalEvents = [];
+    renderSignalFeed();
+  }
+  state.signalLoading = true;
+  try {
+    const query = new URLSearchParams({
+      scope: state.signalScope,
+      limit: String(SIGNAL_EVENT_LIMIT),
+    });
+    if (state.signalLatestId > 0) {
+      query.set("after_id", String(state.signalLatestId));
+    }
+    const payload = await fetchJson(`/api/miniqmt/events?${query}`, 8000);
+    const incoming = Array.isArray(payload.events) ? payload.events : [];
+    const existingIds = new Set(state.signalEvents.map((event) => event.id));
+    const additions = incoming.filter((event) => !existingIds.has(event.id));
+    const newIds = new Set(additions.map((event) => event.id));
+    if (state.signalLatestId === 0) {
+      state.signalEvents = incoming.slice(0, SIGNAL_EVENT_LIMIT);
+    } else if (additions.length > 0) {
+      state.signalEvents = [...additions, ...state.signalEvents]
+        .sort((left, right) => right.id - left.id)
+        .slice(0, SIGNAL_EVENT_LIMIT);
+    }
+    state.signalLatestId = Math.max(
+      Number(payload.latest_id || 0),
+      state.signalLatestId,
+      ...state.signalEvents.map((event) => Number(event.id || 0)),
+    );
+    renderSignalFeed(newIds);
+    updateSignalMonitorStatus(payload);
+  } catch (error) {
+    console.warn("MiniQMT signal monitor failed.", error);
+    updateSignalMonitorStatus(null, error);
+  } finally {
+    state.signalLoading = false;
+  }
+}
+
 function createDemoQuotes(stocks) {
   const minuteSeed = Math.floor(Date.now() / 60000);
   const quoteMap = new Map();
@@ -3124,16 +3336,21 @@ async function boot() {
   await refreshIndices({ force: true });
   scheduleMainRefresh();
   scheduleBondRefresh();
+  signalScope.value = state.signalScope;
+  await refreshSignalFeed({ reset: true });
+  scheduleSignalRefresh();
 
   window.setInterval(updateStatus, 1000);
 
   document.addEventListener("visibilitychange", () => {
     scheduleMainRefresh();
     scheduleBondRefresh();
+    scheduleSignalRefresh();
     if (!document.hidden && marketSession().canAutoRefresh && Date.now() > state.nextRefreshAt) {
       refreshQuotes();
       refreshIndices();
       refreshBondQuotes({ force: true });
+      refreshSignalFeed();
     }
   });
 }
@@ -3164,8 +3381,29 @@ refreshButton.addEventListener("click", () => {
   refreshQuotes({ force: true });
   refreshIndices({ force: true });
   refreshBondQuotes({ force: true });
+  refreshSignalFeed();
   scheduleMainRefresh();
   scheduleBondRefresh();
+  scheduleSignalRefresh();
+});
+
+signalScope.addEventListener("change", async (event) => {
+  state.signalScope = event.target.value === "all" ? "all" : "focus";
+  await refreshSignalFeed({ reset: true });
+  scheduleSignalRefresh();
+});
+
+signalPauseButton.addEventListener("click", () => {
+  state.signalPaused = !state.signalPaused;
+  signalPauseButton.classList.toggle("is-paused", state.signalPaused);
+  signalPauseButton.textContent = state.signalPaused ? "继续滚动" : "暂停滚动";
+  updateSignalMonitorStatus();
+  if (state.signalPaused) {
+    window.clearTimeout(state.signalTimer);
+  } else {
+    refreshSignalFeed();
+    scheduleSignalRefresh(SIGNAL_UPDATE_INTERVAL_MS);
+  }
 });
 
 editListButton.addEventListener("click", () => {

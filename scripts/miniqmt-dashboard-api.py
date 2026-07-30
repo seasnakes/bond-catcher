@@ -32,6 +32,35 @@ DATA_ROOT = RUNTIME_ROOT / "data"
 STATUS_PATH = RUNTIME_ROOT / "status.json"
 SERVICE_PATH = RUNTIME_ROOT / "service.json"
 CODE_PATTERN = re.compile(r"^(110|111|113|118|123|127|128)\d{3}$")
+FOCUS_EVENT_TYPES = {
+    "accelerate_up",
+    "accelerate_down",
+    "urgent_up",
+    "urgent_down",
+    "sudden_rise",
+    "sudden_fall",
+    "suspected_large_buy",
+    "suspected_large_sell",
+    "visible_bid_large_order",
+    "visible_ask_large_order",
+    "macd_underwater_golden_cross",
+    "underwater_golden_cross_purple_confirmed",
+    "purple_line_pullback_reclaim",
+    "dark_funds_inflow_start",
+    "dark_funds_outflow_start",
+    "visible_funds_inflow_start",
+    "visible_funds_strong_inflow",
+    "visible_funds_strong_exit",
+    "strong_interval_volume",
+    "new_high_acceleration",
+    "new_low_acceleration",
+    "platform_dive",
+    "pole_jump",
+    "near_up_limit",
+    "at_up_limit",
+    "high_pullback",
+    "low_rebound",
+}
 
 
 def load_monitor_module() -> Any:
@@ -386,6 +415,88 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
     )
 
 
+def events_payload(
+    scope: str = "focus",
+    after_id: int = 0,
+    limit: int = 80,
+) -> dict[str, Any]:
+    normalized_scope = scope if scope in {"focus", "all"} else "focus"
+    safe_after_id = max(0, int(after_id))
+    safe_limit = min(200, max(1, int(limit)))
+    database = database_for_date()
+    trading_date = database.stem
+    conditions = ["trading_date=?"]
+    parameters: list[Any] = [trading_date]
+    if normalized_scope == "focus":
+        event_types = sorted(FOCUS_EVENT_TYPES)
+        placeholders = ",".join("?" for _ in event_types)
+        conditions.append(f"event_type IN ({placeholders})")
+        parameters.extend(event_types)
+    if safe_after_id:
+        conditions.append("id>?")
+        parameters.append(safe_after_id)
+    order = "ASC" if safe_after_id else "DESC"
+    query = f"""
+        SELECT id,event_time_ms,event_time,code,name,event_type,direction,price,
+               tier,speed_1m,speed_3m,speed_5m,amount_1m,confidence,score,
+               details_json
+        FROM qmt_events
+        WHERE {' AND '.join(conditions)}
+        ORDER BY id {order}
+        LIMIT ?
+    """
+    parameters.append(safe_limit)
+    with connect_read_only(database) as connection:
+        rows = connection.execute(query, parameters).fetchall()
+
+    events: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            details = json.loads(row["details_json"] or "{}")
+        except json.JSONDecodeError:
+            details = {}
+        events.append(
+            {
+                "id": int(row["id"]),
+                "event_time_ms": int(row["event_time_ms"]),
+                "event_time": str(row["event_time"]),
+                "code": str(row["code"]).split(".")[0],
+                "monitor_code": str(row["code"]),
+                "name": str(row["name"] or ""),
+                "event_type": str(row["event_type"]),
+                "direction": str(row["direction"]),
+                "price": float(row["price"]),
+                "tier": str(row["tier"]),
+                "speed_1m": finite_or_none(row["speed_1m"]),
+                "speed_3m": finite_or_none(row["speed_3m"]),
+                "speed_5m": finite_or_none(row["speed_5m"]),
+                "amount_1m": finite_or_none(row["amount_1m"]),
+                "confidence": str(row["confidence"]),
+                "score": float(row["score"]),
+                "priority": str(details.get("alert_priority") or "medium"),
+                "source_bar_time": details.get("source_bar_time"),
+            }
+        )
+    if safe_after_id:
+        events.reverse()
+
+    health = api_health()
+    latest_id = max((event["id"] for event in events), default=safe_after_id)
+    return clean_json(
+        {
+            "ok": True,
+            "mode": "read_only",
+            "scope": normalized_scope,
+            "trading_date": trading_date,
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "monitor_alive": bool(health["monitor_alive"]),
+            "data_is_stale": trading_date != health["calendar_date"],
+            "latest_id": latest_id,
+            "events": events,
+        }
+    )
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     server_version = "MiniQMTDashboard/1.0"
 
@@ -400,6 +511,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 payload = bond_payload(
                     (query.get("code") or [""])[0],
                     (query.get("date") or [""])[0],
+                )
+                self.send_payload(200, payload)
+                return
+            if parsed.path == "/events":
+                payload = events_payload(
+                    (query.get("scope") or ["focus"])[0],
+                    int((query.get("after_id") or ["0"])[0]),
+                    int((query.get("limit") or ["80"])[0]),
                 )
                 self.send_payload(200, payload)
                 return

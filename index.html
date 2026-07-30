@@ -57,6 +57,29 @@
         </div>
       </header>
 
+      <section class="signal-monitor" aria-label="MiniQMT主力监控精灵">
+        <header class="signal-monitor-head">
+          <div class="signal-monitor-title">
+            <span class="signal-live-dot" aria-hidden="true"></span>
+            <strong>MiniQMT 主力监控精灵</strong>
+            <span id="signalMonitorStatus">正在连接</span>
+          </div>
+          <div class="signal-monitor-controls">
+            <label>
+              <span>显示</span>
+              <select id="signalScope">
+                <option value="focus">重点信号</option>
+                <option value="all">全部信号</option>
+              </select>
+            </label>
+            <button id="signalPauseButton" type="button">暂停滚动</button>
+          </div>
+        </header>
+        <div id="signalFeed" class="signal-feed" aria-live="polite">
+          <div class="signal-empty">正在读取MiniQMT盘中信号…</div>
+        </div>
+      </section>
+
       <section id="boardGrid" class="board-grid" aria-live="polite"></section>
 
       <dialog id="editorDialog" class="editor-dialog">

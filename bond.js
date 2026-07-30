@@ -258,7 +258,10 @@ function renderEvents(events) {
     const score = document.createElement("span");
     score.className = "event-score";
     score.textContent = Number.isFinite(Number(event.speed_1m))
-      ? `1分钟 ${Number(event.speed_1m) > 0 ? "+" : ""}${formatNumber(event.speed_1m, 2)}%`
+      ? `1分钟 ${Number(event.speed_1m) > 0 ? "+" : ""}${formatNumber(
+          Number(event.speed_1m) * 100,
+          2,
+        )}%`
       : `评分 ${formatNumber(event.score, 2)}`;
     const confidence = document.createElement("span");
     confidence.className = "event-confidence";

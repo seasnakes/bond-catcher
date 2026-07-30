@@ -357,6 +357,211 @@ textarea:disabled {
   display: inline-grid;
 }
 
+.signal-monitor {
+  margin-bottom: 8px;
+  overflow: hidden;
+  border: 1px solid #c8d6ba;
+  background: #ffffff;
+  box-shadow: var(--shadow);
+}
+
+.signal-monitor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  padding: 4px 7px;
+  border-bottom: 1px solid #dbe4d1;
+  background: linear-gradient(90deg, #edf7df, #f8fbf3);
+}
+
+.signal-monitor-title,
+.signal-monitor-controls,
+.signal-monitor-controls label {
+  display: flex;
+  align-items: center;
+}
+
+.signal-monitor-title {
+  min-width: 0;
+  gap: 7px;
+}
+
+.signal-monitor-title strong {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.signal-monitor-title > span:last-child {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.signal-live-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #a5ada0;
+  box-shadow: 0 0 0 3px rgba(165, 173, 160, 0.14);
+}
+
+.signal-monitor.is-live .signal-live-dot {
+  background: #22a447;
+  box-shadow: 0 0 0 3px rgba(34, 164, 71, 0.14);
+  animation: signal-pulse 1.8s ease-in-out infinite;
+}
+
+.signal-monitor.is-error .signal-live-dot {
+  background: #d03a3a;
+}
+
+.signal-monitor-controls {
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.signal-monitor-controls label {
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.signal-monitor-controls select,
+.signal-monitor-controls button {
+  height: 24px;
+  border: 1px solid #b9c9aa;
+  background: #fbfdf8;
+  color: #263222;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.signal-monitor-controls select {
+  padding: 0 20px 0 6px;
+}
+
+.signal-monitor-controls button {
+  padding: 0 8px;
+}
+
+.signal-monitor-controls button.is-paused {
+  border-color: #d3ae65;
+  background: #fff3d8;
+  color: #805408;
+}
+
+.signal-feed {
+  height: 150px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.signal-row {
+  display: grid;
+  grid-template-columns: 66px minmax(105px, 0.8fr) minmax(170px, 1.7fr) 75px 100px 54px;
+  gap: 8px;
+  align-items: center;
+  min-height: 29px;
+  padding: 3px 8px;
+  border-bottom: 1px solid #edf0e9;
+  border-left: 3px solid #9eaa98;
+  color: #182119;
+  font-size: 11px;
+  text-decoration: none;
+}
+
+.signal-row:hover,
+.signal-row:focus-visible {
+  background: #f2f7ec;
+  outline: none;
+}
+
+.signal-row.is-up {
+  border-left-color: var(--red);
+}
+
+.signal-row.is-down {
+  border-left-color: var(--green);
+}
+
+.signal-row.is-new {
+  animation: signal-arrive 1.2s ease-out;
+}
+
+.signal-time,
+.signal-price,
+.signal-metric {
+  font-variant-numeric: tabular-nums;
+}
+
+.signal-time,
+.signal-code,
+.signal-tier {
+  color: var(--muted);
+}
+
+.signal-bond,
+.signal-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.signal-bond {
+  font-weight: 700;
+}
+
+.signal-code {
+  margin-left: 5px;
+  font-size: 10px;
+}
+
+.signal-type {
+  font-weight: 800;
+}
+
+.signal-row.is-up .signal-type,
+.signal-row.is-up .signal-price {
+  color: var(--red);
+}
+
+.signal-row.is-down .signal-type,
+.signal-row.is-down .signal-price {
+  color: var(--green);
+}
+
+.signal-tier {
+  text-align: right;
+}
+
+.signal-empty {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  padding: 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@keyframes signal-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes signal-arrive {
+  from {
+    background: #fff1a8;
+  }
+}
+
 .board-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, 134px);
@@ -1099,6 +1304,26 @@ textarea:disabled {
 
   .controls {
     justify-content: flex-start;
+  }
+
+  .signal-monitor-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .signal-monitor-controls {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .signal-row {
+    grid-template-columns: 58px minmax(92px, 0.9fr) minmax(130px, 1.4fr) 64px;
+  }
+
+  .signal-metric,
+  .signal-tier {
+    display: none;
   }
 
   .search-box {
