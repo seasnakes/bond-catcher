@@ -66,9 +66,12 @@ ETF|科创50ETF|588000
 前端只访问本地 Node 服务，由后端统一代理外部行情接口：
 
 - `/api/miniqmt/quotes`：A 股、ETF、可转债优先使用 MiniQMT `full_tick` 实时行情；单只缺失或 Bridge 暂时不可用时回退到 `/api/quotes`。
+- `/api/auction/series`：服务端在 09:15–09:25:30 每 3 秒采集当前看板沪深标的的 MiniQMT 竞价快照，保存竞价价格、累计金额与增量金额；网页首次读取历史，后续按 cursor 增量更新。
 - `/api/quotes`：新浪行情兜底，并继续负责 MiniQMT 不覆盖的港股等标的。
 - `/api/indices`：国内和外围指数报价；上证、创业板、科创综指来自新浪报价，中证转债来自腾讯报价，韩国 KOSPI / 日经 225 / 恒生科技使用对应外围指数源。
 - `/api/sparks`：今日分时缩略走势，腾讯分时 `ifzq.gtimg.cn` 优先；港股额外使用 Yahoo 港股分时兜底；东方财富分时和新浪 5 分钟 K 线作为后续兜底。
+
+集合竞价期间，卡片缩略图会切换为 MiniQMT 竞价价格线和金额柱；09:25:30 后冻结到 09:30，随后恢复普通盘中分时缩略图。竞价采样缓存写入 `runtime/auction-series.json`，不纳入 Git。
 - `/api/search`：添加标的联想，本地沪深名单优先，东方财富远程搜索兜底。
 - `/api/state`：读取和保存 `data/board-state.json`。
 

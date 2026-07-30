@@ -8,6 +8,11 @@ const PORT = Number(process.env.PORT || 5173);
 const ROOT = __dirname;
 const LOCAL_A_SHARE_LIST_PATH = path.join(ROOT, "data", "a-share-list.json");
 const BOARD_STATE_PATH = path.join(ROOT, "data", "board-state.json");
+const AUCTION_CACHE_PATH = path.join(ROOT, "runtime", "auction-series.json");
+const AUCTION_SAMPLE_INTERVAL_MS = 3000;
+const AUCTION_PERSIST_INTERVAL_MS = 30000;
+const AUCTION_MAX_SAMPLES = 210;
+const AUCTION_RESPONSE_SAMPLES = 64;
 const EASTMONEY_SEARCH_TOKEN = "D43BF722C8E33BD69D955A7E7361F5D9";
 const EASTMONEY_TRENDS_TOKEN = "fa5fd1943c7b386f172d6893dbfba10b";
 const EASTMONEY_SEARCH_TIMEOUT_MS = 2500;
@@ -23,6 +28,14 @@ const MINIQMT_PYTHON =
   process.env.MINIQMT_PYTHON || "/Users/seasnake/miniconda3/bin/python3";
 const MINIQMT_API_SCRIPT = path.join(ROOT, "scripts", "miniqmt-dashboard-api.py");
 let miniqmtApiProcess = null;
+let auctionSamplerTimer = null;
+let auctionSamplerRunning = false;
+let auctionCacheDate = "";
+let auctionCacheDirty = false;
+let auctionLastPersistedAt = 0;
+let auctionBoardStateMtime = 0;
+let auctionBoardSecids = [];
+const auctionSeries = new Map();
 const DOMESTIC_INDEXES = [
   { key: "sh000001", name: "上证指数", symbol: "sh000001", secid: "1.000001" },
   { key: "sz399006", name: "创业板指", symbol: "sz399006", secid: "0.399006" },
@@ -64,6 +77,11 @@ const server = http.createServer(async (request, response) => {
 
     if (url.pathname === "/api/auction") {
       await handleAuction(url, response);
+      return;
+    }
+
+    if (url.pathname === "/api/auction/series") {
+      await handleAuctionSeries(url, response);
       return;
     }
 
@@ -140,11 +158,18 @@ const server = http.createServer(async (request, response) => {
 
 server.listen(PORT, () => {
   console.log(`Finance board running at http://localhost:${PORT}`);
-  void ensureMiniQmtApi();
+  void ensureMiniQmtApi().finally(async () => {
+    await loadAuctionCache();
+    scheduleAuctionSampler(1000);
+  });
 });
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.once(signal, () => {
+  process.once(signal, async () => {
+    if (auctionSamplerTimer) clearTimeout(auctionSamplerTimer);
+    await persistAuctionCache(true).catch((error) => {
+      console.warn(`Auction cache final persist failed: ${error.message}`);
+    });
     stopMiniQmtApi();
     server.close(() => process.exit(0));
   });
@@ -238,6 +263,56 @@ async function handleAuction(url, response) {
     truncated: secids.length > limitedSecids.length,
     auctions,
     failed,
+  });
+}
+
+async function handleAuctionSeries(url, response) {
+  const secids = Array.from(
+    new Set(
+      (url.searchParams.get("secids") || "")
+        .split(",")
+        .map((value) => value.trim())
+        .map(normalizeSecidInput)
+        .filter((secid) => /^[01]\.\d{6}$/.test(secid)),
+    ),
+  ).slice(0, 160);
+  if (secids.length === 0) {
+    sendJson(response, 400, { error: "missing secids" });
+    return;
+  }
+
+  const after = Math.max(0, Number(url.searchParams.get("after")) || 0);
+  const current = currentChinaDateTimeParts();
+  const rows = [];
+  let cursor = after;
+  for (const secid of secids) {
+    const cached = auctionSeries.get(secid);
+    if (!cached || cached.date !== auctionCacheDate) continue;
+    let samples = cached.samples;
+    if (after > 0) {
+      samples = samples.filter((sample) => sample.capturedAt > after);
+    } else {
+      samples = downsampleAuctionSamples(samples, AUCTION_RESPONSE_SAMPLES);
+    }
+    cursor = Math.max(cursor, ...samples.map((sample) => Number(sample.capturedAt) || 0));
+    rows.push({
+      secid,
+      date: cached.date,
+      previousClose: cached.previousClose,
+      latestAmount: cached.samples.at(-1)?.amount || 0,
+      samples,
+    });
+  }
+
+  sendJson(response, 200, {
+    source: "MiniQMT竞价采样",
+    date: auctionCacheDate || current.date.replaceAll("-", ""),
+    phase: auctionClockPhase(current.time),
+    sampleIntervalMs: AUCTION_SAMPLE_INTERVAL_MS,
+    requested: secids.length,
+    returned: rows.length,
+    cursor,
+    series: rows,
   });
 }
 
@@ -1267,6 +1342,182 @@ function currentChinaDateTimeParts() {
     date: `${map.year}-${map.month}-${map.day}`,
     time: `${map.hour}:${map.minute}:${map.second}`,
   };
+}
+
+function auctionClockPhase(time) {
+  if (time >= "09:15:00" && time < "09:25:30") return "collecting";
+  if (time >= "09:25:30" && time < "09:30:00") return "frozen";
+  return "closed";
+}
+
+function nextAuctionSamplerDelay() {
+  const time = currentChinaDateTimeParts().time;
+  if (auctionClockPhase(time) === "collecting") {
+    return AUCTION_SAMPLE_INTERVAL_MS;
+  }
+  if (time >= "09:14:30" && time < "09:15:00") {
+    return 1000;
+  }
+  return 30000;
+}
+
+function scheduleAuctionSampler(delayMs = 30000) {
+  if (auctionSamplerTimer) clearTimeout(auctionSamplerTimer);
+  auctionSamplerTimer = setTimeout(async () => {
+    if (!auctionSamplerRunning) {
+      auctionSamplerRunning = true;
+      try {
+        const clock = currentChinaDateTimeParts();
+        const weekday = new Date().getDay();
+        const isWeekday = weekday >= 1 && weekday <= 5;
+        const phase = isWeekday ? auctionClockPhase(clock.time) : "closed";
+        if (phase === "collecting") {
+          await sampleAuctionQuotes(clock);
+          await persistAuctionCache();
+        } else if (phase === "frozen") {
+          await persistAuctionCache(true);
+        }
+      } catch (error) {
+        console.warn(`MiniQMT auction sampler failed: ${error.message}`);
+      } finally {
+        auctionSamplerRunning = false;
+      }
+    }
+    scheduleAuctionSampler(nextAuctionSamplerDelay());
+  }, Math.max(250, delayMs));
+}
+
+async function sampleAuctionQuotes(clock = currentChinaDateTimeParts()) {
+  const tradingDate = clock.date.replaceAll("-", "");
+  if (auctionCacheDate !== tradingDate) {
+    auctionCacheDate = tradingDate;
+    auctionSeries.clear();
+    auctionCacheDirty = true;
+  }
+  const secids = await loadAuctionBoardSecids();
+  if (secids.length === 0) return;
+
+  const capturedAt = Date.now();
+  for (const secidGroup of chunk(secids, 100)) {
+    const marketCodes = secidGroup.map(secidToTdxStockCode);
+    let payload;
+    try {
+      const query = new URLSearchParams({ codes: marketCodes.join(",") });
+      payload = await fetchLocalJson(`/quotes?${query}`, 12000);
+    } catch (error) {
+      console.warn(`MiniQMT auction batch failed (${secidGroup[0]}): ${error.message}`);
+      continue;
+    }
+    const quotes = Array.isArray(payload?.quotes) ? payload.quotes : [];
+    for (const quote of quotes) {
+      const secid = normalizeSecidInput(quote.secid);
+      const price = Number(quote.price);
+      const amount = Number(quote.amount);
+      if (!/^[01]\.\d{6}$/.test(secid) || !Number.isFinite(price) || price <= 0) continue;
+
+      let cached = auctionSeries.get(secid);
+      if (!cached || cached.date !== tradingDate) {
+        cached = {
+          secid,
+          date: tradingDate,
+          previousClose: Number(quote.previousClose) || null,
+          samples: [],
+        };
+        auctionSeries.set(secid, cached);
+      }
+      const previous = cached.samples.at(-1);
+      const timestamp = Number(quote.timestamp) || capturedAt;
+      if (previous && previous.timestamp === timestamp) continue;
+      cached.previousClose ||= Number(quote.previousClose) || null;
+      cached.samples.push({
+        capturedAt,
+        timestamp,
+        time: quote.time || clock.time,
+        price,
+        change: Number(quote.change) || 0,
+        amount: Number.isFinite(amount) ? amount : 0,
+        deltaAmount:
+          previous && Number.isFinite(amount)
+            ? Math.max(0, amount - Number(previous.amount || 0))
+            : 0,
+      });
+      if (cached.samples.length > AUCTION_MAX_SAMPLES) {
+        cached.samples.splice(0, cached.samples.length - AUCTION_MAX_SAMPLES);
+      }
+      auctionCacheDirty = true;
+    }
+  }
+}
+
+async function loadAuctionBoardSecids() {
+  try {
+    const stat = await fs.promises.stat(BOARD_STATE_PATH);
+    if (stat.mtimeMs === auctionBoardStateMtime && auctionBoardSecids.length > 0) {
+      return auctionBoardSecids;
+    }
+    const boardState = await readBoardStateFile();
+    auctionBoardSecids = Array.from(
+      new Set(
+        (boardState.sectors || [])
+          .flatMap((sector) => sector.stocks || [])
+          .map((stock) => normalizeSecidInput(stock.secid))
+          .filter((secid) => /^[01]\.\d{6}$/.test(secid))
+          .filter((secid) => !/^[89]/.test(secid.split(".")[1])),
+      ),
+    );
+    auctionBoardStateMtime = stat.mtimeMs;
+  } catch (error) {
+    console.warn(`Auction watchlist unavailable: ${error.message}`);
+  }
+  return auctionBoardSecids;
+}
+
+function downsampleAuctionSamples(samples, limit) {
+  if (samples.length <= limit) return samples;
+  const lastIndex = samples.length - 1;
+  const result = [];
+  for (let index = 0; index < limit; index += 1) {
+    result.push(samples[Math.round((index / (limit - 1)) * lastIndex)]);
+  }
+  return result;
+}
+
+async function loadAuctionCache() {
+  const today = currentChinaDateTimeParts().date.replaceAll("-", "");
+  try {
+    const parsed = JSON.parse(await fs.promises.readFile(AUCTION_CACHE_PATH, "utf8"));
+    if (parsed?.date !== today || !Array.isArray(parsed.series)) return;
+    auctionCacheDate = today;
+    for (const item of parsed.series) {
+      if (!/^[01]\.\d{6}$/.test(item?.secid) || !Array.isArray(item.samples)) continue;
+      auctionSeries.set(item.secid, {
+        secid: item.secid,
+        date: today,
+        previousClose: Number(item.previousClose) || null,
+        samples: item.samples.slice(-AUCTION_MAX_SAMPLES),
+      });
+    }
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      console.warn(`Auction cache unavailable: ${error.message}`);
+    }
+  }
+}
+
+async function persistAuctionCache(force = false) {
+  if (!auctionCacheDirty || !auctionCacheDate) return;
+  if (!force && Date.now() - auctionLastPersistedAt < AUCTION_PERSIST_INTERVAL_MS) return;
+  const payload = {
+    date: auctionCacheDate,
+    updatedAt: new Date().toISOString(),
+    series: [...auctionSeries.values()],
+  };
+  await fs.promises.mkdir(path.dirname(AUCTION_CACHE_PATH), { recursive: true });
+  const temporaryPath = `${AUCTION_CACHE_PATH}.tmp`;
+  await fs.promises.writeFile(temporaryPath, `${JSON.stringify(payload)}\n`);
+  await fs.promises.rename(temporaryPath, AUCTION_CACHE_PATH);
+  auctionLastPersistedAt = Date.now();
+  auctionCacheDirty = false;
 }
 
 function normalizeTdxOpenCode(value) {

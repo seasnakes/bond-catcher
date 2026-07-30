@@ -13,6 +13,8 @@ const SPARKLINE_STORAGE_KEY = "finance-board-show-sparklines-v1";
 const BOARD_VIEW_STATE_STORAGE_KEY = "finance-board-view-state-v1";
 const SPARKLINE_BATCH_SIZE = 24;
 const SPARKLINE_REFRESH_MS = 2 * 60 * 1000;
+const AUCTION_SERIES_BATCH_SIZE = 120;
+const AUCTION_SERIES_MAX_POINTS = 80;
 const ADD_SEARCH_DEBOUNCE_MS = 220;
 const ACTIVE_DEFAULT_SECTOR_VERSION = "screenshot-2026-05-18-v1";
 const SIGNAL_EVENT_LABELS = {
@@ -794,6 +796,11 @@ const state = {
   sparklines: new Map(),
   sparkPending: new Set(),
   sparkCacheDate: localDateKey(),
+  auctionSeries: new Map(),
+  auctionSeriesDate: "",
+  auctionCursor: 0,
+  auctionLoading: false,
+  auctionLastFetchAt: 0,
   source: "连接中",
   lastUpdated: null,
   loading: false,
@@ -1970,6 +1977,7 @@ async function fetchLocalQuotes(stocks) {
 function miniQmtMarketCode(secid) {
   const match = String(secid || "").match(/^([01])\.(\d{6})$/);
   if (!match) return "";
+  if (/^[89]/.test(match[2])) return "";
   return `${match[2]}.${match[1] === "1" ? "SH" : "SZ"}`;
 }
 
@@ -2063,9 +2071,80 @@ async function fetchLocalSparklines(secids) {
   return sparkMap;
 }
 
+async function fetchAuctionSeries(secids, after = 0) {
+  const query = new URLSearchParams({ secids: secids.join(",") });
+  if (after > 0) query.set("after", String(after));
+  return fetchJson(`/api/auction/series?${query}`, 12000);
+}
+
+async function ensureAuctionSeriesFor(sectors) {
+  if (!state.showSparklines || state.auctionLoading) return;
+  if (Date.now() - state.auctionLastFetchAt < 2000) return;
+  const secids = Array.from(
+    new Set(
+      sectors
+        .flatMap((sector) => sector.stocks)
+        .map((stock) => stock.secid)
+        .filter((secid) => /^[01]\.\d{6}$/.test(String(secid || "")))
+        .filter((secid) => !/^[89]/.test(secid.split(".")[1])),
+    ),
+  );
+  if (secids.length === 0) return;
+
+  state.auctionLoading = true;
+  state.auctionLastFetchAt = Date.now();
+  const requestCursor = state.auctionCursor;
+  let nextCursor = requestCursor;
+  try {
+    for (const group of chunk(secids, AUCTION_SERIES_BATCH_SIZE)) {
+      const needsHistory = group.some((secid) => !state.auctionSeries.has(secid));
+      const after = needsHistory ? 0 : requestCursor;
+      const payload = await fetchAuctionSeries(group, after);
+      if (
+        state.auctionSeriesDate &&
+        payload.date &&
+        state.auctionSeriesDate !== payload.date
+      ) {
+        state.auctionSeries.clear();
+        state.auctionCursor = 0;
+      }
+      state.auctionSeriesDate = payload.date || state.auctionSeriesDate;
+      nextCursor = Math.max(nextCursor, Number(payload.cursor) || 0);
+      for (const item of Array.isArray(payload.series) ? payload.series : []) {
+        const existing = after > 0 ? state.auctionSeries.get(item.secid) : null;
+        const samples = [...(existing?.samples || []), ...(item.samples || [])];
+        const deduplicated = [];
+        const sampleKeys = new Set();
+        for (const sample of samples) {
+          const key = `${sample.capturedAt || 0}:${sample.timestamp || 0}`;
+          if (sampleKeys.has(key)) continue;
+          sampleKeys.add(key);
+          deduplicated.push(sample);
+        }
+        state.auctionSeries.set(item.secid, {
+          ...item,
+          samples: deduplicated
+            .sort((left, right) => Number(left.capturedAt) - Number(right.capturedAt))
+            .slice(-AUCTION_SERIES_MAX_POINTS),
+        });
+      }
+    }
+    state.auctionCursor = nextCursor;
+  } catch (error) {
+    console.warn("Auction series request failed.", error);
+  } finally {
+    state.auctionLoading = false;
+    renderAfterBackgroundUpdate();
+  }
+}
+
 async function ensureSparklinesFor(sectors) {
   if (!state.showSparklines) return;
   if (isRenaming()) return;
+  if (isAuctionDisplaySession()) {
+    void ensureAuctionSeriesFor(sectors);
+    return;
+  }
   resetSparklinesIfNewDay();
 
   const secids = Array.from(
@@ -2149,6 +2228,7 @@ function marketSession(now = new Date()) {
   const day = now.getDay();
   const isWeekday = day >= 1 && day <= 5;
   const minute = now.getHours() * 60 + now.getMinutes();
+  const second = minute * 60 + now.getSeconds();
 
   if (!isWeekday) {
     return closedSession("休市", nextWeekdayAt(now, 9, 15));
@@ -2156,7 +2236,7 @@ function marketSession(now = new Date()) {
   if (minute < 9 * 60 + 15) {
     return closedSession("等待集合竞价", todayAt(now, 9, 15));
   }
-  if (minute < 9 * 60 + 25) {
+  if (second < (9 * 60 + 25) * 60 + 30) {
     return openSession("集合竞价", "auction", AUCTION_UPDATE_INTERVAL_MS);
   }
   if (minute < 9 * 60 + 30) {
@@ -2183,6 +2263,13 @@ function marketSession(now = new Date()) {
       nextAt: new Date(now.getTime() + intervalMs),
     };
   }
+}
+
+function isAuctionDisplaySession(now = new Date()) {
+  const day = now.getDay();
+  if (day < 1 || day > 5) return false;
+  const second = (now.getHours() * 60 + now.getMinutes()) * 60 + now.getSeconds();
+  return second >= (9 * 60 + 15) * 60 && second < (9 * 60 + 30) * 60;
 }
 
 function closedSession(label, nextAt) {
@@ -3229,12 +3316,12 @@ function createChangeValue(text) {
 }
 
 function renderStockRow(stock, sectorName) {
-  const session = marketSession();
+  const auctionDisplay = isAuctionDisplaySession();
   const tone = quoteClass(stock.change);
   const nameTone = stockNameClass(stock.change);
   const row = state.editMode ? document.createElement("div") : document.createElement("a");
   row.className = "stock-row";
-  row.classList.toggle("is-auction", session.phase === "auction");
+  row.classList.toggle("is-auction", auctionDisplay);
   row.dataset.sectorName = sectorName;
   row.dataset.secid = stock.secid;
   row.draggable = state.editMode;
@@ -3247,7 +3334,7 @@ function renderStockRow(stock, sectorName) {
       row.rel = "noreferrer";
     }
   }
-  const priceLabel = session.phase === "auction" ? "集合竞价参考价" : "最新价";
+  const priceLabel = auctionDisplay ? "集合竞价参考价" : "最新价";
   row.title = `${stock.name} ${codeForEditor(stock.secid)} ${priceLabel} ${formatPrice(stock.price, stock.secid)} 涨跌幅 ${formatPercent(
     stock.change,
     true,
@@ -3322,7 +3409,12 @@ function renderStockRow(stock, sectorName) {
   change.append(createChangeValue(formatPercent(stock.change)));
 
   if (state.showSparklines) {
-    row.append(name, renderSparkline(stock), price, change);
+    row.append(
+      name,
+      auctionDisplay ? renderAuctionSparkline(stock) : renderSparkline(stock),
+      price,
+      change,
+    );
   } else {
     row.append(name, price, change);
   }
@@ -3385,6 +3477,78 @@ function renderSparkline(stock) {
   return box;
 }
 
+function renderAuctionSparkline(stock) {
+  const series = state.auctionSeries.get(stock.secid);
+  const samples = Array.isArray(series?.samples) ? series.samples : [];
+  const box = document.createElement("span");
+  box.className = `sparkline auction-sparkline${state.auctionLoading ? " is-loading" : ""}`;
+  if (samples.length === 0) {
+    box.title = state.auctionLoading ? "正在读取MiniQMT竞价轨迹" : "暂无竞价采样";
+    return box;
+  }
+
+  const latest = samples.at(-1);
+  const points = samples.map((sample) => Number(sample.price)).filter((price) => price > 0);
+  const tone = quoteClass(
+    Number.isFinite(Number(latest.change))
+      ? Number(latest.change)
+      : Number(stock.change),
+  );
+  box.classList.add(`is-${tone}`);
+  box.title = `MiniQMT竞价 ${latest.time || ""} · 累计金额 ${formatAuctionAmount(
+    Number(latest.amount),
+    false,
+  )}`;
+
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 68 20");
+  svg.setAttribute("aria-hidden", "true");
+
+  const amounts = samples.map((sample) => Math.max(0, Number(sample.deltaAmount) || 0));
+  const maxAmount = Math.max(...amounts, 0);
+  if (maxAmount > 0) {
+    const barWidth = Math.max(0.45, 68 / Math.max(amounts.length, 1) - 0.35);
+    amounts.forEach((amount, index) => {
+      if (amount <= 0) return;
+      const height = Math.max(0.6, (amount / maxAmount) * 5);
+      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("class", "auction-amount-bar");
+      rect.setAttribute("x", ((index / Math.max(amounts.length - 1, 1)) * (68 - barWidth)).toFixed(2));
+      rect.setAttribute("y", (20 - height).toFixed(2));
+      rect.setAttribute("width", barWidth.toFixed(2));
+      rect.setAttribute("height", height.toFixed(2));
+      svg.append(rect);
+    });
+  }
+
+  if (points.length >= 2) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("class", `spark-${tone}`);
+    path.setAttribute("d", sparklinePath(points, 68, 14));
+    svg.append(path);
+  }
+  box.append(svg);
+
+  const amount = document.createElement("small");
+  amount.className = "auction-amount";
+  amount.textContent = formatAuctionAmount(Number(latest.amount));
+  box.append(amount);
+  return box;
+}
+
+function formatAuctionAmount(value, compact = true) {
+  if (!Number.isFinite(value) || value <= 0) return compact ? "竞--" : "--";
+  let text;
+  if (value >= 1e8) {
+    text = `${(value / 1e8).toFixed(1)}亿`;
+  } else if (value >= 1e4) {
+    text = `${(value / 1e4).toFixed(value >= 1e7 ? 0 : 1)}万`;
+  } else {
+    text = `${value.toFixed(0)}元`;
+  }
+  return compact ? `竞${text}` : text;
+}
+
 function flatSparklinePoints(value) {
   return Array.from({ length: 12 }, () => value);
 }
@@ -3417,7 +3581,7 @@ function updateStatus() {
     : session.canAutoRefresh
       ? `${seconds}s 后刷新`
       : `停止自动刷新 · 下次 ${formatScheduleTime(session.nextAt)}`;
-  grid.classList.toggle("is-auction", session.phase === "auction");
+  grid.classList.toggle("is-auction", isAuctionDisplaySession());
   statusNode.textContent = `${state.source} · ${time} · ${session.label} · ${loadingText}`;
 }
 

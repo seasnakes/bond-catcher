@@ -944,6 +944,12 @@ textarea:disabled {
   line-height: 18px;
 }
 
+.board-grid.has-sparks.is-auction .stock-row {
+  grid-template-columns: minmax(0, 1fr) 68px 36px 34px;
+  min-height: 22px;
+  line-height: 20px;
+}
+
 .sector-card.is-editing .stock-row {
   grid-template-columns: 10px minmax(0, 1fr) 31px 34px 14px;
   cursor: grab;
@@ -951,6 +957,10 @@ textarea:disabled {
 
 .board-grid.has-sparks .sector-card.is-editing .stock-row {
   grid-template-columns: 10px minmax(0, 1fr) 58px 36px 34px 14px;
+}
+
+.board-grid.has-sparks.is-auction .sector-card.is-editing .stock-row {
+  grid-template-columns: 10px minmax(0, 1fr) 68px 36px 34px 14px;
 }
 
 .stock-row.is-dragging {
@@ -1063,6 +1073,39 @@ textarea:disabled {
     linear-gradient(90deg, transparent, rgba(142, 170, 114, 0.18), transparent),
     linear-gradient(180deg, rgba(40, 70, 34, 0.05), rgba(255, 255, 255, 0));
   background-size: 44px 100%, 100% 100%;
+}
+
+.auction-sparkline {
+  position: relative;
+  width: 68px;
+  height: 20px;
+  background:
+    linear-gradient(180deg, rgba(255, 209, 67, 0.11) 0 70%, rgba(88, 117, 73, 0.06) 70% 100%);
+}
+
+.auction-sparkline svg {
+  width: 68px;
+  height: 20px;
+}
+
+.auction-sparkline .auction-amount-bar {
+  fill: rgba(86, 119, 70, 0.42);
+  stroke: none;
+}
+
+.auction-amount {
+  position: absolute;
+  right: 1px;
+  bottom: -1px;
+  padding-left: 2px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #665000;
+  font-size: 7px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 8px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 
 .is-up .sector-change {
