@@ -10,6 +10,7 @@ const STOCK_LIST_VERSION_STORAGE_KEY = "finance-board-stock-list-version-v1";
 const STACK_GROUP_STORAGE_KEY = "finance-board-stack-groups-v1";
 const LOCAL_BACKUP_STORAGE_KEY = "finance-board-local-backup-v1";
 const SPARKLINE_STORAGE_KEY = "finance-board-show-sparklines-v1";
+const BOARD_VIEW_STATE_STORAGE_KEY = "finance-board-view-state-v1";
 const SPARKLINE_BATCH_SIZE = 24;
 const SPARKLINE_REFRESH_MS = 2 * 60 * 1000;
 const ADD_SEARCH_DEBOUNCE_MS = 220;
@@ -860,6 +861,61 @@ const addStockMessage = document.querySelector("#addStockMessage");
 const closeAddStockButton = document.querySelector("#closeAddStockButton");
 const cancelAddStockButton = document.querySelector("#cancelAddStockButton");
 const cardTemplate = document.querySelector("#cardTemplate");
+
+function saveBoardViewState() {
+  try {
+    sessionStorage.setItem(
+      BOARD_VIEW_STATE_STORAGE_KEY,
+      JSON.stringify({
+        query: state.query,
+        sort: state.sort,
+        range: state.range,
+        signalScope: state.signalScope,
+        signalPaused: state.signalPaused,
+        scrollY: window.scrollY,
+        signalScrollTop: signalFeed.scrollTop,
+        savedAt: Date.now(),
+      }),
+    );
+  } catch (error) {
+    console.warn("Failed to save board view state.", error);
+  }
+}
+
+function restoreBoardViewState() {
+  try {
+    const saved = JSON.parse(
+      sessionStorage.getItem(BOARD_VIEW_STATE_STORAGE_KEY) || "null",
+    );
+    if (!saved || typeof saved !== "object") return null;
+    state.query = String(saved.query || "");
+    state.sort = ["hot", "change", "name"].includes(saved.sort) ? saved.sort : "hot";
+    state.range = ["all", "up", "down"].includes(saved.range) ? saved.range : "all";
+    state.signalScope = saved.signalScope === "all" ? "all" : "focus";
+    state.signalPaused = Boolean(saved.signalPaused);
+    searchInput.value = state.query;
+    sortSelect.value = state.sort;
+    rangeSelect.value = state.range;
+    signalScope.value = state.signalScope;
+    signalPauseButton.classList.toggle("is-paused", state.signalPaused);
+    signalPauseButton.textContent = state.signalPaused ? "继续滚动" : "暂停滚动";
+    return {
+      scrollY: Math.max(0, Number(saved.scrollY) || 0),
+      signalScrollTop: Math.max(0, Number(saved.signalScrollTop) || 0),
+    };
+  } catch (error) {
+    console.warn("Failed to restore board view state.", error);
+    return null;
+  }
+}
+
+function restoreBoardViewport(viewState) {
+  if (!viewState) return;
+  window.requestAnimationFrame(() => {
+    window.scrollTo({ top: viewState.scrollY, left: 0, behavior: "auto" });
+    signalFeed.scrollTop = viewState.signalScrollTop;
+  });
+}
 
 function normalizeSectors(sectors, options = {}) {
   const allowMissingSecid = Boolean(options.allowMissingSecid);
@@ -3358,6 +3414,7 @@ async function refreshIndices(options = {}) {
 
 async function boot() {
   await loadServerBoardState();
+  const restoredView = restoreBoardViewState();
   const stocks = getAllStocks(state.sectors);
   sparkToggle.checked = state.showSparklines;
   state.quotes = createDemoQuotes(stocks);
@@ -3374,6 +3431,7 @@ async function boot() {
   signalScope.value = state.signalScope;
   await refreshSignalFeed({ reset: true });
   scheduleSignalRefresh();
+  restoreBoardViewport(restoredView);
 
   window.setInterval(updateStatus, 1000);
 
@@ -3389,6 +3447,21 @@ async function boot() {
     }
   });
 }
+
+window.addEventListener("pagehide", saveBoardViewState);
+window.addEventListener("pageshow", (event) => {
+  if (!event.persisted) return;
+  scheduleMainRefresh();
+  scheduleBondRefresh();
+  scheduleSignalRefresh();
+  updateStatus();
+  if (marketSession().canAutoRefresh) {
+    refreshQuotes();
+    refreshIndices();
+    refreshBondQuotes({ force: true });
+    if (!state.signalPaused) refreshSignalFeed();
+  }
+});
 
 searchInput.addEventListener("input", (event) => {
   state.query = event.target.value;

@@ -50,6 +50,7 @@ const state = {
 };
 
 const nodes = {
+  backLink: document.querySelector(".back-link"),
   name: document.querySelector("#bondName"),
   code: document.querySelector("#bondCode"),
   latestPrice: document.querySelector("#latestPrice"),
@@ -68,6 +69,18 @@ const nodes = {
   eventList: document.querySelector("#eventList"),
   dataFootnote: document.querySelector("#dataFootnote"),
 };
+
+function isBoardReferrer() {
+  try {
+    const referrer = new URL(document.referrer);
+    return (
+      referrer.origin === window.location.origin &&
+      ["/", "/index.html"].includes(referrer.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
 
 const panelDefinitions = [
   { key: "price", label: "价格", weight: 0.36 },
@@ -794,6 +807,11 @@ nodes.refreshButton.addEventListener("click", () => {
 nodes.dateSelect.addEventListener("change", () => {
   state.manualDate = true;
   loadBond({ date: nodes.dateSelect.value });
+});
+nodes.backLink.addEventListener("click", (event) => {
+  if (!isBoardReferrer() || window.history.length <= 1) return;
+  event.preventDefault();
+  window.history.back();
 });
 window.addEventListener("resize", () => {
   window.clearTimeout(state.resizeTimer);
