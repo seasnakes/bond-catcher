@@ -53,6 +53,20 @@ const SIGNAL_EVENT_LABELS = {
   open_low: "低开",
   volume_surge: "分钟放量",
 };
+// 2026-07-30 snapshot: current “可转债” + “热/热债” board groups,
+// filtered to convertible-bond codes and deduplicated.
+const SIGNAL_MONITORED_CODES = Object.freeze([
+  "110074", "110076", "110101", "111004", "111024", "111025", "113048", "113051",
+  "113610", "113615", "113624", "113632", "113636", "113644", "113667", "113673",
+  "113677", "113681", "113691", "113697", "113701", "113703", "113704", "118011",
+  "118012", "118016", "118030", "118034", "118050", "118051", "118053", "118059",
+  "118060", "118062", "118064", "118069", "118071", "123061", "123064", "123091",
+  "123118", "123131", "123149", "123157", "123158", "123160", "123165", "123178",
+  "123207", "123211", "123213", "123216", "123243", "123245", "123253", "123255",
+  "123258", "123259", "123261", "123265", "123266", "123267", "123268", "123269",
+  "123270", "123271", "123273", "127044", "127047", "127067", "127070", "127080",
+  "127088", "127092", "127096", "127104", "127109", "127112", "127114", "128136",
+]);
 
 // Kept as a broad starter-pool reference; the active default is rebuilt from the screenshot text below.
 const LEGACY_DEFAULT_SECTORS = [
@@ -807,6 +821,8 @@ const state = {
   signalPaused: false,
   signalLoading: false,
   signalTimer: 0,
+  signalCodeSignature: "",
+  signalCodeCount: 0,
 };
 let serverPersistTimer = 0;
 let temporaryStatusTimer = 0;
@@ -2182,23 +2198,39 @@ function updateSignalMonitorStatus(payload = null, error = null) {
   }
   const time = String(payload.generated_at || "").slice(11, 19);
   const dateNote = payload.data_is_stale ? ` · 数据日 ${payload.trading_date}` : "";
+  const sourceNote = `固定监控 ${state.signalCodeCount} 只`;
   signalMonitorStatus.textContent = payload.monitor_alive
-    ? `实时 · ${time} · 展示 ${state.signalEvents.length} 条${dateNote}`
-    : `监控已停止 · 展示 ${state.signalEvents.length} 条${dateNote}`;
+    ? `实时 · ${time} · ${sourceNote} · 展示 ${state.signalEvents.length} 条${dateNote}`
+    : `监控已停止 · ${sourceNote} · 展示 ${state.signalEvents.length} 条${dateNote}`;
+}
+
+function monitoredSignalCodes() {
+  return [...SIGNAL_MONITORED_CODES];
 }
 
 async function refreshSignalFeed(options = {}) {
   if (state.signalLoading) return;
-  if (options.reset) {
+  const monitoredCodes = monitoredSignalCodes();
+  const signature = monitoredCodes.join(",");
+  const sourcesChanged = signature !== state.signalCodeSignature;
+  state.signalCodeSignature = signature;
+  state.signalCodeCount = monitoredCodes.length;
+  if (options.reset || sourcesChanged) {
     state.signalLatestId = 0;
     state.signalEvents = [];
     renderSignalFeed();
+  }
+  if (monitoredCodes.length === 0) {
+    signalMonitor.classList.remove("is-live", "is-error");
+    signalMonitorStatus.textContent = "“可转债”和“热债”分组中暂无转债";
+    return;
   }
   state.signalLoading = true;
   try {
     const query = new URLSearchParams({
       scope: state.signalScope,
       limit: String(SIGNAL_EVENT_LIMIT),
+      codes: monitoredCodes.join(","),
     });
     if (state.signalLatestId > 0) {
       query.set("after_id", String(state.signalLatestId));

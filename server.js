@@ -89,7 +89,7 @@ const server = http.createServer(async (request, response) => {
 
     if (url.pathname === "/api/miniqmt/events") {
       const query = new URLSearchParams();
-      for (const key of ["scope", "after_id", "limit"]) {
+      for (const key of ["scope", "after_id", "limit", "codes"]) {
         const value = url.searchParams.get(key);
         if (value) query.set(key, value);
       }

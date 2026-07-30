@@ -419,6 +419,7 @@ def events_payload(
     scope: str = "focus",
     after_id: int = 0,
     limit: int = 80,
+    codes_input: str = "",
 ) -> dict[str, Any]:
     normalized_scope = scope if scope in {"focus", "all"} else "focus"
     safe_after_id = max(0, int(after_id))
@@ -427,6 +428,20 @@ def events_payload(
     trading_date = database.stem
     conditions = ["trading_date=?"]
     parameters: list[Any] = [trading_date]
+    monitored_codes: list[str] = []
+    for value in str(codes_input or "").split(","):
+        if not value.strip():
+            continue
+        try:
+            code = monitor_code(normalize_code(value))
+        except ValueError:
+            continue
+        if code not in monitored_codes:
+            monitored_codes.append(code)
+    if monitored_codes:
+        placeholders = ",".join("?" for _ in monitored_codes)
+        conditions.append(f"code IN ({placeholders})")
+        parameters.extend(monitored_codes)
     if normalized_scope == "focus":
         event_types = sorted(FOCUS_EVENT_TYPES)
         placeholders = ",".join("?" for _ in event_types)
@@ -491,6 +506,7 @@ def events_payload(
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "monitor_alive": bool(health["monitor_alive"]),
             "data_is_stale": trading_date != health["calendar_date"],
+            "monitored_code_count": len(monitored_codes),
             "latest_id": latest_id,
             "events": events,
         }
@@ -519,6 +535,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     (query.get("scope") or ["focus"])[0],
                     int((query.get("after_id") or ["0"])[0]),
                     int((query.get("limit") or ["80"])[0]),
+                    (query.get("codes") or [""])[0],
                 )
                 self.send_payload(200, payload)
                 return
