@@ -32,6 +32,9 @@ DATA_ROOT = RUNTIME_ROOT / "data"
 STATUS_PATH = RUNTIME_ROOT / "status.json"
 SERVICE_PATH = RUNTIME_ROOT / "service.json"
 CODE_PATTERN = re.compile(r"^(110|111|113|118|123|127|128)\d{3}$")
+MARKET_CODE_PATTERN = re.compile(r"^\d{6}\.(SH|SZ)$")
+QMT_BRIDGE_HOST = os.environ.get("QMT_BRIDGE_HOST", "10.211.55.3")
+QMT_BRIDGE_PORT = int(os.environ.get("QMT_BRIDGE_PORT", "18888"))
 FOCUS_EVENT_TYPES = {
     "accelerate_up",
     "accelerate_down",
@@ -139,6 +142,13 @@ def monitor_code(code: str) -> str:
     return f"{code}.{market}"
 
 
+def normalize_market_code(value: str) -> str:
+    code = str(value or "").strip().upper()
+    if not MARKET_CODE_PATTERN.fullmatch(code):
+        raise ValueError("行情代码必须为六位代码加.SH或.SZ")
+    return code
+
+
 def finite_or_none(value: Any) -> float | None:
     try:
         number = float(value)
@@ -192,6 +202,76 @@ def api_health() -> dict[str, Any]:
         ),
         "status": status,
     }
+
+
+def quotes_payload(codes_input: str) -> dict[str, Any]:
+    codes: list[str] = []
+    for value in str(codes_input or "").split(","):
+        if not value.strip():
+            continue
+        try:
+            code = normalize_market_code(value)
+        except ValueError:
+            continue
+        if code not in codes:
+            codes.append(code)
+    if not codes:
+        raise ValueError("缺少有效的MiniQMT行情代码")
+    if len(codes) > 500:
+        raise ValueError("单次最多查询500个行情代码")
+
+    bridge = MONITOR.BridgeClient(
+        f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}",
+        timeout=8.0,
+    )
+    ticks: dict[str, dict[str, Any]] = {}
+    for index in range(0, len(codes), 100):
+        ticks.update(bridge.full_tick(codes[index : index + 100]))
+
+    quotes: list[dict[str, Any]] = []
+    for code in codes:
+        tick = ticks.get(code)
+        if not isinstance(tick, dict):
+            continue
+        price = finite_or_none(tick.get("lastPrice"))
+        previous_close = finite_or_none(tick.get("lastClose"))
+        if price is None or price <= 0:
+            continue
+        change = (
+            (price / previous_close - 1) * 100
+            if previous_close is not None and previous_close > 0
+            else None
+        )
+        timetag = str(tick.get("timetag") or "")
+        quotes.append(
+            {
+                "secid": f"{'1' if code.endswith('.SH') else '0'}.{code[:6]}",
+                "code": code[:6],
+                "monitor_code": code,
+                "price": price,
+                "change": change,
+                "amount": finite_or_none(tick.get("amount")) or 0,
+                "previousClose": previous_close,
+                "date": timetag[:8],
+                "time": timetag[9:17],
+                "timestamp": int(tick.get("time") or 0),
+                "source": "MiniQMT full_tick",
+            }
+        )
+
+    return clean_json(
+        {
+            "ok": True,
+            "mode": "read_only",
+            "source": "MiniQMT full_tick",
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "bridge": f"{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}",
+            "requested": len(codes),
+            "returned": len(quotes),
+            "failed": [code for code in codes if code not in ticks],
+            "quotes": quotes,
+        }
+    )
 
 
 def resolve_name(
@@ -544,6 +624,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     (query.get("scope") or ["focus"])[0],
                     int((query.get("after_id") or ["0"])[0]),
                     int((query.get("limit") or ["80"])[0]),
+                    (query.get("codes") or [""])[0],
+                )
+                self.send_payload(200, payload)
+                return
+            if parsed.path == "/quotes":
+                payload = quotes_payload(
                     (query.get("codes") or [""])[0],
                 )
                 self.send_payload(200, payload)

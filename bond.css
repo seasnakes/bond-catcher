@@ -26,6 +26,10 @@ body {
   color: var(--ink);
 }
 
+.is-embedded body {
+  min-height: 100%;
+}
+
 button,
 select {
   font: inherit;

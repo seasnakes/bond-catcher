@@ -49,6 +49,9 @@ const state = {
   manualDate: Boolean(params.get("date")),
 };
 
+const pageParams = new URLSearchParams(window.location.search);
+const isEmbedded = pageParams.get("embedded") === "1";
+
 const nodes = {
   backLink: document.querySelector(".back-link"),
   name: document.querySelector("#bondName"),
@@ -80,6 +83,10 @@ function isBoardReferrer() {
   } catch {
     return false;
   }
+}
+
+if (isEmbedded) {
+  document.documentElement.classList.add("is-embedded");
 }
 
 const panelDefinitions = [
@@ -809,6 +816,11 @@ nodes.dateSelect.addEventListener("change", () => {
   loadBond({ date: nodes.dateSelect.value });
 });
 nodes.backLink.addEventListener("click", (event) => {
+  if (isEmbedded && window.parent !== window) {
+    event.preventDefault();
+    window.parent.postMessage({ type: "finance:close-bond-overlay" }, window.location.origin);
+    return;
+  }
   if (!isBoardReferrer() || window.history.length <= 1) return;
   event.preventDefault();
   window.history.back();

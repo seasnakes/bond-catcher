@@ -28,6 +28,29 @@ body {
   color: var(--ink);
 }
 
+body.has-bond-overlay {
+  overflow: hidden;
+}
+
+.bond-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--bg);
+}
+
+.bond-overlay[hidden] {
+  display: none;
+}
+
+.bond-overlay-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--bg);
+}
+
 button,
 input,
 select {

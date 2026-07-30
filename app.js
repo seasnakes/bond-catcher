@@ -861,6 +861,44 @@ const addStockMessage = document.querySelector("#addStockMessage");
 const closeAddStockButton = document.querySelector("#closeAddStockButton");
 const cancelAddStockButton = document.querySelector("#cancelAddStockButton");
 const cardTemplate = document.querySelector("#cardTemplate");
+const bondOverlay = document.querySelector("#bondOverlay");
+const bondOverlayFrame = document.querySelector("#bondOverlayFrame");
+
+function embeddedBondUrl(url) {
+  const target = new URL(url, window.location.href);
+  target.searchParams.set("embedded", "1");
+  return target.href;
+}
+
+function showBondOverlay(url, updateHistory = true) {
+  const target = new URL(url, window.location.href);
+  target.searchParams.delete("embedded");
+  saveBoardViewState();
+  bondOverlayFrame.src = embeddedBondUrl(target.href);
+  bondOverlay.hidden = false;
+  document.body.classList.add("has-bond-overlay");
+  if (updateHistory) {
+    window.history.pushState(
+      { ...(window.history.state || {}), bondOverlay: true },
+      "",
+      `${target.pathname}${target.search}`,
+    );
+  }
+}
+
+function hideBondOverlay() {
+  bondOverlay.hidden = true;
+  document.body.classList.remove("has-bond-overlay");
+  bondOverlayFrame.removeAttribute("src");
+}
+
+function closeBondOverlay() {
+  if (window.history.state?.bondOverlay) {
+    window.history.back();
+  } else {
+    hideBondOverlay();
+  }
+}
 
 function saveBoardViewState() {
   try {
@@ -1927,6 +1965,82 @@ async function fetchLocalQuotes(stocks) {
   }
 
   return quoteMap;
+}
+
+function miniQmtMarketCode(secid) {
+  const match = String(secid || "").match(/^([01])\.(\d{6})$/);
+  if (!match) return "";
+  return `${match[2]}.${match[1] === "1" ? "SH" : "SZ"}`;
+}
+
+async function fetchMiniQmtQuotes(stocks) {
+  const quoteMap = new Map();
+  const marketCodes = Array.from(
+    new Set(stocks.map((stock) => miniQmtMarketCode(stock.secid)).filter(Boolean)),
+  );
+
+  for (const group of chunk(marketCodes, 100)) {
+    const query = new URLSearchParams({ codes: group.join(",") });
+    const json = await fetchJson(`/api/miniqmt/quotes?${query}`, 12000);
+    const rows = Array.isArray(json?.quotes) ? json.quotes : [];
+    for (const row of rows) {
+      const price = Number(row.price);
+      if (!row.secid || !Number.isFinite(price) || price <= 0) continue;
+      quoteMap.set(row.secid, {
+        secid: row.secid,
+        code: row.code || row.secid.split(".")[1],
+        price,
+        change: Number(row.change),
+        amount: Number(row.amount) || 0,
+        date: row.date || "",
+        time: row.time || "",
+        previousClose: Number(row.previousClose),
+        source: row.source || "MiniQMT full_tick",
+      });
+    }
+  }
+
+  if (marketCodes.length > 0 && quoteMap.size === 0) {
+    throw new Error("MiniQMT行情为空");
+  }
+  return { quotes: quoteMap, requested: marketCodes.length };
+}
+
+async function fetchPreferredQuotes(stocks) {
+  const quotes = new Map();
+  let qmtRequested = 0;
+  let qmtReturned = 0;
+
+  try {
+    const miniQmt = await fetchMiniQmtQuotes(stocks);
+    qmtRequested = miniQmt.requested;
+    qmtReturned = miniQmt.quotes.size;
+    for (const [secid, quote] of miniQmt.quotes) quotes.set(secid, quote);
+  } catch (error) {
+    console.warn("MiniQMT quote request failed, using fallback.", error);
+    qmtRequested = stocks.filter((stock) => miniQmtMarketCode(stock.secid)).length;
+  }
+
+  const missing = stocks.filter((stock) => !quotes.has(stock.secid));
+  if (missing.length > 0) {
+    let fallback;
+    try {
+      fallback = await fetchLocalQuotes(missing);
+    } catch (localError) {
+      try {
+        fallback = await fetchEastmoneyQuotes(missing);
+      } catch (eastmoneyError) {
+        console.warn("Fallback quote request failed, using demo data.", localError, eastmoneyError);
+        fallback = createDemoQuotes(missing);
+      }
+    }
+    for (const [secid, quote] of fallback) quotes.set(secid, quote);
+  }
+
+  const source = qmtReturned > 0
+    ? `MiniQMT实时 ${qmtReturned}/${qmtRequested}`
+    : "行情源兜底";
+  return { quotes, source, qmtRequested, qmtReturned };
 }
 
 async function fetchLocalSparklines(secids) {
@@ -3334,21 +3448,9 @@ async function refreshQuotes(options = {}) {
       return;
     }
 
-    let quotes;
-    let source = "东方财富实时";
-
-    try {
-      quotes = await fetchLocalQuotes(stocks);
-      source = "新浪实时";
-    } catch (localError) {
-      try {
-        quotes = await fetchEastmoneyQuotes(stocks);
-      } catch (eastmoneyError) {
-        console.warn("Live quote request failed, using demo data.", localError, eastmoneyError);
-        quotes = createDemoQuotes(stocks);
-        source = "演示数据";
-      }
-    }
+    const preferred = await fetchPreferredQuotes(stocks);
+    const quotes = preferred.quotes;
+    const source = preferred.source;
 
     if (requestId === state.quoteRequestId) {
       state.quotes = quotes;
@@ -3378,14 +3480,14 @@ async function refreshBondQuotes(options = {}) {
   state.bondLoading = true;
 
   try {
-    const quotes = await fetchLocalQuotes(bonds);
+    const preferred = await fetchPreferredQuotes(bonds);
+    const quotes = preferred.quotes;
     if (requestId !== state.bondQuoteRequestId) return;
 
     for (const [secid, quote] of quotes) {
       state.quotes.set(secid, quote);
     }
     state.hydrated = hydrateSectors(state.quotes);
-    state.source = "新浪实时";
     state.lastUpdated = new Date();
     renderAfterBackgroundUpdate();
     updateStatus();
@@ -3462,6 +3564,35 @@ window.addEventListener("pageshow", (event) => {
     if (!state.signalPaused) refreshSignalFeed();
   }
 });
+window.addEventListener("popstate", (event) => {
+  if (event.state?.bondOverlay) {
+    showBondOverlay(window.location.href, false);
+  } else {
+    hideBondOverlay();
+    restoreBoardViewport(restoreBoardViewState());
+  }
+});
+window.addEventListener("message", (event) => {
+  if (
+    event.origin === window.location.origin &&
+    event.source === bondOverlayFrame.contentWindow &&
+    event.data?.type === "finance:close-bond-overlay"
+  ) {
+    closeBondOverlay();
+  }
+});
+document.addEventListener(
+  "click",
+  (event) => {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const link = event.target.closest?.('a[href*="bond.html"]');
+    if (!link) return;
+    event.preventDefault();
+    event.stopPropagation();
+    showBondOverlay(link.href);
+  },
+  true,
+);
 
 searchInput.addEventListener("input", (event) => {
   state.query = event.target.value;

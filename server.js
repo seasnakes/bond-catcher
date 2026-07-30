@@ -97,6 +97,14 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (url.pathname === "/api/miniqmt/quotes") {
+      const query = new URLSearchParams();
+      const codes = url.searchParams.get("codes");
+      if (codes) query.set("codes", codes);
+      await handleMiniQmtApi(`/quotes?${query}`, response);
+      return;
+    }
+
     if (url.pathname === "/api/sparks") {
       await handleSparks(url, response);
       return;
