@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>可转债星图</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./bond-heatmap.css" />
+  </head>
+  <body>
+    <main class="heatmap-shell">
+      <header class="heatmap-header">
+        <div class="heatmap-title">
+          <a href="./">← 返回看板</a>
+          <div>
+            <span>CONVERTIBLE BOND MAP</span>
+            <h1>可转债星图</h1>
+          </div>
+          <p id="marketStatus">正在读取转债快照…</p>
+        </div>
+        <div class="heatmap-kpis" aria-label="市场概览">
+          <article><span>转债</span><strong id="bondCount">-</strong></article>
+          <article><span>成交额</span><strong id="totalAmount">-</strong></article>
+          <article><span>上涨</span><strong id="upCount" class="is-up">-</strong></article>
+          <article><span>下跌</span><strong id="downCount" class="is-down">-</strong></article>
+        </div>
+      </header>
+
+      <section class="heatmap-workspace">
+        <aside class="heatmap-controls" aria-label="星图设置">
+          <label>
+            <span>分组</span>
+            <select id="groupSelect">
+              <option value="industry1">申万一级行业</option>
+              <option value="industry2" selected>申万二级行业</option>
+              <option value="industry3">申万三级行业</option>
+              <option value="theme">主线题材</option>
+            </select>
+          </label>
+          <label>
+            <span>面积代表</span>
+            <select id="sizeSelect">
+              <option value="amount" selected>成交额</option>
+              <option value="issue">发行规模</option>
+            </select>
+          </label>
+          <label>
+            <span>色彩代表</span>
+            <select id="colorSelect">
+              <option value="change" selected>涨跌幅</option>
+              <option value="premium">转股溢价率</option>
+              <option value="price">转债价格</option>
+            </select>
+          </label>
+          <label>
+            <span>板块筛选</span>
+            <select id="sectorSelect">
+              <option value="">全部板块</option>
+            </select>
+          </label>
+          <label>
+            <span>搜索</span>
+            <input id="searchInput" type="search" placeholder="名称 / 代码 / 正股" autocomplete="off" />
+          </label>
+          <button id="refreshButton" type="button">刷新 MiniQMT 行情</button>
+          <div id="colorLegend" class="color-legend" aria-label="色彩刻度"></div>
+          <p id="dataNote" class="data-note"></p>
+        </aside>
+
+        <section id="heatmapStage" class="heatmap-stage" aria-label="可转债热力图">
+          <svg id="heatmapSvg" role="img" aria-label="按板块分组的可转债分层矩形图"></svg>
+          <div id="heatmapTooltip" class="heatmap-tooltip" hidden></div>
+          <section id="sectorPreview" class="sector-preview" aria-label="板块转债列表" hidden>
+            <header>
+              <div>
+                <strong id="sectorPreviewTitle">-</strong>
+                <span id="sectorPreviewMeta">-</span>
+              </div>
+              <button id="closeSectorPreview" type="button" aria-label="关闭板块列表">×</button>
+            </header>
+            <div class="sector-preview-columns" aria-hidden="true">
+              <span>转债</span>
+              <span>今日分时</span>
+              <span>价格</span>
+              <span>涨跌幅</span>
+            </div>
+            <div id="sectorPreviewList" class="sector-preview-list"></div>
+          </section>
+          <div id="selectedBond" class="selected-bond" hidden>
+            <div>
+              <strong id="selectedBondName">-</strong>
+              <span id="selectedBondMeta">-</span>
+            </div>
+            <div class="selected-bond-quote">
+              <strong id="selectedBondPrice">-</strong>
+              <span id="selectedBondChange">-</span>
+            </div>
+            <button id="openBondDetail" type="button">查看分时</button>
+            <button id="clearSelectedBond" class="selected-close" type="button" aria-label="取消选择">×</button>
+          </div>
+          <div id="emptyState" class="empty-state" hidden>没有匹配的转债</div>
+        </section>
+      </section>
+    </main>
+
+    <section id="bondDetailOverlay" class="bond-detail-overlay" aria-label="可转债分时详情" hidden>
+      <button id="closeBondDetail" class="detail-close" type="button" aria-label="关闭分时详情">×</button>
+      <iframe id="bondDetailFrame" title="可转债分时指标"></iframe>
+    </section>
+    <script src="./bond-heatmap.js" defer></script>
+  </body>
+</html>

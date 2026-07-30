@@ -42,6 +42,8 @@ const requestedCode = String(params.get("code") || "").replace(/\D/g, "");
 const requestedName = params.get("name") || "";
 const state = {
   payload: null,
+  dailyPayload: null,
+  view: params.get("view") === "daily" ? "daily" : "intraday",
   selectedIndex: -1,
   refreshTimer: 0,
   resizeTimer: 0,
@@ -58,11 +60,20 @@ const nodes = {
   code: document.querySelector("#bondCode"),
   latestPrice: document.querySelector("#latestPrice"),
   latestChange: document.querySelector("#latestChange"),
+  barCountLabel: document.querySelector("#barCountLabel"),
   barCount: document.querySelector("#barCount"),
+  latestMinuteLabel: document.querySelector("#latestMinuteLabel"),
   latestMinute: document.querySelector("#latestMinute"),
+  totalAmountLabel: document.querySelector("#totalAmountLabel"),
   totalAmount: document.querySelector("#totalAmount"),
+  eventCountLabel: document.querySelector("#eventCountLabel"),
   eventCount: document.querySelector("#eventCount"),
+  intradayViewButton: document.querySelector("#intradayViewButton"),
+  dailyViewButton: document.querySelector("#dailyViewButton"),
+  dateControl: document.querySelector("#dateControl"),
   dateSelect: document.querySelector("#dateSelect"),
+  dailyRangeControl: document.querySelector("#dailyRangeControl"),
+  dailyRangeSelect: document.querySelector("#dailyRangeSelect"),
   refreshButton: document.querySelector("#refreshButton"),
   connectionStatus: document.querySelector("#connectionStatus"),
   dataAlert: document.querySelector("#dataAlert"),
@@ -70,6 +81,9 @@ const nodes = {
   canvas: document.querySelector("#indicatorChart"),
   tooltip: document.querySelector("#chartTooltip"),
   eventList: document.querySelector("#eventList"),
+  intradayLegend: document.querySelector("#intradayLegend"),
+  dailyLegend: document.querySelector("#dailyLegend"),
+  eventsCard: document.querySelector(".events-card"),
   dataFootnote: document.querySelector("#dataFootnote"),
 };
 
@@ -164,6 +178,101 @@ async function loadBond(options = {}) {
   }
 }
 
+function setView(view, options = {}) {
+  state.view = view === "daily" ? "daily" : "intraday";
+  state.selectedIndex = -1;
+  nodes.tooltip.hidden = true;
+  nodes.intradayViewButton.classList.toggle("is-active", state.view === "intraday");
+  nodes.dailyViewButton.classList.toggle("is-active", state.view === "daily");
+  nodes.dateControl.hidden = state.view !== "intraday";
+  nodes.dailyRangeControl.hidden = state.view !== "daily";
+  nodes.intradayLegend.hidden = state.view !== "intraday";
+  nodes.dailyLegend.hidden = state.view !== "daily";
+  nodes.eventsCard.hidden = state.view !== "intraday";
+  window.clearTimeout(state.refreshTimer);
+
+  if (options.updateUrl !== false) {
+    const url = new URL(window.location.href);
+    if (state.view === "daily") url.searchParams.set("view", "daily");
+    else url.searchParams.delete("view");
+    window.history.replaceState(window.history.state, "", url);
+  }
+
+  if (state.view === "daily") {
+    if (state.dailyPayload && !options.force) renderDailyPayload(state.dailyPayload);
+    else void loadDaily();
+  } else if (state.payload && !options.force) {
+    renderPayload(state.payload);
+    setStatus(statusText(state.payload), statusTone(state.payload));
+    scheduleRefresh();
+  } else {
+    void loadBond();
+  }
+}
+
+async function loadDaily() {
+  if (!requestedCode) {
+    setStatus("缺少转债代码", "is-error");
+    return;
+  }
+  const requestId = (state.requestId += 1);
+  const count = Number(nodes.dailyRangeSelect.value) || 120;
+  setStatus("正在读取 MiniQMT 日K");
+  nodes.refreshButton.disabled = true;
+  try {
+    const query = new URLSearchParams({ code: requestedCode, count: String(count) });
+    const payload = await fetchJson(`/api/miniqmt/daily?${query}`, 120000);
+    if (requestId !== state.requestId || state.view !== "daily") return;
+    state.dailyPayload = payload;
+    state.selectedIndex = Math.max(0, payload.rows.length - 1);
+    renderDailyPayload(payload);
+    setStatus(`日K · ${payload.source} · ${payload.rows.length}日`);
+  } catch (error) {
+    if (requestId !== state.requestId) return;
+    setStatus(error.message || "MiniQMT日K读取失败", "is-error");
+  } finally {
+    if (requestId === state.requestId) nodes.refreshButton.disabled = false;
+  }
+}
+
+function displayDailyDate(value) {
+  const text = String(value || "");
+  return text.length === 8
+    ? `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}`
+    : text || "-";
+}
+
+function renderDailyPayload(payload) {
+  const rows = payload.rows || [];
+  if (!rows.length) return;
+  const latest = rows.at(-1);
+  const first = rows[0];
+  const displayName = requestedName || state.payload?.name || "可转债";
+  const rangeReturn =
+    Number(first.close) > 0 ? (Number(latest.close) / Number(first.close) - 1) * 100 : 0;
+  document.title = `${displayName} ${payload.code} · 日K`;
+  nodes.name.textContent = displayName;
+  nodes.code.textContent = payload.code;
+  nodes.latestPrice.textContent = formatNumber(latest.close, 3);
+  nodes.latestChange.textContent =
+    `${Number(latest.change) > 0 ? "+" : ""}${formatNumber(latest.change, 2)}%`;
+  nodes.latestChange.className = toneClass(latest.change);
+  nodes.barCountLabel.textContent = "交易日数";
+  nodes.latestMinuteLabel.textContent = "最新日期";
+  nodes.totalAmountLabel.textContent = "区间成交额";
+  nodes.eventCountLabel.textContent = "区间涨跌";
+  nodes.barCount.textContent = String(rows.length);
+  nodes.latestMinute.textContent = displayDailyDate(latest.date);
+  nodes.totalAmount.textContent = formatAmount(
+    rows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0),
+  );
+  nodes.eventCount.textContent =
+    `${rangeReturn > 0 ? "+" : ""}${formatNumber(rangeReturn, 2)}%`;
+  nodes.eventCount.className = toneClass(rangeReturn);
+  nodes.dataAlert.hidden = true;
+  drawChart();
+}
+
 function renderPayload(payload) {
   const displayName = payload.name || requestedName || "可转债";
   document.title = `${displayName} ${payload.code} · MiniQMT分时指标`;
@@ -178,6 +287,11 @@ function renderPayload(payload) {
     2,
   )}%`;
   nodes.latestChange.className = toneClass(displayedReturn);
+  nodes.barCountLabel.textContent = "分钟数";
+  nodes.latestMinuteLabel.textContent = "最新分钟";
+  nodes.totalAmountLabel.textContent = "累计成交额";
+  nodes.eventCountLabel.textContent = "今日信号";
+  nodes.eventCount.className = "";
   nodes.barCount.textContent = `${payload.bar_count}${payload.complete_session ? " / 241" : ""}`;
   nodes.latestMinute.textContent = payload.latest_minute || "-";
   nodes.totalAmount.textContent = formatAmount(payload.total_amount);
@@ -301,6 +415,7 @@ function escapeHtml(value) {
 
 function scheduleRefresh() {
   window.clearTimeout(state.refreshTimer);
+  if (state.view !== "intraday") return;
   const realtime = state.payload?.realtime;
   const waitingForToday = !state.manualDate && realtime?.data_is_stale;
   const followingLive = realtime?.monitor_alive && realtime?.is_latest_trading_date;
@@ -338,7 +453,10 @@ function chartGeometry(canvas) {
 }
 
 function finiteValues(values) {
-  return values.map(Number).filter(Number.isFinite);
+  return values
+    .filter((value) => value !== null && value !== undefined && value !== "")
+    .map(Number)
+    .filter(Number.isFinite);
 }
 
 function domain(values, options = {}) {
@@ -380,6 +498,10 @@ function setupCanvas() {
 }
 
 function drawChart() {
+  if (state.view === "daily") {
+    drawDailyChart();
+    return;
+  }
   const rows = state.payload?.rows || [];
   if (!rows.length) return;
   const context = setupCanvas();
@@ -392,6 +514,156 @@ function drawChart() {
   drawEvents(context, geometry.panels[0], rows, domains.price);
   drawAxes(context, geometry, rows, domains);
   if (state.selectedIndex >= 0) drawCrosshair(context, geometry, rows, state.selectedIndex);
+}
+
+function dailyChartGeometry(canvas) {
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  const left = width < 700 ? 48 : 68;
+  const right = width < 700 ? 48 : 72;
+  const top = 12;
+  const bottom = 30;
+  const gap = 14;
+  const usable = height - top - bottom - gap;
+  const priceHeight = usable * 0.76;
+  return {
+    width,
+    height,
+    panels: [
+      { key: "price", label: "日K", x: left, y: top, width: width - left - right, height: priceHeight },
+      {
+        key: "amount",
+        label: "成交额",
+        x: left,
+        y: top + priceHeight + gap,
+        width: width - left - right,
+        height: usable - priceHeight,
+      },
+    ],
+  };
+}
+
+function movingAverage(rows, period) {
+  let sum = 0;
+  return rows.map((row, index) => {
+    sum += Number(row.close);
+    if (index >= period) sum -= Number(rows[index - period].close);
+    return index >= period - 1 ? sum / period : null;
+  });
+}
+
+function drawDailyChart() {
+  const rows = state.dailyPayload?.rows || [];
+  if (!rows.length) return;
+  const chartRows = rows.map((row) => ({ ...row }));
+  for (const [key, period] of [["ma5", 5], ["ma10", 10], ["ma20", 20]]) {
+    const values = movingAverage(chartRows, period);
+    chartRows.forEach((row, index) => {
+      row[key] = values[index];
+    });
+  }
+
+  const context = setupCanvas();
+  const geometry = dailyChartGeometry(nodes.canvas);
+  const [pricePanel, amountPanel] = geometry.panels;
+  context.clearRect(0, 0, geometry.width, geometry.height);
+  context.font = '11px Arial, "Microsoft YaHei", sans-serif';
+  context.lineJoin = "round";
+  context.lineCap = "round";
+
+  for (const panel of geometry.panels) {
+    context.fillStyle = "#fff";
+    context.fillRect(panel.x, panel.y, panel.width, panel.height);
+    context.strokeStyle = "#dfe5da";
+    context.strokeRect(panel.x + 0.5, panel.y + 0.5, panel.width - 1, panel.height - 1);
+    for (let line = 1; line < 5; line += 1) {
+      const y = panel.y + (panel.height * line) / 5;
+      context.strokeStyle = "#edf0ea";
+      context.beginPath();
+      context.moveTo(panel.x, y);
+      context.lineTo(panel.x + panel.width, y);
+      context.stroke();
+    }
+  }
+
+  const priceDomain = domain(
+    chartRows.flatMap((row) => [row.low, row.high, row.ma5, row.ma10, row.ma20]),
+    { padding: 0.05 },
+  );
+  const amountDomain = domain(chartRows.map((row) => row.amount), {
+    includeZero: true,
+    padding: 0.03,
+  });
+  const candleWidth = Math.max(1.5, Math.min(9, (pricePanel.width / chartRows.length) * 0.62));
+  chartRows.forEach((row, index) => {
+    const x = xFor(index, pricePanel, chartRows.length);
+    const openY = yFor(row.open, pricePanel, priceDomain);
+    const closeY = yFor(row.close, pricePanel, priceDomain);
+    const highY = yFor(row.high, pricePanel, priceDomain);
+    const lowY = yFor(row.low, pricePanel, priceDomain);
+    const rising = Number(row.close) >= Number(row.open);
+    const color = rising ? "#df2434" : "#159447";
+    context.strokeStyle = color;
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(x, highY);
+    context.lineTo(x, lowY);
+    context.stroke();
+    context.fillStyle = rising ? "rgba(223,36,52,.18)" : "rgba(21,148,71,.22)";
+    context.strokeStyle = color;
+    const bodyY = Math.min(openY, closeY);
+    const bodyHeight = Math.max(1.2, Math.abs(openY - closeY));
+    context.fillRect(x - candleWidth / 2, bodyY, candleWidth, bodyHeight);
+    context.strokeRect(x - candleWidth / 2, bodyY, candleWidth, bodyHeight);
+  });
+  drawLine(context, chartRows, pricePanel, priceDomain, "ma5", "#e2a51a", 1.2);
+  drawLine(context, chartRows, pricePanel, priceDomain, "ma10", "#d638c2", 1.2);
+  drawLine(context, chartRows, pricePanel, priceDomain, "ma20", "#1f5fbf", 1.2);
+  drawBars(
+    context,
+    chartRows,
+    amountPanel,
+    amountDomain,
+    (row) => row.close >= row.open ? "rgba(223,36,52,.62)" : "rgba(21,148,71,.62)",
+  );
+
+  context.fillStyle = "#586355";
+  context.font = '10px Arial, "Microsoft YaHei", sans-serif';
+  context.textBaseline = "middle";
+  context.textAlign = "left";
+  context.fillText("日K", pricePanel.x + 6, pricePanel.y + 10);
+  context.fillText("成交额", amountPanel.x + 6, amountPanel.y + 10);
+  for (const [panel, range, key] of [
+    [pricePanel, priceDomain, "price"],
+    [amountPanel, amountDomain, "amount"],
+  ]) {
+    for (const ratio of [0.15, 0.5, 0.85]) {
+      const value = range[1] - (range[1] - range[0]) * ratio;
+      const y = panel.y + panel.height * ratio;
+      context.textAlign = "right";
+      context.fillText(formatAxis(value, key), panel.x - 6, y);
+    }
+  }
+  const labels = [0, Math.floor((chartRows.length - 1) / 4), Math.floor((chartRows.length - 1) / 2), Math.floor(((chartRows.length - 1) * 3) / 4), chartRows.length - 1];
+  context.textBaseline = "top";
+  labels.forEach((index, labelIndex) => {
+    const x = xFor(index, amountPanel, chartRows.length);
+    context.textAlign = labelIndex === 0 ? "left" : labelIndex === labels.length - 1 ? "right" : "center";
+    context.fillText(displayDailyDate(chartRows[index]?.date).slice(5), x, amountPanel.y + amountPanel.height + 7);
+  });
+
+  if (state.selectedIndex >= 0) {
+    const index = Math.max(0, Math.min(chartRows.length - 1, state.selectedIndex));
+    const x = xFor(index, pricePanel, chartRows.length);
+    context.save();
+    context.strokeStyle = "rgba(48,61,51,.48)";
+    context.setLineDash([3, 3]);
+    context.beginPath();
+    context.moveTo(x, pricePanel.y);
+    context.lineTo(x, amountPanel.y + amountPanel.height);
+    context.stroke();
+    context.restore();
+  }
 }
 
 function drawPanels(context, geometry, rows) {
@@ -579,7 +851,11 @@ function drawLine(context, rows, panel, range, key, color, width, dash = []) {
   context.beginPath();
   let started = false;
   rows.forEach((row, index) => {
-    const value = Number(row[key]);
+    const rawValue = row[key];
+    const value =
+      rawValue === null || rawValue === undefined || rawValue === ""
+        ? Number.NaN
+        : Number(rawValue);
     if (!Number.isFinite(value)) {
       started = false;
       return;
@@ -755,9 +1031,15 @@ function drawCrosshair(context, geometry, rows, index) {
 }
 
 function selectedIndexFromPointer(event) {
-  const rows = state.payload?.rows || [];
+  const rows =
+    state.view === "daily"
+      ? state.dailyPayload?.rows || []
+      : state.payload?.rows || [];
   if (!rows.length) return -1;
-  const geometry = chartGeometry(nodes.canvas);
+  const geometry =
+    state.view === "daily"
+      ? dailyChartGeometry(nodes.canvas)
+      : chartGeometry(nodes.canvas);
   const panel = geometry.panels[0];
   const rect = nodes.canvas.getBoundingClientRect();
   const x = event.clientX - rect.left;
@@ -769,6 +1051,10 @@ function showTooltip(event) {
   const index = selectedIndexFromPointer(event);
   if (index < 0) return;
   state.selectedIndex = index;
+  if (state.view === "daily") {
+    showDailyTooltip(event, index);
+    return;
+  }
   const row = state.payload.rows[index];
   const nearbyEvents = state.payload.events.filter((item) => {
     const source = String(item.details?.source_bar_time || item.event_time || "").slice(11, 16);
@@ -795,6 +1081,27 @@ function showTooltip(event) {
   drawChart();
 }
 
+function showDailyTooltip(event, index) {
+  const rows = state.dailyPayload?.rows || [];
+  const row = rows[index];
+  if (!row) return;
+  nodes.tooltip.innerHTML = `
+    <strong>${displayDailyDate(row.date)}　${formatNumber(row.close, 3)}</strong>
+    开 ${formatNumber(row.open, 3)}　高 ${formatNumber(row.high, 3)}　低 ${formatNumber(row.low, 3)}<br>
+    涨跌幅 ${Number(row.change) > 0 ? "+" : ""}${formatNumber(row.change, 2)}%<br>
+    成交额 ${formatAmount(row.amount)}　成交量 ${Number(row.volume || 0).toLocaleString("zh-CN")}
+  `;
+  nodes.tooltip.hidden = false;
+  const wrapRect = nodes.chartWrap.getBoundingClientRect();
+  const left = event.clientX - wrapRect.left + 14;
+  const top = event.clientY - wrapRect.top + 12;
+  const maxLeft = nodes.chartWrap.clientWidth - nodes.tooltip.offsetWidth - 8;
+  const maxTop = nodes.chartWrap.clientHeight - nodes.tooltip.offsetHeight - 8;
+  nodes.tooltip.style.left = `${Math.max(8, Math.min(maxLeft, left))}px`;
+  nodes.tooltip.style.top = `${Math.max(8, Math.min(maxTop, top))}px`;
+  drawChart();
+}
+
 function formatMinuteReturn(price) {
   const previousClose = Number(state.payload?.previous_close);
   if (!(previousClose > 0) || !Number.isFinite(Number(price))) return "-";
@@ -809,12 +1116,19 @@ nodes.canvas.addEventListener("pointerleave", () => {
   drawChart();
 });
 nodes.refreshButton.addEventListener("click", () => {
-  loadBond({ date: state.manualDate ? nodes.dateSelect.value : "" });
+  if (state.view === "daily") {
+    loadDaily();
+  } else {
+    loadBond({ date: state.manualDate ? nodes.dateSelect.value : "" });
+  }
 });
 nodes.dateSelect.addEventListener("change", () => {
   state.manualDate = true;
   loadBond({ date: nodes.dateSelect.value });
 });
+nodes.dailyRangeSelect.addEventListener("change", loadDaily);
+nodes.intradayViewButton.addEventListener("click", () => setView("intraday"));
+nodes.dailyViewButton.addEventListener("click", () => setView("daily"));
 nodes.backLink.addEventListener("click", (event) => {
   if (isEmbedded && window.parent !== window) {
     event.preventDefault();
@@ -832,4 +1146,4 @@ window.addEventListener("resize", () => {
 
 nodes.name.textContent = requestedName || "可转债";
 nodes.code.textContent = requestedCode;
-loadBond();
+setView(state.view, { updateUrl: false, force: true });

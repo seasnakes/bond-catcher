@@ -11,7 +11,8 @@ import os
 import re
 import sqlite3
 import sys
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -64,6 +65,8 @@ FOCUS_EVENT_TYPES = {
     "high_pullback",
     "low_rebound",
 }
+DAILY_CACHE_TTL_SECONDS = 300
+DAILY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 def load_monitor_module() -> Any:
@@ -272,6 +275,119 @@ def quotes_payload(codes_input: str) -> dict[str, Any]:
             "quotes": quotes,
         }
     )
+
+
+def daily_payload(code_input: str, count_input: int = 120) -> dict[str, Any]:
+    code = normalize_code(code_input)
+    count = max(30, min(500, int(count_input or 120)))
+    cache_key = f"{code}:{count}"
+    cached = DAILY_CACHE.get(cache_key)
+    if cached and time.monotonic() - cached[0] < DAILY_CACHE_TTL_SECONDS:
+        return {**cached[1], "cached": True}
+
+    stored_code = monitor_code(code)
+    end_moment = datetime.now()
+    start_moment = end_moment - timedelta(days=max(730, int(count * 2.6)))
+    start_time = start_moment.strftime("%Y%m%d")
+    end_time = end_moment.strftime("%Y%m%d")
+    bridge = MONITOR.BridgeClient(
+        f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}",
+        timeout=30.0,
+    )
+    download_error = ""
+    try:
+        bridge.post(
+            "/api/download/history_data2",
+            {
+                "stocks": [stored_code],
+                "period": "1d",
+                "start_time": start_time,
+                "end_time": end_time,
+            },
+            timeout=90.0,
+        )
+    except Exception as error:
+        download_error = f"{type(error).__name__}: {error}"
+
+    payload = bridge.get(
+        "/api/market/market_data_ex",
+        {
+            "stocks": stored_code,
+            "period": "1d",
+            "start_time": start_time,
+            "end_time": end_time,
+            "count": "-1",
+            "dividend_type": "none",
+            "fill_data": "false",
+        },
+        timeout=30.0,
+    )
+    raw_rows = list((payload.get("data") or {}).get(stored_code) or [])
+    rows: list[dict[str, Any]] = []
+    for raw in raw_rows:
+        open_price = finite_or_none(raw.get("open"))
+        high = finite_or_none(raw.get("high"))
+        low = finite_or_none(raw.get("low"))
+        close = finite_or_none(raw.get("close"))
+        if not all(
+            value is not None and value > 0
+            for value in (open_price, high, low, close)
+        ):
+            continue
+        trading_date = str(raw.get("index") or "")
+        if not re.fullmatch(r"\d{8}", trading_date):
+            timestamp = int(raw.get("time") or 0)
+            trading_date = (
+                datetime.fromtimestamp(timestamp / 1000).strftime("%Y%m%d")
+                if timestamp > 0
+                else ""
+            )
+        previous_close = finite_or_none(raw.get("preClose"))
+        change = (
+            (close / previous_close - 1) * 100
+            if previous_close is not None and previous_close > 0
+            else None
+        )
+        rows.append(
+            {
+                "date": trading_date,
+                "time": int(raw.get("time") or 0),
+                "open": open_price,
+                "high": high,
+                "low": low,
+                "close": close,
+                "volume": finite_or_none(raw.get("volume")) or 0,
+                "amount": finite_or_none(raw.get("amount")) or 0,
+                "previous_close": previous_close,
+                "change": change,
+                "suspend": int(raw.get("suspendFlag") or 0),
+            }
+        )
+    rows.sort(key=lambda row: (row["date"], row["time"]))
+    rows = rows[-count:]
+    if not rows:
+        detail = f"；下载错误：{download_error}" if download_error else ""
+        raise LookupError(f"MiniQMT未返回{stored_code}日K数据{detail}")
+
+    result = clean_json(
+        {
+            "ok": True,
+            "mode": "read_only",
+            "source": "MiniQMT 1d",
+            "code": code,
+            "monitor_code": stored_code,
+            "count": len(rows),
+            "requested_count": count,
+            "start_date": rows[0]["date"],
+            "end_date": rows[-1]["date"],
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "download_error": download_error or None,
+            "cached": False,
+            "rows": rows,
+        }
+    )
+    DAILY_CACHE[cache_key] = (time.monotonic(), result)
+    return result
 
 
 def resolve_name(
@@ -616,6 +732,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 payload = bond_payload(
                     (query.get("code") or [""])[0],
                     (query.get("date") or [""])[0],
+                )
+                self.send_payload(200, payload)
+                return
+            if parsed.path == "/daily":
+                payload = daily_payload(
+                    (query.get("code") or [""])[0],
+                    int((query.get("count") or ["120"])[0]),
                 )
                 self.send_payload(200, payload)
                 return

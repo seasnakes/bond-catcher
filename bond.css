@@ -64,6 +64,10 @@ select {
   text-decoration: none;
 }
 
+.heatmap-link {
+  margin-left: 12px;
+}
+
 .instrument-heading {
   display: flex;
   align-items: flex-end;
@@ -124,6 +128,31 @@ h1 small {
   align-items: center;
   gap: 8px;
   margin-top: 12px;
+}
+
+.indicator-controls [hidden],
+.chart-legend[hidden],
+.events-card[hidden] {
+  display: none;
+}
+
+.view-switch {
+  display: inline-flex;
+}
+
+.view-switch button {
+  min-width: 48px;
+  border-right-width: 0;
+}
+
+.view-switch button:last-child {
+  border-right-width: 1px;
+}
+
+.view-switch button.is-active {
+  border-color: #719655;
+  background: #c9ecaa;
+  color: #26351e;
 }
 
 .indicator-controls label {
@@ -275,6 +304,30 @@ h1 small {
 
 .legend-previous {
   border-top: 1px dashed #7d8998;
+}
+
+.legend-candle-up {
+  height: 10px !important;
+  border: 1px solid var(--red);
+  background: rgba(223, 36, 52, 0.18);
+}
+
+.legend-candle-down {
+  height: 10px !important;
+  border: 1px solid var(--green);
+  background: rgba(21, 148, 71, 0.18);
+}
+
+.legend-ma5 {
+  background: #e2a51a;
+}
+
+.legend-ma10 {
+  background: #d638c2;
+}
+
+.legend-ma20 {
+  background: #1f5fbf;
 }
 
 .chart-legend .legend-note {

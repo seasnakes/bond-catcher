@@ -105,6 +105,16 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (url.pathname === "/api/miniqmt/daily") {
+      const query = new URLSearchParams();
+      for (const key of ["code", "count"]) {
+        const value = url.searchParams.get(key);
+        if (value) query.set(key, value);
+      }
+      await handleMiniQmtApi(`/daily?${query}`, response);
+      return;
+    }
+
     if (url.pathname === "/api/miniqmt/events") {
       const query = new URLSearchParams();
       for (const key of ["scope", "after_id", "limit", "codes"]) {

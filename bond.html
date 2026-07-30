@@ -11,6 +11,7 @@
     <main class="indicator-shell">
       <header class="indicator-header">
         <a class="back-link" href="./">← 返回看板</a>
+        <a class="back-link heatmap-link" href="./bond-heatmap.html">转债星图</a>
         <div class="instrument-heading">
           <div>
             <span class="eyebrow">MINIQMT · 只读</span>
@@ -22,9 +23,21 @@
           </div>
         </div>
         <div class="indicator-controls">
-          <label>
+          <div class="view-switch" role="group" aria-label="行情周期">
+            <button id="intradayViewButton" class="is-active" type="button">分时</button>
+            <button id="dailyViewButton" type="button">日K</button>
+          </div>
+          <label id="dateControl">
             <span>交易日</span>
             <select id="dateSelect"></select>
+          </label>
+          <label id="dailyRangeControl" hidden>
+            <span>区间</span>
+            <select id="dailyRangeSelect">
+              <option value="60">近60日</option>
+              <option value="120" selected>近120日</option>
+              <option value="250">近250日</option>
+            </select>
           </label>
           <button id="refreshButton" type="button">立即刷新</button>
           <span id="connectionStatus" class="status-pill">正在连接</span>
@@ -33,20 +46,28 @@
       </header>
 
       <section class="metrics" aria-label="数据摘要">
-        <article><span>分钟数</span><strong id="barCount">-</strong></article>
-        <article><span>最新分钟</span><strong id="latestMinute">-</strong></article>
-        <article><span>累计成交额</span><strong id="totalAmount">-</strong></article>
-        <article><span>今日信号</span><strong id="eventCount">-</strong></article>
+        <article><span id="barCountLabel">分钟数</span><strong id="barCount">-</strong></article>
+        <article><span id="latestMinuteLabel">最新分钟</span><strong id="latestMinute">-</strong></article>
+        <article><span id="totalAmountLabel">累计成交额</span><strong id="totalAmount">-</strong></article>
+        <article><span id="eventCountLabel">今日信号</span><strong id="eventCount">-</strong></article>
       </section>
 
       <section class="chart-card">
-        <div class="chart-legend">
+        <div id="intradayLegend" class="chart-legend">
           <span><i class="legend-price"></i>价格</span>
           <span><i class="legend-average"></i>均价线≈</span>
           <span><i class="legend-previous"></i>昨收</span>
           <span><i class="legend-purple"></i>紫线</span>
           <span><i class="legend-green"></i>绿线</span>
           <span class="legend-note">移动鼠标查看分钟详情</span>
+        </div>
+        <div id="dailyLegend" class="chart-legend" hidden>
+          <span><i class="legend-candle-up"></i>上涨K线</span>
+          <span><i class="legend-candle-down"></i>下跌K线</span>
+          <span><i class="legend-ma5"></i>MA5</span>
+          <span><i class="legend-ma10"></i>MA10</span>
+          <span><i class="legend-ma20"></i>MA20</span>
+          <span class="legend-note">移动鼠标查看日线详情</span>
         </div>
         <div id="chartWrap" class="chart-wrap">
           <canvas id="indicatorChart" aria-label="MiniQMT五栏分时指标图"></canvas>

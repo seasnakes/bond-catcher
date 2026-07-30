@@ -348,6 +348,10 @@ select {
   white-space: nowrap;
 }
 
+.heatmap-entry {
+  text-decoration: none;
+}
+
 .text-button:hover {
   background: #dff1cc;
 }
