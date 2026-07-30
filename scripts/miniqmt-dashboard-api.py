@@ -144,12 +144,17 @@ def api_health() -> dict[str, Any]:
     service = read_json(SERVICE_PATH)
     pid = int(service.get("pid") or 0)
     latest = databases[0] if databases else None
+    calendar_date = datetime.now().strftime("%Y%m%d")
     return {
         "ok": bool(latest),
         "mode": "read_only",
         "monitor_alive": process_alive(pid),
         "monitor_pid": pid or None,
+        "calendar_date": calendar_date,
         "latest_trading_date": latest.stem if latest else None,
+        "latest_database_is_today": bool(
+            latest and latest.stem == calendar_date
+        ),
         "available_dates": [path.stem for path in databases],
         "database_updated_at": (
             datetime.fromtimestamp(latest.stat().st_mtime).isoformat(timespec="seconds")
@@ -369,6 +374,10 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
                 "is_latest_trading_date": (
                     trading_date == health["latest_trading_date"]
                 ),
+                "calendar_date": health["calendar_date"],
+                "is_today": trading_date == health["calendar_date"],
+                "data_is_stale": trading_date != health["calendar_date"],
+                "auto_follow_latest": not bool(date_input),
                 "refresh_interval_seconds": 5,
             },
             "rows": rows,

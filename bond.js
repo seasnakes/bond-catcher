@@ -46,6 +46,7 @@ const state = {
   refreshTimer: 0,
   resizeTimer: 0,
   requestId: 0,
+  manualDate: Boolean(params.get("date")),
 };
 
 const nodes = {
@@ -60,6 +61,7 @@ const nodes = {
   dateSelect: document.querySelector("#dateSelect"),
   refreshButton: document.querySelector("#refreshButton"),
   connectionStatus: document.querySelector("#connectionStatus"),
+  dataAlert: document.querySelector("#dataAlert"),
   chartWrap: document.querySelector("#chartWrap"),
   canvas: document.querySelector("#indicatorChart"),
   tooltip: document.querySelector("#chartTooltip"),
@@ -117,7 +119,11 @@ async function loadBond(options = {}) {
     return;
   }
   const requestId = (state.requestId += 1);
-  const date = options.date ?? nodes.dateSelect.value ?? params.get("date") ?? "";
+  const date = options.date !== undefined
+    ? options.date
+    : state.manualDate
+      ? nodes.dateSelect.value || params.get("date") || ""
+      : "";
   setStatus("正在读取MiniQMT");
   try {
     const query = new URLSearchParams({ code: requestedCode });
@@ -127,7 +133,7 @@ async function loadBond(options = {}) {
     state.payload = payload;
     state.selectedIndex = Math.max(0, payload.rows.length - 1);
     renderPayload(payload);
-    setStatus(statusText(payload), "is-live");
+    setStatus(statusText(payload), statusTone(payload));
     scheduleRefresh();
   } catch (error) {
     if (requestId !== state.requestId) return;
@@ -157,6 +163,7 @@ function renderPayload(payload) {
   nodes.totalAmount.textContent = formatAmount(payload.total_amount);
   nodes.eventCount.textContent = String(payload.events.length);
   renderDates(payload.available_dates, payload.trading_date);
+  renderDataAlert(payload);
   renderEvents(payload.events);
   nodes.dataFootnote.textContent = payload.full_session
     ? "当前为完整交易日数据；黄色均价线按分钟成交额估算，普通行情不等同于Level-2逐笔。"
@@ -167,12 +174,50 @@ function renderPayload(payload) {
 }
 
 function statusText(payload) {
+  if (payload.realtime?.data_is_stale && !state.manualDate) {
+    return "等待今日数据 · 自动重试";
+  }
   if (payload.realtime?.monitor_alive && payload.realtime?.is_latest_trading_date) {
     return `实时刷新 · ${payload.realtime.refresh_interval_seconds || 5}秒 · 只读`;
   }
   if (payload.full_session) return "完整241分钟 · 只读";
   if (payload.complete_session) return "可用交易日 · 只读";
   return "历史/静态数据 · 只读";
+}
+
+function statusTone(payload) {
+  if (payload.realtime?.data_is_stale && !state.manualDate) return "is-warning";
+  if (payload.realtime?.monitor_alive && payload.realtime?.is_latest_trading_date) {
+    return "is-live";
+  }
+  return "";
+}
+
+function displayDate(value) {
+  const text = String(value || "");
+  return text.length === 8
+    ? `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}`
+    : text || "-";
+}
+
+function renderDataAlert(payload) {
+  const isHistorical = payload.realtime?.data_is_stale;
+  if (!isHistorical) {
+    nodes.dataAlert.hidden = true;
+    nodes.dataAlert.textContent = "";
+    nodes.dataAlert.className = "data-alert";
+    return;
+  }
+  nodes.dataAlert.hidden = false;
+  if (state.manualDate) {
+    nodes.dataAlert.className = "data-alert is-history";
+    nodes.dataAlert.textContent = `正在查看历史交易日 ${displayDate(payload.trading_date)}，不会自动跳回今天。`;
+    return;
+  }
+  nodes.dataAlert.className = "data-alert is-stale";
+  nodes.dataAlert.textContent =
+    `今日数据尚未到达，当前临时显示 ${displayDate(payload.trading_date)}。` +
+    "页面会持续检查，并在MiniQMT产生今日数据后自动切换。";
 }
 
 function renderDates(dates, selected) {
@@ -233,13 +278,15 @@ function escapeHtml(value) {
 
 function scheduleRefresh() {
   window.clearTimeout(state.refreshTimer);
-  if (
-    !state.payload?.realtime?.monitor_alive ||
-    !state.payload?.realtime?.is_latest_trading_date
-  ) {
-    return;
-  }
-  state.refreshTimer = window.setTimeout(() => loadBond({ date: state.payload.trading_date }), 5000);
+  const realtime = state.payload?.realtime;
+  const waitingForToday = !state.manualDate && realtime?.data_is_stale;
+  const followingLive = realtime?.monitor_alive && realtime?.is_latest_trading_date;
+  if (!waitingForToday && !followingLive) return;
+  const date = state.manualDate ? state.payload.trading_date : "";
+  state.refreshTimer = window.setTimeout(
+    () => loadBond({ date }),
+    (realtime?.refresh_interval_seconds || 5) * 1000,
+  );
 }
 
 function chartGeometry(canvas) {
@@ -738,8 +785,13 @@ nodes.canvas.addEventListener("pointerleave", () => {
   state.selectedIndex = -1;
   drawChart();
 });
-nodes.refreshButton.addEventListener("click", () => loadBond({ date: nodes.dateSelect.value }));
-nodes.dateSelect.addEventListener("change", () => loadBond({ date: nodes.dateSelect.value }));
+nodes.refreshButton.addEventListener("click", () => {
+  loadBond({ date: state.manualDate ? nodes.dateSelect.value : "" });
+});
+nodes.dateSelect.addEventListener("change", () => {
+  state.manualDate = true;
+  loadBond({ date: nodes.dateSelect.value });
+});
 window.addEventListener("resize", () => {
   window.clearTimeout(state.resizeTimer);
   state.resizeTimer = window.setTimeout(drawChart, 100);

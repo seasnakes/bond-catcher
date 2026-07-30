@@ -171,6 +171,35 @@ h1 small {
   color: #a62727;
 }
 
+.status-pill.is-warning {
+  border-color: #e0bd74;
+  background: #fff7df;
+  color: #8b5d08;
+}
+
+.data-alert {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid #d8c99b;
+  background: #fff9e8;
+  color: #70500d;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.data-alert.is-stale {
+  border-color: #e1a2a2;
+  background: #fff0f0;
+  color: #9f2929;
+}
+
+.data-alert.is-history {
+  border-color: #b8c5ae;
+  background: #f4f7f0;
+  color: #576450;
+}
+
 .metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
