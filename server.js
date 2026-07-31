@@ -117,7 +117,15 @@ const server = http.createServer(async (request, response) => {
 
     if (url.pathname === "/api/miniqmt/events") {
       const query = new URLSearchParams();
-      for (const key of ["scope", "after_id", "limit", "codes"]) {
+      for (const key of [
+        "scope",
+        "after_id",
+        "limit",
+        "codes",
+        "types",
+        "min_daily_amount",
+        "min_daily_amplitude",
+      ]) {
         const value = url.searchParams.get(key);
         if (value) query.set(key, value);
       }
@@ -130,6 +138,21 @@ const server = http.createServer(async (request, response) => {
       const codes = url.searchParams.get("codes");
       if (codes) query.set("codes", codes);
       await handleMiniQmtApi(`/quotes?${query}`, response);
+      return;
+    }
+
+    if (url.pathname === "/api/active-index/live") {
+      await handleMiniQmtApi("/active-index", response, 55_000);
+      return;
+    }
+
+    if (url.pathname === "/api/miniqmt/tags") {
+      const query = new URLSearchParams();
+      for (const key of ["code", "tag"]) {
+        const value = url.searchParams.get(key);
+        if (value) query.set(key, value);
+      }
+      await handleMiniQmtApi(`/tags?${query}`, response);
       return;
     }
 
@@ -357,9 +380,9 @@ async function handleOpenTdx(request, response) {
   });
 }
 
-async function handleMiniQmtApi(pathname, response) {
+async function handleMiniQmtApi(pathname, response, timeout = 12_000) {
   try {
-    const payload = await fetchLocalJson(pathname, 12_000);
+    const payload = await fetchLocalJson(pathname, timeout);
     sendJson(response, 200, payload);
   } catch (error) {
     const message = error instanceof Error ? error.message : "MiniQMT API unavailable";
@@ -668,6 +691,7 @@ async function fetchSinaGlobalIndices() {
         return {
           ...quote,
           points: spark.points,
+          sparkTimes: spark.times,
           sparkChange: spark.change,
           sparkTime: spark.time,
           sparkSource: "腾讯分时",
@@ -678,6 +702,7 @@ async function fetchSinaGlobalIndices() {
           return {
             ...quote,
             points: spark.points,
+            sparkTimes: spark.times,
             sparkChange: spark.change,
             sparkTime: spark.time,
             sparkSource: "新浪5分钟K线",
@@ -759,6 +784,7 @@ async function fetchSinaGlobalIndices() {
         indices.push({
           ...quote,
           points: spark.points,
+          sparkTimes: spark.times,
           sparkChange: spark.change,
           sparkTime: spark.time,
           sparkSource: "腾讯分时",
@@ -769,6 +795,7 @@ async function fetchSinaGlobalIndices() {
           indices.push({
             ...quote,
             points: spark.points,
+            sparkTimes: spark.times,
             sparkChange: spark.change,
             sparkTime: spark.time,
             sparkSource: spark.source,
@@ -830,6 +857,7 @@ async function fetchTencentIndex(config) {
     return {
       ...quote,
       points: spark.points,
+      sparkTimes: spark.times,
       sparkChange: spark.change,
       sparkTime: spark.time,
       sparkSource: "腾讯分时",
@@ -872,6 +900,7 @@ async function withGlobalIndexSparkline(quote, config) {
   return {
     ...quote,
     points: spark.points,
+    sparkTimes: spark.times,
     sparkChange: spark.change,
     sparkTime: spark.time,
     sparkSource: spark.source,
@@ -942,21 +971,26 @@ async function fetchYahooChartSparkline(symbol, limit, source) {
     throw new Error(`empty yahoo index sparkline: ${symbol}`);
   }
 
-  const points = downsample(
-    closes.filter((value) => Number.isFinite(value) && value > 0),
+  const timestamps = Array.isArray(result?.timestamp) ? result.timestamp : [];
+  const sampledRows = downsampleRows(
+    closes
+      .map((value, index) => ({ value: Number(value), timestamp: timestamps[index] }))
+      .filter((row) => Number.isFinite(row.value) && row.value > 0),
     limit,
+    (row) => row.value,
   );
+  const points = sampledRows.map((row) => row.value);
   if (points.length < 2) {
     throw new Error(`invalid yahoo index sparkline: ${symbol}`);
   }
 
   const first = points[0];
   const last = points[points.length - 1];
-  const timestamps = Array.isArray(result?.timestamp) ? result.timestamp : [];
   const lastTimestamp = timestamps[timestamps.length - 1];
 
   return {
     points,
+    times: sampledRows.map((row) => formatUnixTime(row.timestamp, "Asia/Shanghai")),
     change: first ? ((last - first) / first) * 100 : 0,
     time: formatUnixTime(lastTimestamp, result?.meta?.exchangeTimezoneName),
     source,
@@ -1009,10 +1043,12 @@ async function fetchTencentMinuteAmounts(symbol) {
 
 async function fetchTencentMinuteSparkline(symbol, limit = 58) {
   const rows = await fetchTencentMinuteAmounts(symbol);
-  const points = downsample(
-    rows.map((item) => item.price).filter((value) => Number.isFinite(value) && value > 0),
+  const sampledRows = downsampleRows(
+    rows.filter((item) => Number.isFinite(item.price) && item.price > 0),
     limit,
+    (row) => row.price,
   );
+  const points = sampledRows.map((row) => row.price);
   if (points.length < 2) {
     throw new Error(`empty tencent sparkline: ${symbol}`);
   }
@@ -1021,6 +1057,7 @@ async function fetchTencentMinuteSparkline(symbol, limit = 58) {
   const last = points[points.length - 1];
   return {
     points,
+    times: sampledRows.map((row) => normalizedMinuteClock(row.time)),
     change: first ? ((last - first) / first) * 100 : 0,
     date: rows[rows.length - 1]?.date || currentChinaDateKey(),
     time: rows[rows.length - 1]?.time || "",
@@ -1102,12 +1139,14 @@ async function fetchSinaSparkline(secid, limit = 58) {
     throw new Error(`empty latest-day sparkline: ${secid}`);
   }
 
-  const points = downsample(
+  const sampledRows = downsampleRows(
     latestRows
-      .map((row) => Number(row?.close))
-      .filter((value) => Number.isFinite(value) && value > 0),
+      .map((row) => ({ row, value: Number(row?.close) }))
+      .filter((item) => Number.isFinite(item.value) && item.value > 0),
     limit,
+    (item) => item.value,
   );
+  const points = sampledRows.map((item) => item.value);
 
   if (points.length < 2) {
     throw new Error(`invalid sparkline: ${secid}`);
@@ -1119,6 +1158,7 @@ async function fetchSinaSparkline(secid, limit = 58) {
   return {
     secid,
     points,
+    times: sampledRows.map((item) => normalizedMinuteClock(item.row?.day)),
     change: first ? ((last - first) / first) * 100 : 0,
     date: dateKeyFromDateTime(latestRows[latestRows.length - 1]?.day),
     time: latestRows[latestRows.length - 1]?.day || "",
@@ -1147,12 +1187,17 @@ async function fetchEastmoneyMinuteSparkline(secid, limit = 58) {
     throw new Error(`empty latest-day eastmoney sparkline: ${secid}`);
   }
 
-  const points = downsample(
+  const sampledRows = downsampleRows(
     latestTrends
-      .map((line) => Number(String(line).split(",")[2]))
-      .filter((value) => Number.isFinite(value) && value > 0),
+      .map((line) => ({
+        line,
+        value: Number(String(line).split(",")[2]),
+      }))
+      .filter((item) => Number.isFinite(item.value) && item.value > 0),
     limit,
+    (item) => item.value,
   );
+  const points = sampledRows.map((item) => item.value);
   if (points.length < 2) {
     throw new Error(`invalid eastmoney sparkline: ${secid}`);
   }
@@ -1162,6 +1207,9 @@ async function fetchEastmoneyMinuteSparkline(secid, limit = 58) {
   return {
     secid,
     points,
+    times: sampledRows.map((item) =>
+      normalizedMinuteClock(String(item.line).split(",")[0]),
+    ),
     change: first ? ((last - first) / first) * 100 : 0,
     date: dateKeyFromDateTime(String(latestTrends[latestTrends.length - 1] || "").split(",")[0]),
     time: String(latestTrends[latestTrends.length - 1] || "").split(",")[0] || "",
@@ -1625,6 +1673,11 @@ function currentChinaDateKey() {
   }).format(new Date());
 }
 
+function normalizedMinuteClock(value) {
+  const match = String(value || "").match(/(\d{2}):?(\d{2})(?::\d{2})?$/);
+  return match ? `${match[1]}:${match[2]}` : "";
+}
+
 function downsample(values, limit) {
   if (values.length <= limit) return values;
   if (limit < 4) return [values[0], values[values.length - 1]].slice(0, limit);
@@ -1659,6 +1712,42 @@ function downsample(values, limit) {
     sampled.splice(sampled.length - 2, 1);
   }
 
+  return sampled;
+}
+
+function downsampleRows(rows, limit, valueAccessor) {
+  if (rows.length <= limit) return rows;
+  if (limit < 4) return [rows[0], rows[rows.length - 1]].slice(0, limit);
+
+  const sampled = [rows[0]];
+  const bucketCount = Math.max(1, Math.floor((limit - 2) / 2));
+  const bucketSize = (rows.length - 2) / bucketCount;
+
+  for (let bucket = 0; bucket < bucketCount; bucket += 1) {
+    const start = 1 + Math.floor(bucket * bucketSize);
+    const end = Math.min(rows.length - 1, 1 + Math.floor((bucket + 1) * bucketSize));
+    if (start >= end) continue;
+
+    let minIndex = start;
+    let maxIndex = start;
+    for (let index = start + 1; index < end; index += 1) {
+      if (valueAccessor(rows[index]) < valueAccessor(rows[minIndex])) minIndex = index;
+      if (valueAccessor(rows[index]) > valueAccessor(rows[maxIndex])) maxIndex = index;
+    }
+
+    if (minIndex === maxIndex) {
+      sampled.push(rows[minIndex]);
+    } else if (minIndex < maxIndex) {
+      sampled.push(rows[minIndex], rows[maxIndex]);
+    } else {
+      sampled.push(rows[maxIndex], rows[minIndex]);
+    }
+  }
+
+  sampled.push(rows[rows.length - 1]);
+  while (sampled.length > limit) {
+    sampled.splice(sampled.length - 2, 1);
+  }
   return sampled;
 }
 

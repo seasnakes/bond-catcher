@@ -19,6 +19,7 @@
 - 顶部显示主要指数：上证指数、创业板指、科创综指、中证转债、韩国 KOSPI、日经 225、恒生科技。
 - “K线”开关可显示或隐藏每只标的的今日分时缩略走势。
 - “转债星图”按申万一至三级行业或主线题材展示全部转债；面积可切换成交额/发行规模，色彩可切换涨跌幅/转股溢价率/价格，并可用 MiniQMT 更新盘中价格、涨跌幅和成交额。小格会按可用空间缩写简称，悬浮板块标题可查看完整转债列表和今日分时缩略线。
+- “活跃转债指数”是盘中监控页：显示复刻指数分时、日K、成交额和成分宽度，并实时列出成分债的涨跌幅、现价、估算量比、1分钟涨速、成交额、1分钟金额和3日涨跌。复刻指数由既定成分等权合成，明确区别于通达信官方实时指数。
 - 单债详情支持“分时 / 日K”切换；日K可查看近60、120或250个交易日的转债蜡烛图、MA5/MA10/MA20和成交额，双击某根K线可按日期从MiniQMT读取并切换到当日历史分时。日K使用固定周期槽位，新上市转债保持与其他转债一致的K线间距和宽度，缺少的交易日保留为右侧空白。
 - 搜索和添加标的优先走本地沪深 A 股名单，远程联想只作兜底。
 - 当前板块、叠组和标的池保存到 `data/board-state.json`，不同浏览器打开时使用同一份默认数据。
@@ -40,6 +41,32 @@ http://localhost:5173
 ```bash
 npm run update:stocks
 ```
+
+使用通达信本地 `.day` 文件重新生成活跃转债指数研究快照：
+
+```bash
+npm run build:active-bond-index -- \
+  --index /path/to/sh880677.day \
+  --bonds-dir /path/to/cb_day_files \
+  --names /path/to/cb_details_or_name_summary.json \
+  --output data/active-convertible-bond-index.json
+```
+
+生成器会用 880677 当日成交额审计本地转债历史是否完整；未通过审计的日期不会混入复刻统计。
+
+## 可转债标签
+
+当前 306 只普通上市可转债使用统一标签库，标签会显示在主力监控、活跃转债指数成分表和个债分时页，并可在“转债星图”按标签筛选。
+
+```bash
+npm run build:bond-tags -- --as-of 2026-07-31
+```
+
+- `data/convertible-bond-tag-source.json`：从“当前上市可转债完整名单与题材分类”工作簿抽取的名单、申万行业和 F10 题材底稿。
+- `data/convertible-bond-tags.json`：生成后的统一标签库。
+- `data/convertible-bond-tag-overrides.json`：人工增删标签，键使用带市场后缀的转债代码。
+- “次新债”按上市未满 365 天；“小盘”按正股实时流通市值低于 50 亿元，其余主题标签按申万行业、东方财富 F10 题材和核心业务关键词匹配。
+- 本地接口 `/api/miniqmt/tags` 支持 `code` 或 `tag` 查询。
 
 ## 编辑方式
 
@@ -97,9 +124,16 @@ ETF|科创50ETF|588000
 ├── bond-heatmap.html         # 可转债全市场星图
 ├── bond-heatmap.js           # 星图布局、筛选和 MiniQMT 行情刷新
 ├── bond-heatmap.css          # 星图样式
+├── active-bond-index.html    # 活跃转债指数盘中监控
+├── active-bond-index.js      # 分时/日K、实时成分表与排序筛选
+├── active-bond-index.css     # 活跃转债指数监控页样式
 ├── data/
 │   ├── a-share-list.json     # 本地沪深 A 股联想名单
+│   ├── active-convertible-bond-index.json # 880677 已核验历史研究快照
 │   ├── convertible-bond-heatmap.json # 转债行业/题材基础快照
+│   ├── convertible-bond-tag-source.json # 当前上市转债标签源数据
+│   ├── convertible-bond-tags.json # 统一转债标签库
+│   ├── convertible-bond-tag-overrides.json # 人工标签修订
 │   └── board-state.json      # 默认板块/叠组/标的池
 └── docs/assets/
     └── finance-board.png     # README 截图

@@ -46,6 +46,7 @@
           <button id="refreshButton" class="icon-button" type="button" title="立即刷新" aria-label="立即刷新">
             ↻
           </button>
+          <a class="text-button heatmap-entry" href="./active-bond-index.html">活跃转债指数</a>
           <a class="text-button heatmap-entry" href="./bond-heatmap.html">转债星图</a>
           <button id="editListButton" class="text-button" type="button">编辑</button>
           <button id="addSectorButton" class="text-button add-sector-button" type="button" title="新建板块">
@@ -61,7 +62,7 @@
       <section
         class="signal-monitor"
         aria-label="MiniQMT主力监控精灵"
-        title="固定名单：2026-07-30读取的可转债与热债分组，共80只"
+        title="QMT全市场可转债只读监控"
       >
         <header class="signal-monitor-head">
           <div class="signal-monitor-title">
@@ -77,6 +78,32 @@
                 <option value="all">全部信号</option>
               </select>
             </label>
+            <label>
+              <span>成交额</span>
+              <select id="signalAmountFilter">
+                <option value="0">不限</option>
+                <option value="100000000">＞1亿</option>
+                <option value="200000000">＞2亿</option>
+              </select>
+            </label>
+            <label>
+              <span>振幅</span>
+              <select id="signalAmplitudeFilter">
+                <option value="0">不限</option>
+                <option value="0.01">＞1%</option>
+                <option value="0.02">＞2%</option>
+              </select>
+            </label>
+            <details id="signalTypeFilter" class="signal-type-filter">
+              <summary id="signalTypeSummary">类型：不限</summary>
+              <div class="signal-type-menu">
+                <div class="signal-type-actions">
+                  <button id="signalTypeClear" type="button">不限</button>
+                  <button id="signalTypeSelectAll" type="button">全选</button>
+                </div>
+                <div id="signalTypeOptions" class="signal-type-options"></div>
+              </div>
+            </details>
             <button id="signalPauseButton" type="button">暂停滚动</button>
           </div>
         </header>

@@ -93,6 +93,24 @@ h1 {
   font-size: clamp(24px, 3vw, 38px);
 }
 
+.bond-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.bond-tags span {
+  padding: 2px 7px;
+  border: 1px solid #cbd8bf;
+  border-radius: 999px;
+  background: #f3f7ee;
+  color: #526348;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
 h1 small {
   color: #75806f;
   font-size: 0.45em;
@@ -235,7 +253,7 @@ h1 small {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
   margin: 8px 0;
 }
@@ -247,6 +265,14 @@ h1 small {
   gap: 8px;
   min-width: 0;
   padding: 9px 11px;
+}
+
+.metrics article[hidden] {
+  display: none;
+}
+
+.metrics strong.is-hot {
+  color: #bb6b08;
 }
 
 .metrics span {

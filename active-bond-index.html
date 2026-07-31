@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>活跃转债指数监控</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./active-bond-index.css" />
+  </head>
+  <body>
+    <main class="monitor-shell">
+      <header class="monitor-header">
+        <div>
+          <nav>
+            <a href="./">← 返回看板</a>
+            <a href="./bond-heatmap.html">转债星图</a>
+          </nav>
+          <div class="title-row">
+            <span id="liveDot" class="live-dot"></span>
+            <h1>活跃转债指数监控</h1>
+          </div>
+          <p id="marketStatus">正在连接 MiniQMT…</p>
+        </div>
+        <div class="header-actions">
+          <span id="lastUpdated">--:--:--</span>
+          <button id="refreshButton" type="button">刷新</button>
+        </div>
+      </header>
+
+      <section class="quote-strip" aria-label="指数行情">
+        <article class="primary-quote">
+          <span>活跃转债复刻指数</span>
+          <strong id="indexValue">--</strong>
+          <b id="indexChange">--</b>
+        </article>
+        <article><span>成分</span><strong id="constituentCount">--</strong><small id="universeDate">--</small></article>
+        <article><span>成交额</span><strong id="indexAmount">--</strong></article>
+        <article><span>上涨 / 下跌</span><strong id="breadth">--</strong></article>
+        <article><span>行情覆盖</span><strong id="coverage">--</strong></article>
+      </section>
+
+      <section class="chart-panel">
+        <header class="chart-toolbar">
+          <div class="period-tabs" role="tablist" aria-label="图表周期">
+            <button type="button" data-view="intraday" class="is-active">分时</button>
+            <button type="button" data-view="daily">日K</button>
+          </div>
+          <div id="dailyRanges" class="daily-ranges" hidden>
+            <button type="button" data-range="60" class="is-active">60日</button>
+            <button type="button" data-range="120">120日</button>
+            <button type="button" data-range="250">250日</button>
+          </div>
+          <div id="overlayControls" class="overlay-controls" aria-label="叠加指数">
+            <label><input type="checkbox" data-overlay="sh000001" /><i class="overlay-swatch overlay-sh000001"></i>上证指数</label>
+            <label><input type="checkbox" data-overlay="sz399006" /><i class="overlay-swatch overlay-sz399006"></i>创业板指</label>
+            <label><input type="checkbox" data-overlay="sh000680" /><i class="overlay-swatch overlay-sh000680"></i>科创综指</label>
+            <label><input type="checkbox" data-overlay="kospi" /><i class="overlay-swatch overlay-kospi"></i>韩国KOSPI</label>
+          </div>
+          <div class="chart-legend">
+            <span><i class="line-swatch"></i>活跃转债</span>
+            <span><i class="amount-swatch"></i>成交额</span>
+          </div>
+        </header>
+        <div id="chartStage" class="chart-stage">
+          <svg id="marketChart" viewBox="0 0 1200 580" role="img" aria-label="活跃转债复刻指数图表"></svg>
+          <div id="chartTooltip" class="chart-tooltip" hidden></div>
+          <div id="chartEmpty" class="chart-empty" hidden>当前没有可用图表数据</div>
+        </div>
+      </section>
+
+      <section class="constituent-panel">
+        <header class="table-toolbar">
+          <div>
+            <h2>实时成分行情</h2>
+          </div>
+          <div class="table-controls">
+            <label>
+              <span>范围</span>
+              <select id="scopeSelect">
+                <option value="all">全部</option>
+                <option value="up">上涨</option>
+                <option value="down">下跌</option>
+                <option value="fast">快速异动</option>
+              </select>
+            </label>
+            <label class="search-control">
+              <span>查找</span>
+              <input id="searchInput" type="search" placeholder="名称 / 代码" />
+            </label>
+          </div>
+        </header>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th data-sort="name"><button class="sort-button" type="button">转债<span class="sort-indicator"></span></button></th>
+                <th>分时</th>
+                <th class="number" data-sort="change"><button class="sort-button" type="button">涨跌幅<span class="sort-indicator"></span></button></th>
+                <th class="number" data-sort="price"><button class="sort-button" type="button">现价<span class="sort-indicator"></span></button></th>
+                <th class="number" data-sort="volumeRatio"><button class="sort-button" type="button">量比<span class="sort-indicator"></span></button></th>
+                <th class="number" data-sort="speed1m"><button class="sort-button" type="button">1分钟涨速<span class="sort-indicator"></span></button></th>
+                <th class="number" data-sort="amount" aria-sort="descending"><button class="sort-button is-active" type="button">成交额<span class="sort-indicator">↓</span></button></th>
+                <th class="number" data-sort="amount1m"><button class="sort-button" type="button">1分钟金额<span class="sort-indicator"></span></button></th>
+                <th class="number" data-sort="change3d"><button class="sort-button" type="button">3日涨跌<span class="sort-indicator"></span></button></th>
+              </tr>
+            </thead>
+            <tbody id="constituentRows"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <script src="./active-bond-index.js" defer></script>
+  </body>
+</html>

@@ -48,8 +48,10 @@ FOCUS_EVENT_TYPES = {
     "visible_bid_large_order",
     "visible_ask_large_order",
     "macd_underwater_golden_cross",
+    "macd_above_water_golden_cross",
     "underwater_golden_cross_purple_confirmed",
     "purple_line_pullback_reclaim",
+    "intraday_average_pullback_reclaim",
     "dark_funds_inflow_start",
     "dark_funds_outflow_start",
     "visible_funds_inflow_start",
@@ -69,6 +71,21 @@ DAILY_CACHE_TTL_SECONDS = 300
 DAILY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 INTRADAY_CACHE_TTL_SECONDS = 300
 INTRADAY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+FINANCE_ROOT = Path(__file__).resolve().parents[1]
+ACTIVE_INDEX_DATA_PATH = FINANCE_ROOT / "data" / "active-convertible-bond-index.json"
+BOND_TAGS_DATA_PATH = FINANCE_ROOT / "data" / "convertible-bond-tags.json"
+ACTIVE_INDEX_UNIVERSE_PATH = FINANCE_ROOT / "runtime" / "active-index-universes.json"
+ACTIVE_INDEX_CACHE_TTL_SECONDS = 6
+ACTIVE_INDEX_CACHE: tuple[float, dict[str, Any]] | None = None
+ACTIVE_INDEX_NAME_CACHE: dict[str, str] = {}
+EVENT_MARKET_CACHE_TTL_SECONDS = 5
+EVENT_MARKET_CACHE: dict[str, tuple[float, dict[str, float | None]]] = {}
+ACTIVE_INDEX_TICK_MINUTES: dict[
+    str,
+    dict[str, dict[int, dict[str, Any]]],
+] = {}
+ACTIVE_INDEX_THRESHOLD = 200_000_000
+BOND_TAGS_CACHE: tuple[float, dict[str, Any], dict[str, dict[str, Any]]] | None = None
 
 
 def load_monitor_module() -> Any:
@@ -93,6 +110,66 @@ def read_json(path: Path) -> dict[str, Any]:
         return value if isinstance(value, dict) else {}
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {}
+
+
+def load_bond_tags() -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    global BOND_TAGS_CACHE
+    modified_at = BOND_TAGS_DATA_PATH.stat().st_mtime
+    if BOND_TAGS_CACHE and BOND_TAGS_CACHE[0] == modified_at:
+        return BOND_TAGS_CACHE[1], BOND_TAGS_CACHE[2]
+    payload = read_json(BOND_TAGS_DATA_PATH)
+    rows = list(payload.get("rows") or [])
+    by_code: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        code = str(row.get("code") or "").upper()
+        if not MARKET_CODE_PATTERN.fullmatch(code):
+            continue
+        by_code[code] = row
+        by_code[code.split(".")[0]] = row
+    BOND_TAGS_CACHE = (modified_at, payload, by_code)
+    return payload, by_code
+
+
+def bond_tag_row(code: str) -> dict[str, Any]:
+    try:
+        _, by_code = load_bond_tags()
+    except OSError:
+        return {}
+    return by_code.get(str(code or "").upper()) or {}
+
+
+def bond_tags(code: str) -> list[str]:
+    return [
+        str(value)
+        for value in bond_tag_row(code).get("tags") or []
+        if str(value)
+    ]
+
+
+def tags_payload(code_input: str = "", tag_input: str = "") -> dict[str, Any]:
+    payload, _ = load_bond_tags()
+    rows = list(payload.get("rows") or [])
+    if code_input:
+        lookup = bond_tag_row(code_input)
+        rows = [lookup] if lookup else []
+    if tag_input:
+        rows = [
+            row
+            for row in rows
+            if tag_input in (row.get("tags") or [])
+        ]
+    return clean_json(
+        {
+            "ok": True,
+            "asOf": payload.get("asOf"),
+            "source": payload.get("source"),
+            "definitions": payload.get("definitions") or {},
+            "tagOrder": payload.get("tagOrder") or [],
+            "tagCounts": payload.get("tagCounts") or {},
+            "count": len(rows),
+            "rows": rows,
+        }
+    )
 
 
 def available_databases() -> list[Path]:
@@ -256,6 +333,10 @@ def quotes_payload(codes_input: str) -> dict[str, Any]:
                 "price": price,
                 "change": change,
                 "amount": finite_or_none(tick.get("amount")) or 0,
+                "volume": finite_or_none(tick.get("volume")) or 0,
+                "open": finite_or_none(tick.get("open")),
+                "high": finite_or_none(tick.get("high")),
+                "low": finite_or_none(tick.get("low")),
                 "previousClose": previous_close,
                 "date": timetag[:8],
                 "time": timetag[9:17],
@@ -277,6 +358,775 @@ def quotes_payload(codes_input: str) -> dict[str, Any]:
             "quotes": quotes,
         }
     )
+
+
+def compact_date(value: Any) -> str:
+    return re.sub(r"\D", "", str(value or ""))[:8]
+
+
+def dashed_date(value: str) -> str:
+    text = compact_date(value)
+    return f"{text[:4]}-{text[4:6]}-{text[6:8]}" if len(text) == 8 else ""
+
+
+def next_weekday(value: str) -> str:
+    moment = datetime.strptime(compact_date(value), "%Y%m%d")
+    moment += timedelta(days=1)
+    while moment.weekday() >= 5:
+        moment += timedelta(days=1)
+    return moment.strftime("%Y%m%d")
+
+
+def load_active_index_source() -> dict[str, Any]:
+    payload = json.loads(ACTIVE_INDEX_DATA_PATH.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise LookupError("活跃转债指数研究快照格式错误")
+    return payload
+
+
+def load_active_index_universes(source: dict[str, Any]) -> dict[str, Any]:
+    cache = read_json(ACTIVE_INDEX_UNIVERSE_PATH)
+    universes = cache.get("universes")
+    if not isinstance(universes, dict):
+        universes = {}
+    seed = source.get("seedUniverse") or {}
+    effective_date = compact_date(seed.get("effectiveDate"))
+    if effective_date and effective_date not in universes:
+        universes[effective_date] = {
+            "effective_date": effective_date,
+            "selected_from_date": compact_date(seed.get("selectedFromDate")),
+            "threshold": float(seed.get("threshold") or ACTIVE_INDEX_THRESHOLD),
+            "constituents": list(seed.get("constituents") or []),
+            "source": "通达信本地日线",
+        }
+    return {"universes": universes}
+
+
+def persist_active_index_universes(cache: dict[str, Any]) -> None:
+    ACTIVE_INDEX_UNIVERSE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary = ACTIVE_INDEX_UNIVERSE_PATH.with_suffix(".json.tmp")
+    temporary.write_text(
+        json.dumps(cache, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    temporary.replace(ACTIVE_INDEX_UNIVERSE_PATH)
+
+
+def quote_date_from_ticks(ticks: dict[str, dict[str, Any]]) -> str:
+    counts: dict[str, int] = {}
+    for tick in ticks.values():
+        timetag = compact_date(tick.get("timetag"))
+        if len(timetag) == 8:
+            counts[timetag] = counts.get(timetag, 0) + 1
+    return max(counts, key=lambda value: (counts[value], value)) if counts else ""
+
+
+def build_universe_from_ticks(
+    ticks: dict[str, dict[str, Any]],
+    names: dict[str, str],
+    selected_from_date: str,
+    effective_date: str,
+) -> dict[str, Any]:
+    constituents: list[dict[str, Any]] = []
+    for code, tick in ticks.items():
+        if compact_date(tick.get("timetag")) != selected_from_date:
+            continue
+        amount = finite_or_none(tick.get("amount")) or 0
+        price = finite_or_none(tick.get("lastPrice")) or 0
+        if amount <= ACTIVE_INDEX_THRESHOLD or price <= 0:
+            continue
+        constituents.append(
+            {
+                "code": code,
+                "name": names.get(code, code),
+                "previousAmount": amount,
+                "previousVolume": finite_or_none(tick.get("volume")) or 0,
+            }
+        )
+    constituents.sort(
+        key=lambda item: float(item.get("previousAmount") or 0),
+        reverse=True,
+    )
+    return {
+        "effective_date": effective_date,
+        "selected_from_date": selected_from_date,
+        "threshold": ACTIVE_INDEX_THRESHOLD,
+        "constituents": constituents,
+        "source": "MiniQMT 前一交易日收盘快照",
+    }
+
+
+def resolve_active_index_names(
+    bridge: Any,
+    codes: list[str],
+    source_names: dict[str, str],
+) -> dict[str, str]:
+    names = dict(source_names)
+    unresolved = [
+        code
+        for code in codes
+        if not names.get(code)
+        or names[code] == code
+        or names[code] == code[:6]
+        or MARKET_CODE_PATTERN.fullmatch(names[code])
+    ]
+    for code in unresolved:
+        cached_name = ACTIVE_INDEX_NAME_CACHE.get(code)
+        if cached_name:
+            names[code] = cached_name
+    unresolved = [code for code in unresolved if code not in ACTIVE_INDEX_NAME_CACHE]
+    for index in range(0, len(unresolved), 100):
+        batch = unresolved[index : index + 100]
+        try:
+            payload = bridge.get(
+                "/api/utility/batch_stock_name",
+                {"stocks": ",".join(batch)},
+            )
+            resolved = payload.get("data") if isinstance(payload, dict) else {}
+            if not isinstance(resolved, dict):
+                continue
+            for code in batch:
+                name = str(resolved.get(code) or "").strip()
+                if not name or name == code or name == code[:6]:
+                    continue
+                ACTIVE_INDEX_NAME_CACHE[code] = name
+                names[code] = name
+        except Exception:
+            continue
+    return names
+
+
+def load_local_minute_bars(
+    codes: list[str],
+    trading_date: str,
+) -> dict[str, list[dict[str, Any]]]:
+    result = {code: [] for code in codes}
+    if not codes:
+        return result
+    try:
+        database = database_for_date(trading_date)
+    except FileNotFoundError:
+        return result
+
+    try:
+        with connect_read_only(database) as connection:
+            for index in range(0, len(codes), 500):
+                batch = codes[index : index + 500]
+                placeholders = ",".join("?" for _ in batch)
+                rows = connection.execute(
+                    f"""
+                    SELECT code,minute_ms,open,high,low,close,amount
+                    FROM minute_observations
+                    WHERE trading_date=? AND code IN ({placeholders})
+                    ORDER BY code,minute_ms
+                    """,
+                    (trading_date, *batch),
+                ).fetchall()
+                for row in rows:
+                    code = str(row["code"])
+                    result.setdefault(code, []).append(
+                        {
+                            "time": int(row["minute_ms"]),
+                            "open": finite_or_none(row["open"]),
+                            "high": finite_or_none(row["high"]),
+                            "low": finite_or_none(row["low"]),
+                            "close": finite_or_none(row["close"]),
+                            "amount": finite_or_none(row["amount"]) or 0,
+                            "volume": 0,
+                        }
+                    )
+    except (OSError, sqlite3.Error):
+        return {code: [] for code in codes}
+    return result
+
+
+def tick_minute_timestamp(tick: dict[str, Any]) -> int:
+    digits = re.sub(r"\D", "", str(tick.get("timetag") or ""))
+    if len(digits) < 12:
+        return 0
+    clock = digits[:14] if len(digits) >= 14 else digits[:12] + "00"
+    try:
+        moment = datetime.strptime(clock, "%Y%m%d%H%M%S").replace(second=0)
+    except ValueError:
+        return 0
+    in_session = (
+        datetime.strptime("09:30", "%H:%M").time()
+        <= moment.time()
+        <= datetime.strptime("11:30", "%H:%M").time()
+        or datetime.strptime("13:00", "%H:%M").time()
+        <= moment.time()
+        <= datetime.strptime("15:00", "%H:%M").time()
+    )
+    return int(moment.timestamp() * 1000) if in_session else 0
+
+
+def elapsed_market_minutes(tick: dict[str, Any]) -> int:
+    timestamp = tick_minute_timestamp(tick)
+    if timestamp <= 0:
+        return 0
+    moment = datetime.fromtimestamp(timestamp / 1000)
+    morning_start = datetime.strptime("09:30", "%H:%M").time()
+    morning_end = datetime.strptime("11:30", "%H:%M").time()
+    afternoon_start = datetime.strptime("13:00", "%H:%M").time()
+    if morning_start <= moment.time() <= morning_end:
+        start = moment.replace(hour=9, minute=30, second=0, microsecond=0)
+        return int((moment - start).total_seconds() // 60) + 1
+    if moment.time() >= afternoon_start:
+        start = moment.replace(hour=13, minute=0, second=0, microsecond=0)
+        return 121 + int((moment - start).total_seconds() // 60)
+    return 0
+
+
+def active_index_average_volume(
+    candidate: dict[str, Any],
+    constituent: dict[str, Any],
+    selected_from_date: str,
+) -> float:
+    average5 = finite_or_none(candidate.get("average5Volume")) or 0
+    latest_volume = finite_or_none(candidate.get("latestVolume")) or 0
+    previous_volume = finite_or_none(constituent.get("previousVolume")) or 0
+    latest_date = compact_date(candidate.get("latestDate"))
+    selected_date = compact_date(selected_from_date)
+
+    if previous_volume > 0 and latest_volume > 0:
+        if latest_date and selected_date and latest_date < selected_date:
+            return (average5 * 3 + latest_volume + previous_volume) / 5
+        return (average5 * 4 + previous_volume) / 5
+    if previous_volume > 0:
+        return (average5 * 4 + previous_volume) / 5
+    if latest_volume > 0:
+        return (average5 * 4 + latest_volume) / 5
+    return average5
+
+
+def active_index_volume_ratio(
+    tick: dict[str, Any],
+    candidate: dict[str, Any],
+    constituent: dict[str, Any],
+    selected_from_date: str,
+) -> float | None:
+    average5_volume = active_index_average_volume(
+        candidate,
+        constituent,
+        selected_from_date,
+    )
+    elapsed_minutes = elapsed_market_minutes(tick)
+    current_volume = finite_or_none(tick.get("volume")) or 0
+    if average5_volume <= 0 or elapsed_minutes <= 0:
+        return None
+    return current_volume / elapsed_minutes / (average5_volume / 240)
+
+
+def bond_volume_ratio(
+    stored_code: str,
+    trading_date: str,
+) -> tuple[float | None, float | None]:
+    if trading_date != datetime.now().strftime("%Y%m%d"):
+        return None, None
+    bridge = MONITOR.BridgeClient(
+        f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}",
+        timeout=15.0,
+    )
+    tick = bridge.full_tick([stored_code]).get(stored_code)
+    if not isinstance(tick, dict):
+        return None
+    source = load_active_index_source()
+    candidate = next(
+        (
+            item
+            for item in source.get("bondCandidates") or []
+            if str(item.get("code") or "") == stored_code
+        ),
+        {},
+    )
+    universe_cache = load_active_index_universes(source)
+    universes = universe_cache.get("universes") or {}
+    universe = universes.get(trading_date)
+    if not isinstance(universe, dict):
+        available = [
+            value
+            for key, value in universes.items()
+            if key <= trading_date and isinstance(value, dict)
+        ]
+        universe = available[-1] if available else {}
+    constituent = next(
+        (
+            item
+            for item in universe.get("constituents") or []
+            if str(item.get("code") or "") == stored_code
+        ),
+        {},
+    )
+    selected_from_date = universe.get("selected_from_date") or ""
+    average5_volume = active_index_average_volume(
+        candidate,
+        constituent,
+        selected_from_date,
+    )
+    return (
+        active_index_volume_ratio(
+            tick,
+            candidate,
+            constituent,
+            selected_from_date,
+        ),
+        average5_volume if average5_volume > 0 else None,
+    )
+
+
+def elapsed_market_minutes_from_clock(value: Any) -> int:
+    match = re.search(r"(\d{2}):(\d{2})", str(value or ""))
+    if not match:
+        return 0
+    hour = int(match.group(1))
+    minute = int(match.group(2))
+    clock_minutes = hour * 60 + minute
+    if 570 <= clock_minutes <= 690:
+        return clock_minutes - 570 + 1
+    if 780 <= clock_minutes <= 900:
+        return 121 + clock_minutes - 780
+    return 0
+
+
+def update_active_index_tick_minutes(
+    ticks: dict[str, dict[str, Any]],
+    codes: list[str],
+    trading_date: str,
+) -> dict[str, list[dict[str, Any]]]:
+    for cached_date in list(ACTIVE_INDEX_TICK_MINUTES):
+        if cached_date != trading_date:
+            ACTIVE_INDEX_TICK_MINUTES.pop(cached_date, None)
+    date_cache = ACTIVE_INDEX_TICK_MINUTES.setdefault(trading_date, {})
+
+    for code in codes:
+        tick = ticks.get(code)
+        if not isinstance(tick, dict):
+            continue
+        timestamp = tick_minute_timestamp(tick)
+        price = finite_or_none(tick.get("lastPrice"))
+        previous_close = finite_or_none(tick.get("lastClose"))
+        if timestamp <= 0 or price is None or price <= 0:
+            continue
+        code_cache = date_cache.setdefault(code, {})
+        previous_row = max(
+            (
+                row
+                for minute, row in code_cache.items()
+                if minute < timestamp
+            ),
+            key=lambda row: int(row["time"]),
+            default=None,
+        )
+        cumulative_amount = finite_or_none(tick.get("amount")) or 0
+        cumulative_volume = finite_or_none(tick.get("volume")) or 0
+        prior_amount = float((previous_row or {}).get("cumulative_amount") or 0)
+        prior_volume = float((previous_row or {}).get("cumulative_volume") or 0)
+        code_cache[timestamp] = {
+            "time": timestamp,
+            "close": price,
+            "preClose": previous_close,
+            "amount": (
+                max(0.0, cumulative_amount - prior_amount)
+                if previous_row
+                else 0
+            ),
+            "volume": (
+                max(0.0, cumulative_volume - prior_volume)
+                if previous_row
+                else 0
+            ),
+            "cumulative_amount": cumulative_amount,
+            "cumulative_volume": cumulative_volume,
+        }
+
+    return {
+        code: [
+            dict(row)
+            for _, row in sorted((date_cache.get(code) or {}).items())
+        ]
+        for code in codes
+    }
+
+
+def merge_active_index_minute_bars(
+    codes: list[str],
+    *sources: dict[str, list[dict[str, Any]]],
+) -> dict[str, list[dict[str, Any]]]:
+    merged: dict[str, list[dict[str, Any]]] = {}
+    for code in codes:
+        by_timestamp: dict[int, dict[str, Any]] = {}
+        for source in sources:
+            for row in source.get(code) or []:
+                timestamp = int(row.get("time") or 0)
+                if timestamp > 0:
+                    by_timestamp[timestamp] = row
+        merged[code] = [
+            by_timestamp[timestamp]
+            for timestamp in sorted(by_timestamp)
+        ]
+    return merged
+
+
+def active_index_payload() -> dict[str, Any]:
+    global ACTIVE_INDEX_CACHE
+    if (
+        ACTIVE_INDEX_CACHE
+        and time.monotonic() - ACTIVE_INDEX_CACHE[0] < ACTIVE_INDEX_CACHE_TTL_SECONDS
+    ):
+        return {**ACTIVE_INDEX_CACHE[1], "cached": True}
+
+    source = load_active_index_source()
+    candidates = list(source.get("bondCandidates") or [])
+    candidate_by_code = {
+        str(item.get("code") or ""): item
+        for item in candidates
+        if MARKET_CODE_PATTERN.fullmatch(str(item.get("code") or ""))
+    }
+    codes = list(candidate_by_code)
+    names = {
+        code: str(item.get("name") or code)
+        for code, item in candidate_by_code.items()
+    }
+    if not codes:
+        raise LookupError("活跃转债指数候选池为空")
+
+    bridge = MONITOR.BridgeClient(
+        f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}",
+        timeout=15.0,
+    )
+    names = resolve_active_index_names(bridge, codes, names)
+    ticks: dict[str, dict[str, Any]] = {}
+    for index in range(0, len(codes), 100):
+        ticks.update(bridge.full_tick(codes[index : index + 100]))
+    quote_date = quote_date_from_ticks(ticks)
+    if not quote_date:
+        raise LookupError("MiniQMT未返回可用的转债行情日期")
+
+    universe_cache = load_active_index_universes(source)
+    universes = universe_cache["universes"]
+    calendar_date = datetime.now().strftime("%Y%m%d")
+    if calendar_date > quote_date:
+        next_effective_date = calendar_date
+    elif datetime.now().time() >= datetime.strptime("15:05", "%H:%M").time():
+        next_effective_date = next_weekday(quote_date)
+    else:
+        next_effective_date = ""
+
+    if next_effective_date:
+        current_signature = (
+            quote_date,
+            len(
+                [
+                    tick
+                    for tick in ticks.values()
+                    if compact_date(tick.get("timetag")) == quote_date
+                    and (finite_or_none(tick.get("amount")) or 0)
+                    > ACTIVE_INDEX_THRESHOLD
+                ]
+            ),
+        )
+        cached_universe = universes.get(next_effective_date) or {}
+        cached_signature = (
+            compact_date(cached_universe.get("selected_from_date")),
+            len(cached_universe.get("constituents") or []),
+        )
+        if current_signature != cached_signature:
+            universes[next_effective_date] = build_universe_from_ticks(
+                ticks,
+                names,
+                quote_date,
+                next_effective_date,
+            )
+            persist_active_index_universes(universe_cache)
+
+    chart_universe = universes.get(quote_date)
+    if not isinstance(chart_universe, dict):
+        available = [
+            value
+            for key, value in universes.items()
+            if key <= quote_date and isinstance(value, dict)
+        ]
+        chart_universe = available[-1] if available else {}
+    table_date = (
+        calendar_date
+        if calendar_date in universes and calendar_date >= quote_date
+        else quote_date
+    )
+    table_universe = universes.get(table_date) or chart_universe
+
+    chart_codes = [
+        str(item.get("code") or "")
+        for item in chart_universe.get("constituents") or []
+        if MARKET_CODE_PATTERN.fullmatch(str(item.get("code") or ""))
+    ]
+    table_constituents = list(table_universe.get("constituents") or [])
+    table_codes = [
+        str(item.get("code") or "")
+        for item in table_constituents
+        if MARKET_CODE_PATTERN.fullmatch(str(item.get("code") or ""))
+    ]
+    requested_codes = list(dict.fromkeys([*chart_codes, *table_codes]))
+    session_end = datetime.strptime(f"{quote_date}150000", "%Y%m%d%H%M%S")
+    if quote_date == calendar_date:
+        session_end = datetime.now()
+    qmt_minute_error = ""
+    try:
+        qmt_minute_data = bridge.minute_bars(
+            requested_codes,
+            quote_date,
+            session_end,
+            timeout=40.0,
+        )
+    except Exception as error:
+        qmt_minute_error = f"{type(error).__name__}: {error}"
+        qmt_minute_data = {code: [] for code in requested_codes}
+    local_minute_data = load_local_minute_bars(requested_codes, quote_date)
+    tick_minute_data = update_active_index_tick_minutes(
+        ticks,
+        requested_codes,
+        quote_date,
+    )
+    minute_data = merge_active_index_minute_bars(
+        requested_codes,
+        qmt_minute_data,
+        tick_minute_data,
+        local_minute_data,
+    )
+
+    historical_rows = list(source.get("indexDailyK") or [])
+    previous_k = next(
+        (
+            row
+            for row in reversed(historical_rows)
+            if compact_date(row.get("date")) < quote_date
+        ),
+        None,
+    )
+    anchor = float((previous_k or {}).get("close") or 100)
+    values_by_minute: dict[int, list[dict[str, float]]] = {}
+    rows_by_code: dict[str, list[dict[str, Any]]] = {}
+    for code in requested_codes:
+        parsed_rows: list[dict[str, Any]] = []
+        tick = ticks.get(code) or {}
+        fallback_previous_close = finite_or_none(tick.get("lastClose"))
+        for raw in minute_data.get(code) or []:
+            close = finite_or_none(raw.get("close"))
+            previous_close = (
+                fallback_previous_close
+                or finite_or_none(raw.get("preClose"))
+            )
+            timestamp = int(raw.get("time") or 0)
+            if (
+                close is None
+                or close <= 0
+                or previous_close is None
+                or previous_close <= 0
+                or timestamp <= 0
+            ):
+                continue
+            item = {
+                "time": timestamp,
+                "close": close,
+                "previous_close": previous_close,
+                "volume": finite_or_none(raw.get("volume")) or 0,
+                "amount": finite_or_none(raw.get("amount")) or 0,
+            }
+            parsed_rows.append(item)
+            if code in chart_codes:
+                values_by_minute.setdefault(timestamp, []).append(item)
+        parsed_rows.sort(key=lambda item: item["time"])
+        rows_by_code[code] = parsed_rows
+
+    intraday: list[dict[str, Any]] = []
+    for timestamp in sorted(values_by_minute):
+        rows = values_by_minute[timestamp]
+        returns = [
+            row["close"] / row["previous_close"] - 1
+            for row in rows
+        ]
+        average_return = sum(returns) / len(returns)
+        intraday.append(
+            {
+                "time": timestamp,
+                "clock": datetime.fromtimestamp(timestamp / 1000).strftime("%H:%M"),
+                "value": anchor * (1 + average_return),
+                "change": average_return * 100,
+                "amount": sum(row["amount"] for row in rows),
+                "volume": sum(row["volume"] for row in rows),
+                "up": sum(1 for value in returns if value > 0),
+                "down": sum(1 for value in returns if value < 0),
+                "coverage": len(rows),
+            }
+        )
+
+    latest_intraday = intraday[-1] if intraday else None
+    current_table: list[dict[str, Any]] = []
+    table_info = {
+        str(item.get("code") or ""): item
+        for item in table_constituents
+    }
+    for code in table_codes:
+        tick = ticks.get(code)
+        if not isinstance(tick, dict):
+            continue
+        price = finite_or_none(tick.get("lastPrice"))
+        previous_close = finite_or_none(tick.get("lastClose"))
+        if price is None or price <= 0:
+            continue
+        minute_rows = rows_by_code.get(code) or []
+        latest_minute = minute_rows[-1] if minute_rows else None
+        prior_minute = minute_rows[-2] if len(minute_rows) >= 2 else None
+        speed_1m = (
+            (latest_minute["close"] / prior_minute["close"] - 1) * 100
+            if latest_minute and prior_minute and prior_minute["close"] > 0
+            else None
+        )
+        candidate = candidate_by_code.get(code) or {}
+        constituent = table_info.get(code) or {}
+        volume_ratio = active_index_volume_ratio(
+            tick,
+            candidate,
+            constituent,
+            table_universe.get("selected_from_date") or "",
+        )
+        current_volume = finite_or_none(tick.get("volume")) or 0
+        close_3 = finite_or_none(candidate.get("close3SessionsAgo"))
+        change_3 = (
+            (price / close_3 - 1) * 100
+            if close_3 is not None and close_3 > 0
+            else None
+        )
+        current_table.append(
+            {
+                "code": code,
+                "name": names.get(code, code),
+                "tags": bond_tags(code),
+                "price": price,
+                "change": (
+                    (price / previous_close - 1) * 100
+                    if previous_close is not None and previous_close > 0
+                    else None
+                ),
+                "speed1m": speed_1m,
+                "volumeRatio": volume_ratio,
+                "amount": finite_or_none(tick.get("amount")) or 0,
+                "volume": current_volume,
+                "amount1m": float((latest_minute or {}).get("amount") or 0),
+                "change3d": change_3,
+                "high": finite_or_none(tick.get("high")),
+                "low": finite_or_none(tick.get("low")),
+                "previousAmount": finite_or_none(
+                    (table_info.get(code) or {}).get("previousAmount")
+                ),
+                "time": str(tick.get("timetag") or "")[9:17],
+            }
+        )
+    current_table.sort(
+        key=lambda item: float(item.get("amount") or 0),
+        reverse=True,
+    )
+    current_index_amount = sum(
+        float(item.get("amount") or 0)
+        for item in current_table
+    )
+
+    daily_rows = historical_rows[-120:]
+    if intraday and compact_date(daily_rows[-1].get("date")) < quote_date:
+        values = [float(item["value"]) for item in intraday]
+        daily_rows = [
+            *daily_rows,
+            {
+                "date": dashed_date(quote_date),
+                "open": values[0],
+                "high": max(values),
+                "low": min(values),
+                "close": values[-1],
+                "amount": current_index_amount,
+                "volume": sum(float(item["volume"]) for item in intraday),
+                "source": "MiniQMT成分等权合成",
+            },
+        ]
+
+    now = datetime.now()
+    is_live = (
+        quote_date == calendar_date
+        and now.weekday() < 5
+        and (
+            datetime.strptime("09:30", "%H:%M").time()
+            <= now.time()
+            <= datetime.strptime("11:30", "%H:%M").time()
+            or datetime.strptime("13:00", "%H:%M").time()
+            <= now.time()
+            <= datetime.strptime("15:05", "%H:%M").time()
+        )
+    )
+    result = clean_json(
+        {
+            "ok": True,
+            "mode": "read_only",
+            "source": "MiniQMT full_tick + 1m",
+            "generated_at": now.isoformat(timespec="seconds"),
+            "cached": False,
+            "quote_date": dashed_date(quote_date),
+            "calendar_date": dashed_date(calendar_date),
+            "is_live": is_live,
+            "data_is_stale": quote_date != calendar_date,
+            "index": {
+                "name": "活跃转债复刻指数",
+                "code": "880677-R",
+                "anchor": anchor,
+                "value": float((latest_intraday or {}).get("value") or anchor),
+                "change": float((latest_intraday or {}).get("change") or 0),
+                "amount": current_index_amount,
+                "up": int((latest_intraday or {}).get("up") or 0),
+                "down": int((latest_intraday or {}).get("down") or 0),
+            },
+            "chart_universe": {
+                "effective_date": dashed_date(
+                    chart_universe.get("effective_date") or quote_date
+                ),
+                "selected_from_date": dashed_date(
+                    chart_universe.get("selected_from_date") or ""
+                ),
+                "count": len(chart_codes),
+            },
+            "table_universe": {
+                "effective_date": dashed_date(
+                    table_universe.get("effective_date") or table_date
+                ),
+                "selected_from_date": dashed_date(
+                    table_universe.get("selected_from_date") or ""
+                ),
+                "count": len(table_codes),
+                "source": table_universe.get("source"),
+            },
+            "intraday": intraday,
+            "daily": daily_rows,
+            "constituents": current_table,
+            "coverage": {
+                "candidate_count": len(codes),
+                "tick_count": len(ticks),
+                "chart_requested": len(chart_codes),
+                "chart_with_minutes": sum(
+                    1 for code in chart_codes if rows_by_code.get(code)
+                ),
+                "chart_with_qmt_minutes": sum(
+                    1 for code in chart_codes if qmt_minute_data.get(code)
+                ),
+                "chart_with_local_minutes": sum(
+                    1 for code in chart_codes if local_minute_data.get(code)
+                ),
+                "chart_with_tick_minutes": sum(
+                    1 for code in chart_codes if tick_minute_data.get(code)
+                ),
+                "table_requested": len(table_codes),
+                "table_returned": len(current_table),
+                "qmt_minute_error": qmt_minute_error,
+            },
+        }
+    )
+    ACTIVE_INDEX_CACHE = (time.monotonic(), result)
+    return result
 
 
 def daily_payload(code_input: str, count_input: int = 120) -> dict[str, Any]:
@@ -378,6 +1228,7 @@ def daily_payload(code_input: str, count_input: int = 120) -> dict[str, Any]:
             "source": "MiniQMT 1d",
             "code": code,
             "monitor_code": stored_code,
+            "tags": bond_tags(stored_code),
             "count": len(rows),
             "requested_count": count,
             "start_date": rows[0]["date"],
@@ -527,6 +1378,120 @@ def historical_minute_rows(
     return rows, previous_close, None, "MiniQMT 1m"
 
 
+def live_tick_minute_rows(
+    stored_code: str,
+    trading_date: str,
+) -> tuple[list[dict[str, Any]], float | None, str, float]:
+    bridge = MONITOR.BridgeClient(
+        f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}",
+        timeout=15.0,
+    )
+    ticks = bridge.full_tick([stored_code])
+    tick = ticks.get(stored_code)
+    if (
+        not isinstance(tick, dict)
+        or compact_date(tick.get("timetag")) != trading_date
+    ):
+        return [], None, "", 0
+    tick_rows = update_active_index_tick_minutes(
+        ticks,
+        [stored_code],
+        trading_date,
+    ).get(stored_code) or []
+    rows: list[dict[str, Any]] = []
+    for raw in tick_rows:
+        timestamp = int(raw.get("time") or 0)
+        close = finite_or_none(raw.get("close"))
+        if timestamp <= 0 or close is None or close <= 0:
+            continue
+        moment = datetime.fromtimestamp(timestamp / 1000)
+        rows.append(
+            {
+                "minute_ms": timestamp,
+                "minute_time": moment.strftime("%Y-%m-%d %H:%M:%S"),
+                "open": close,
+                "high": close,
+                "low": close,
+                "close": close,
+                "amount": finite_or_none(raw.get("amount")) or 0,
+            }
+        )
+    names = resolve_active_index_names(
+        bridge,
+        [stored_code],
+        {stored_code: ""},
+    )
+    return (
+        rows,
+        finite_or_none(tick.get("lastClose")),
+        names.get(stored_code) or "",
+        finite_or_none(tick.get("amount")) or 0,
+    )
+
+
+def minute_row_clock(row: Any) -> str:
+    value = str(row["minute_time"] or "")
+    match = re.search(r"(\d{2}:\d{2})", value)
+    return match.group(1) if match else ""
+
+
+def expected_minute_count(trading_date: str) -> int:
+    now = datetime.now()
+    if trading_date < now.strftime("%Y%m%d"):
+        return 241
+    if trading_date > now.strftime("%Y%m%d") or now.weekday() >= 5:
+        return 0
+    clock = now.time()
+    morning_open = datetime.strptime("09:30", "%H:%M").time()
+    morning_close = datetime.strptime("11:30", "%H:%M").time()
+    afternoon_open = datetime.strptime("13:00", "%H:%M").time()
+    afternoon_close = datetime.strptime("15:00", "%H:%M").time()
+    if clock < morning_open:
+        return 0
+    if clock <= morning_close:
+        return int(
+            (
+                datetime.combine(now.date(), clock)
+                - datetime.combine(now.date(), morning_open)
+            ).total_seconds()
+            // 60
+        ) + 1
+    if clock < afternoon_open:
+        return 121
+    if clock <= afternoon_close:
+        return 121 + int(
+            (
+                datetime.combine(now.date(), clock)
+                - datetime.combine(now.date(), afternoon_open)
+            ).total_seconds()
+            // 60
+        )
+    return 241
+
+
+def minute_rows_need_backfill(rows: list[Any], trading_date: str) -> bool:
+    if not rows:
+        return True
+    clocks = [minute_row_clock(row) for row in rows]
+    clocks = [clock for clock in clocks if clock]
+    if not clocks:
+        return True
+    if min(clocks) > "09:31":
+        return True
+    expected = expected_minute_count(trading_date)
+    return expected > 0 and len(set(clocks)) < max(1, expected - 2)
+
+
+def merge_minute_rows(*sources: list[Any]) -> list[Any]:
+    by_timestamp: dict[int, Any] = {}
+    for source in sources:
+        for row in source:
+            timestamp = int(row["minute_ms"] or 0)
+            if timestamp > 0:
+                by_timestamp[timestamp] = row
+    return [by_timestamp[timestamp] for timestamp in sorted(by_timestamp)]
+
+
 def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
     code = normalize_code(code_input)
     stored_code = monitor_code(code)
@@ -540,6 +1505,7 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
     minute_source = "本地监控数据库"
     previous_close = None
     previous_close_date = None
+    live_cumulative_amount = 0.0
 
     try:
         database = database_for_date(date_input)
@@ -570,15 +1536,42 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
         if not date_input:
             raise
 
-    if not minute_rows and date_input:
+    local_rows = list(minute_rows)
+    downloaded_rows: list[dict[str, Any]] = []
+    downloaded_previous_close = None
+    if minute_rows_need_backfill(local_rows, trading_date):
+        try:
+            (
+                downloaded_rows,
+                downloaded_previous_close,
+                previous_close_date,
+                _,
+            ) = historical_minute_rows(stored_code, trading_date)
+        except Exception:
+            downloaded_rows = []
+    live_rows: list[dict[str, Any]] = []
+    live_previous_close = None
+    live_name = ""
+    if not date_input:
         (
-            minute_rows,
-            previous_close,
-            previous_close_date,
-            minute_source,
-        ) = historical_minute_rows(stored_code, date_input)
-        trading_date = date_input
-        event_rows = []
+            live_rows,
+            live_previous_close,
+            live_name,
+            live_cumulative_amount,
+        ) = live_tick_minute_rows(stored_code, trading_date)
+    minute_rows = merge_minute_rows(downloaded_rows, local_rows, live_rows)
+    previous_close = live_previous_close or downloaded_previous_close
+    if live_name:
+        name = live_name
+    source_parts = []
+    if local_rows:
+        source_parts.append("本地监控")
+    if downloaded_rows:
+        source_parts.append("MiniQMT 1m补齐")
+    if live_rows:
+        source_parts.append("实时快照")
+    if source_parts:
+        minute_source = " + ".join(source_parts)
     if not minute_rows:
         raise LookupError(f"{code} 在 {trading_date} 没有分钟数据")
 
@@ -594,6 +1587,14 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
         for row in minute_rows
     ]
     indicators = MONITOR.compute_indicator_series(minutes)
+    try:
+        volume_ratio, average5_volume = bond_volume_ratio(
+            stored_code,
+            trading_date,
+        )
+    except Exception:
+        volume_ratio = None
+        average5_volume = None
 
     rows: list[dict[str, Any]] = []
     cumulative_amount = 0.0
@@ -609,6 +1610,17 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
             if cumulative_estimated_units > 0
             else close
         )
+        elapsed_minutes = elapsed_market_minutes_from_clock(row["minute_time"])
+        estimated_qmt_volume = cumulative_estimated_units / MONITOR.CB_VOLUME_MULTIPLIER
+        minute_volume_ratio = (
+            estimated_qmt_volume
+            / elapsed_minutes
+            / (average5_volume / 240)
+            if average5_volume
+            and average5_volume > 0
+            and elapsed_minutes > 0
+            else None
+        )
         visible = indicators["visible_funds"][index]
         rows.append(
             {
@@ -620,6 +1632,7 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
                 "close": float(row["close"]),
                 "amount": amount,
                 "cumulative_amount": cumulative_amount,
+                "volume_ratio": minute_volume_ratio,
                 "intraday_average": intraday_average,
                 "purple": indicators["purple"][index],
                 "purple_ma27": indicators["purple_ma27"][index],
@@ -640,6 +1653,29 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
                 "visible_funds_aa": visible + 1,
             }
         )
+
+    latest_estimated_volume_ratio = finite_or_none(rows[-1].get("volume_ratio"))
+    if (
+        volume_ratio is not None
+        and latest_estimated_volume_ratio is not None
+        and latest_estimated_volume_ratio > 0
+    ):
+        volume_ratio_scale = volume_ratio / latest_estimated_volume_ratio
+        for row in rows:
+            value = finite_or_none(row.get("volume_ratio"))
+            row["volume_ratio"] = (
+                value * volume_ratio_scale
+                if value is not None
+                else None
+            )
+
+    support_minutes = minutes
+    current_minute_ms = int(
+        datetime.now().replace(second=0, microsecond=0).timestamp() * 1000
+    )
+    if support_minutes and support_minutes[-1].minute_ms == current_minute_ms:
+        support_minutes = support_minutes[:-1]
+    support_counts = MONITOR.compute_pullback_support_counts(support_minutes)
 
     events: list[dict[str, Any]] = []
     for event in event_rows:
@@ -697,6 +1733,7 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
             "code": code,
             "monitor_code": stored_code,
             "name": name,
+            "tags": bond_tags(stored_code),
             "source": minute_source,
             "trading_date": trading_date,
             "available_dates": available_dates,
@@ -704,17 +1741,30 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
             "complete_session": len(rows) >= 240,
             "full_session": len(rows) >= 241,
             "intraday_average_quality": "estimated_from_minute_amount_and_close",
+            "volume_ratio_quality": (
+                "estimated_intraday_path_anchored_to_live_qmt"
+                if volume_ratio is not None
+                else "unavailable_without_live_qmt_baseline"
+            ),
             "first_price": first["open"],
             "previous_close": previous_close,
             "previous_close_date": previous_close_date,
             "latest_price": latest["close"],
             "daily_return": daily_return,
+            "volume_ratio": volume_ratio,
+            "support_counts": {
+                "purple": support_counts["purple_support_count"],
+                "intraday_average": support_counts[
+                    "intraday_average_support_count"
+                ],
+                "total": support_counts["support_confirmation_count"],
+            },
             "change_from_first": (
                 (latest["close"] / first["open"] - 1) * 100
                 if first["open"]
                 else None
             ),
-            "total_amount": cumulative_amount,
+            "total_amount": max(cumulative_amount, live_cumulative_amount),
             "latest_minute": latest["time"],
             "realtime": {
                 "monitor_alive": bool(health["monitor_alive"]),
@@ -738,10 +1788,21 @@ def events_payload(
     after_id: int = 0,
     limit: int = 80,
     codes_input: str = "",
+    event_types_input: str = "",
+    min_daily_amount_input: str = "",
+    min_daily_amplitude_input: str = "",
 ) -> dict[str, Any]:
     normalized_scope = scope if scope in {"focus", "all"} else "focus"
     safe_after_id = max(0, int(after_id))
     safe_limit = min(200, max(1, int(limit)))
+    try:
+        min_daily_amount = max(0.0, float(min_daily_amount_input or 0))
+    except (TypeError, ValueError):
+        min_daily_amount = 0.0
+    try:
+        min_daily_amplitude = max(0.0, float(min_daily_amplitude_input or 0))
+    except (TypeError, ValueError):
+        min_daily_amplitude = 0.0
     database = database_for_date()
     trading_date = database.stem
     conditions = ["trading_date=?"]
@@ -760,7 +1821,18 @@ def events_payload(
         placeholders = ",".join("?" for _ in monitored_codes)
         conditions.append(f"code IN ({placeholders})")
         parameters.extend(monitored_codes)
-    if normalized_scope == "focus":
+    selected_event_types = list(
+        dict.fromkeys(
+            value
+            for value in str(event_types_input or "").split(",")
+            if re.fullmatch(r"[a-z0-9_]+", value)
+        )
+    )
+    if selected_event_types:
+        placeholders = ",".join("?" for _ in selected_event_types)
+        conditions.append(f"event_type IN ({placeholders})")
+        parameters.extend(selected_event_types)
+    elif normalized_scope == "focus":
         event_types = sorted(FOCUS_EVENT_TYPES)
         placeholders = ",".join("?" for _ in event_types)
         conditions.append(f"event_type IN ({placeholders})")
@@ -778,16 +1850,95 @@ def events_payload(
         ORDER BY id {order}
         LIMIT ?
     """
-    parameters.append(safe_limit)
+    query_limit = (
+        min(1000, max(safe_limit * 5, 400))
+        if min_daily_amount > 0 or min_daily_amplitude > 0
+        else safe_limit
+    )
+    parameters.append(query_limit)
     with connect_read_only(database) as connection:
         rows = connection.execute(query, parameters).fetchall()
 
+    live_market: dict[str, dict[str, float | None]] = {}
+    if (min_daily_amount > 0 or min_daily_amplitude > 0) and rows:
+        event_codes = list(dict.fromkeys(str(row["code"]) for row in rows))
+        now = time.monotonic()
+        stale_codes = [
+            code
+            for code in event_codes
+            if code not in EVENT_MARKET_CACHE
+            or now - EVENT_MARKET_CACHE[code][0] >= EVENT_MARKET_CACHE_TTL_SECONDS
+        ]
+        if stale_codes:
+            try:
+                bridge = MONITOR.BridgeClient(
+                    f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}",
+                    timeout=15.0,
+                )
+                ticks = bridge.full_tick(stale_codes)
+                for code in stale_codes:
+                    tick = ticks.get(code)
+                    if not isinstance(tick, dict):
+                        continue
+                    high = finite_or_none(tick.get("high"))
+                    low = finite_or_none(tick.get("low"))
+                    last_close = finite_or_none(tick.get("lastClose"))
+                    amplitude = (
+                        (high - low) / last_close
+                        if high is not None
+                        and low is not None
+                        and last_close is not None
+                        and high > 0
+                        and low > 0
+                        and high >= low
+                        and last_close > 0
+                        else None
+                    )
+                    EVENT_MARKET_CACHE[code] = (
+                        now,
+                        {
+                            "daily_amount": finite_or_none(tick.get("amount")),
+                            "daily_amplitude": amplitude,
+                        },
+                    )
+            except Exception:
+                pass
+        live_market = {
+            code: EVENT_MARKET_CACHE[code][1]
+            for code in event_codes
+            if code in EVENT_MARKET_CACHE
+        }
+
     events: list[dict[str, Any]] = []
+    scanned_event_ids: list[int] = []
     for row in rows:
+        scanned_event_ids.append(int(row["id"]))
         try:
             details = json.loads(row["details_json"] or "{}")
         except json.JSONDecodeError:
             details = {}
+        daily_amount = (
+            live_market.get(str(row["code"]), {}).get("daily_amount")
+            if min_daily_amount > 0
+            else finite_or_none(details.get("daily_amount"))
+        )
+        if daily_amount is None:
+            daily_amount = finite_or_none(details.get("daily_amount"))
+        if min_daily_amount > 0 and (
+            daily_amount is None or daily_amount < min_daily_amount
+        ):
+            continue
+        daily_amplitude = (
+            live_market.get(str(row["code"]), {}).get("daily_amplitude")
+            if min_daily_amplitude > 0
+            else finite_or_none(details.get("daily_amplitude"))
+        )
+        if daily_amplitude is None:
+            daily_amplitude = finite_or_none(details.get("daily_amplitude"))
+        if min_daily_amplitude > 0 and (
+            daily_amplitude is None or daily_amplitude <= min_daily_amplitude
+        ):
+            continue
         events.append(
             {
                 "id": int(row["id"]),
@@ -796,6 +1947,7 @@ def events_payload(
                 "code": str(row["code"]).split(".")[0],
                 "monitor_code": str(row["code"]),
                 "name": str(row["name"] or ""),
+                "tags": bond_tags(str(row["code"])),
                 "event_type": str(row["event_type"]),
                 "direction": str(row["direction"]),
                 "price": float(row["price"]),
@@ -804,12 +1956,25 @@ def events_payload(
                 "speed_3m": finite_or_none(row["speed_3m"]),
                 "speed_5m": finite_or_none(row["speed_5m"]),
                 "amount_1m": finite_or_none(row["amount_1m"]),
+                "daily_amount": daily_amount,
+                "daily_amplitude": daily_amplitude,
+                "purple_support_count": int(
+                    details.get("purple_support_count") or 0
+                ),
+                "intraday_average_support_count": int(
+                    details.get("intraday_average_support_count") or 0
+                ),
+                "support_confirmation_count": int(
+                    details.get("support_confirmation_count") or 0
+                ),
                 "confidence": str(row["confidence"]),
                 "score": float(row["score"]),
                 "priority": str(details.get("alert_priority") or "medium"),
                 "source_bar_time": details.get("source_bar_time"),
             }
         )
+        if len(events) >= safe_limit:
+            break
     if safe_after_id:
         events.reverse()
 
@@ -822,12 +1987,18 @@ def events_payload(
         )
         or 0
     )
-    latest_id = max((event["id"] for event in events), default=safe_after_id)
+    latest_id = max(
+        scanned_event_ids,
+        default=safe_after_id,
+    )
     return clean_json(
         {
             "ok": True,
             "mode": "read_only",
             "scope": normalized_scope,
+            "event_types": selected_event_types,
+            "min_daily_amount": min_daily_amount,
+            "min_daily_amplitude": min_daily_amplitude,
             "trading_date": trading_date,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "monitor_alive": bool(health["monitor_alive"]),
@@ -870,6 +2041,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     int((query.get("after_id") or ["0"])[0]),
                     int((query.get("limit") or ["80"])[0]),
                     (query.get("codes") or [""])[0],
+                    (query.get("types") or [""])[0],
+                    (query.get("min_daily_amount") or [""])[0],
+                    (query.get("min_daily_amplitude") or [""])[0],
                 )
                 self.send_payload(200, payload)
                 return
@@ -878,6 +2052,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     (query.get("codes") or [""])[0],
                 )
                 self.send_payload(200, payload)
+                return
+            if parsed.path == "/active-index":
+                self.send_payload(200, active_index_payload())
+                return
+            if parsed.path == "/tags":
+                self.send_payload(
+                    200,
+                    tags_payload(
+                        (query.get("code") or [""])[0],
+                        (query.get("tag") or [""])[0],
+                    ),
+                )
                 return
             self.send_payload(404, {"error": "not found"})
         except ValueError as error:

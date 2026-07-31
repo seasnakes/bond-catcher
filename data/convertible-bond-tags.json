@@ -1,0 +1,4615 @@
+{
+  "asOf": "2026-07-31",
+  "source": [
+    "当前上市可转债完整名单与题材分类_2026-07-30.xlsx",
+    "MiniQMT / QMT Bridge instrument_detail + full_tick",
+    "申万行业 + 东方财富F10题材"
+  ],
+  "definitions": {
+    "次新债": "上市未满365天",
+    "小盘": "正股流通市值低于50亿元；行情缺失时采用微盘股/小盘价值题材",
+    "themeTags": "按申万行业、F10题材和核心业务关键词，可多标签"
+  },
+  "tagOrder": [
+    "次新债",
+    "小盘",
+    "AI应用",
+    "算力租赁",
+    "医药",
+    "油气",
+    "玻纤",
+    "PCB",
+    "液冷",
+    "机器人",
+    "光模块",
+    "ST",
+    "能化",
+    "电源",
+    "食品",
+    "饮料",
+    "半导体",
+    "半导体材料",
+    "光刻机",
+    "航天",
+    "环保",
+    "消费电子",
+    "铜缆",
+    "电力设备",
+    "银行",
+    "脑机接口"
+  ],
+  "tagCounts": {
+    "次新债": 52,
+    "小盘": 163,
+    "AI应用": 21,
+    "算力租赁": 5,
+    "医药": 35,
+    "油气": 14,
+    "玻纤": 1,
+    "PCB": 9,
+    "液冷": 12,
+    "机器人": 45,
+    "光模块": 4,
+    "ST": 5,
+    "能化": 39,
+    "电源": 3,
+    "食品": 4,
+    "饮料": 4,
+    "半导体": 37,
+    "半导体材料": 16,
+    "光刻机": 9,
+    "航天": 33,
+    "环保": 26,
+    "消费电子": 12,
+    "铜缆": 7,
+    "电力设备": 35,
+    "银行": 5,
+    "脑机接口": 0
+  },
+  "count": 306,
+  "rows": [
+    {
+      "code": "118053.SH",
+      "name": "正帆转债",
+      "stockCode": "688596.SH",
+      "stockName": "正帆科技",
+      "listedDate": "2025-04-03",
+      "industry1": "机械设备",
+      "industry2": "专用设备",
+      "industry3": "其他专用设备",
+      "floatMarketCap": 14455632159.09,
+      "tags": [
+        "半导体"
+      ]
+    },
+    {
+      "code": "123157.SZ",
+      "name": "科蓝转债",
+      "stockCode": "300663.SZ",
+      "stockName": "科蓝软件",
+      "listedDate": "2022-09-20",
+      "industry1": "计算机",
+      "industry2": "软件开发",
+      "industry3": "垂直应用软件",
+      "floatMarketCap": 4889320634.339999,
+      "tags": [
+        "小盘",
+        "AI应用",
+        "算力租赁",
+        "机器人"
+      ]
+    },
+    {
+      "code": "123173.SZ",
+      "name": "恒锋转债",
+      "stockCode": "300605.SZ",
+      "stockName": "恒锋信息",
+      "listedDate": "2023-02-08",
+      "industry1": "计算机",
+      "industry2": "软件开发",
+      "industry3": "垂直应用软件",
+      "floatMarketCap": 1390212450,
+      "tags": [
+        "小盘",
+        "AI应用",
+        "算力租赁"
+      ]
+    },
+    {
+      "code": "123261.SZ",
+      "name": "普联转债",
+      "stockCode": "300996.SZ",
+      "stockName": "普联软件",
+      "listedDate": "2025-12-22",
+      "industry1": "计算机",
+      "industry2": "软件开发",
+      "industry3": "垂直应用软件",
+      "floatMarketCap": 6203109700.4800005,
+      "tags": [
+        "次新债",
+        "AI应用"
+      ]
+    },
+    {
+      "code": "123235.SZ",
+      "name": "亿田转债",
+      "stockCode": "300911.SZ",
+      "stockName": "亿田智能",
+      "listedDate": "2024-01-12",
+      "industry1": "家用电器",
+      "industry2": "厨卫电器",
+      "industry3": "厨房电器",
+      "floatMarketCap": 3661611129.25,
+      "tags": [
+        "小盘",
+        "AI应用"
+      ]
+    },
+    {
+      "code": "123118.SZ",
+      "name": "惠城转债",
+      "stockCode": "300779.SZ",
+      "stockName": "惠城环保",
+      "listedDate": "2021-07-26",
+      "industry1": "环保",
+      "industry2": "环境治理",
+      "industry3": "固废治理",
+      "floatMarketCap": 18032932966.86,
+      "tags": [
+        "环保"
+      ]
+    },
+    {
+      "code": "123255.SZ",
+      "name": "鼎龙转债",
+      "stockCode": "300054.SZ",
+      "stockName": "鼎龙股份",
+      "listedDate": "2025-04-23",
+      "industry1": "电子",
+      "industry2": "电子化学品Ⅱ",
+      "industry3": "电子化学品Ⅲ",
+      "floatMarketCap": 51040811137.72001,
+      "tags": [
+        "半导体",
+        "半导体材料",
+        "光刻机"
+      ]
+    },
+    {
+      "code": "118058.SH",
+      "name": "微导转债",
+      "stockCode": "688147.SH",
+      "stockName": "微导纳米",
+      "listedDate": "2025-08-27",
+      "industry1": "电力设备",
+      "industry2": "光伏设备",
+      "industry3": "光伏加工设备",
+      "floatMarketCap": 40097102789.87,
+      "tags": [
+        "次新债",
+        "半导体",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "118071.SH",
+      "name": "华峰转债",
+      "stockCode": "688200.SH",
+      "stockName": "华峰测控",
+      "listedDate": "2026-07-17",
+      "industry1": "电子",
+      "industry2": "半导体",
+      "industry3": "半导体设备",
+      "floatMarketCap": 71739689936.61,
+      "tags": [
+        "次新债",
+        "半导体"
+      ]
+    },
+    {
+      "code": "123241.SZ",
+      "name": "欧通转债",
+      "stockCode": "300870.SZ",
+      "stockName": "欧陆通",
+      "listedDate": "2024-07-26",
+      "industry1": "电力设备",
+      "industry2": "其他电源设备Ⅱ",
+      "industry3": "其他电源设备Ⅲ",
+      "floatMarketCap": 26966092776.56,
+      "tags": [
+        "液冷",
+        "电源",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "123176.SZ",
+      "name": "精测转2",
+      "stockCode": "300567.SZ",
+      "stockName": "精测电子",
+      "listedDate": "2023-03-22",
+      "industry1": "机械设备",
+      "industry2": "通用设备",
+      "industry3": "仪器仪表",
+      "floatMarketCap": 43366497475,
+      "tags": [
+        "半导体"
+      ]
+    },
+    {
+      "code": "123273.SZ",
+      "name": "三江转债",
+      "stockCode": "301059.SZ",
+      "stockName": "金三江",
+      "listedDate": "2026-07-03",
+      "industry1": "基础化工",
+      "industry2": "化学制品",
+      "industry3": "其他化学制品",
+      "floatMarketCap": 2309168337.32,
+      "tags": [
+        "次新债",
+        "小盘",
+        "能化"
+      ]
+    },
+    {
+      "code": "113704.SH",
+      "name": "春风转债",
+      "stockCode": "603129.SH",
+      "stockName": "春风动力",
+      "listedDate": "2026-07-07",
+      "industry1": "汽车",
+      "industry2": "摩托车及其他",
+      "industry3": "摩托车",
+      "floatMarketCap": 46999491685.86,
+      "tags": [
+        "次新债"
+      ]
+    },
+    {
+      "code": "123131.SZ",
+      "name": "奥飞转债",
+      "stockCode": "300738.SZ",
+      "stockName": "奥飞数据",
+      "listedDate": "2021-12-22",
+      "industry1": "通信",
+      "industry2": "通信服务",
+      "industry3": "通信应用增值服务",
+      "floatMarketCap": 22022230287.2,
+      "tags": [
+        "算力租赁"
+      ]
+    },
+    {
+      "code": "127067.SZ",
+      "name": "恒逸转2",
+      "stockCode": "000703.SZ",
+      "stockName": "恒逸石化",
+      "listedDate": "2022-08-18",
+      "industry1": "石油石化",
+      "industry2": "炼化及贸易",
+      "industry3": "炼油化工",
+      "floatMarketCap": 61180453442.729996,
+      "tags": [
+        "油气",
+        "能化"
+      ]
+    },
+    {
+      "code": "123274.SZ",
+      "name": "维科转债",
+      "stockCode": "301499.SZ",
+      "stockName": "维科精密",
+      "listedDate": "2026-07-10",
+      "industry1": "汽车",
+      "industry2": "汽车零部件",
+      "industry3": "汽车电子电气系统",
+      "floatMarketCap": 3120412325.62,
+      "tags": [
+        "次新债",
+        "小盘"
+      ]
+    },
+    {
+      "code": "123267.SZ",
+      "name": "珂玛转债",
+      "stockCode": "301611.SZ",
+      "stockName": "珂玛科技",
+      "listedDate": "2026-05-13",
+      "industry1": "电子",
+      "industry2": "半导体",
+      "industry3": "半导体材料",
+      "floatMarketCap": 12400895404.800001,
+      "tags": [
+        "次新债",
+        "医药",
+        "半导体",
+        "半导体材料",
+        "光刻机"
+      ]
+    },
+    {
+      "code": "127080.SZ",
+      "name": "声迅转债",
+      "stockCode": "003004.SZ",
+      "stockName": "声迅股份",
+      "listedDate": "2023-02-10",
+      "industry1": "计算机",
+      "industry2": "计算机设备",
+      "industry3": "安防设备",
+      "floatMarketCap": 3835849300.2,
+      "tags": [
+        "小盘",
+        "AI应用"
+      ]
+    },
+    {
+      "code": "118061.SH",
+      "name": "茂莱转债",
+      "stockCode": "688502.SH",
+      "stockName": "茂莱光学",
+      "listedDate": "2025-12-10",
+      "industry1": "电子",
+      "industry2": "光学光电子",
+      "industry3": "光学元件",
+      "floatMarketCap": 16764237490,
+      "tags": [
+        "次新债",
+        "光刻机"
+      ]
+    },
+    {
+      "code": "118064.SH",
+      "name": "联瑞转债",
+      "stockCode": "688300.SH",
+      "stockName": "联瑞新材",
+      "listedDate": "2026-01-28",
+      "industry1": "基础化工",
+      "industry2": "非金属材料Ⅱ",
+      "industry3": "非金属材料Ⅲ",
+      "floatMarketCap": 25914473470.8,
+      "tags": [
+        "次新债",
+        "PCB",
+        "能化"
+      ]
+    },
+    {
+      "code": "127096.SZ",
+      "name": "泰坦转债",
+      "stockCode": "003036.SZ",
+      "stockName": "泰坦股份",
+      "listedDate": "2023-11-15",
+      "industry1": "机械设备",
+      "industry2": "专用设备",
+      "industry3": "纺织服装设备",
+      "floatMarketCap": 9757870319.75,
+      "tags": [
+        "机器人"
+      ]
+    },
+    {
+      "code": "113697.SH",
+      "name": "应流转债",
+      "stockCode": "603308.SH",
+      "stockName": "应流股份",
+      "listedDate": "2025-10-22",
+      "industry1": "机械设备",
+      "industry2": "通用设备",
+      "industry3": "金属制品",
+      "floatMarketCap": 29097323737.65,
+      "tags": [
+        "次新债",
+        "航天"
+      ]
+    },
+    {
+      "code": "111004.SH",
+      "name": "明新转债",
+      "stockCode": "605068.SH",
+      "stockName": "明新旭腾",
+      "listedDate": "2022-04-25",
+      "industry1": "汽车",
+      "industry2": "汽车零部件",
+      "industry3": "车身附件及饰件",
+      "floatMarketCap": 3518085356.55,
+      "tags": [
+        "小盘",
+        "机器人"
+      ]
+    },
+    {
+      "code": "110101.SH",
+      "name": "宝钛转债",
+      "stockCode": "600456.SH",
+      "stockName": "宝钛股份",
+      "listedDate": "2026-07-16",
+      "industry1": "有色金属",
+      "industry2": "小金属",
+      "industry3": "其他小金属",
+      "floatMarketCap": 13506771027.53,
+      "tags": [
+        "次新债",
+        "航天"
+      ]
+    },
+    {
+      "code": "118035.SH",
+      "name": "国力转债",
+      "stockCode": "688103.SH",
+      "stockName": "国力电子",
+      "listedDate": "2023-07-06",
+      "industry1": "电子",
+      "industry2": "其他电子Ⅱ",
+      "industry3": "其他电子Ⅲ",
+      "floatMarketCap": 5830453172.22,
+      "tags": [
+        "半导体",
+        "航天"
+      ]
+    },
+    {
+      "code": "123158.SZ",
+      "name": "宙邦转债",
+      "stockCode": "300037.SZ",
+      "stockName": "新宙邦",
+      "listedDate": "2022-10-21",
+      "industry1": "电力设备",
+      "industry2": "电池",
+      "industry3": "电池化学品",
+      "floatMarketCap": 34228392067.600002,
+      "tags": [
+        "液冷",
+        "半导体",
+        "半导体材料",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "118030.SH",
+      "name": "睿创转债",
+      "stockCode": "688002.SH",
+      "stockName": "睿创微纳",
+      "listedDate": "2023-02-10",
+      "industry1": "国防军工",
+      "industry2": "军工电子Ⅱ",
+      "industry3": "军工电子Ⅲ",
+      "floatMarketCap": 66648201154.25,
+      "tags": [
+        "机器人",
+        "半导体",
+        "航天"
+      ]
+    },
+    {
+      "code": "118056.SH",
+      "name": "路维转债",
+      "stockCode": "688401.SH",
+      "stockName": "路维光电",
+      "listedDate": "2025-07-10",
+      "industry1": "电子",
+      "industry2": "半导体",
+      "industry3": "半导体材料",
+      "floatMarketCap": 11684113125.21,
+      "tags": [
+        "PCB",
+        "半导体",
+        "半导体材料"
+      ]
+    },
+    {
+      "code": "113667.SH",
+      "name": "春23转债",
+      "stockCode": "603890.SH",
+      "stockName": "春秋电子",
+      "listedDate": "2023-04-11",
+      "industry1": "电子",
+      "industry2": "消费电子",
+      "industry3": "消费电子零部件及组装",
+      "floatMarketCap": 7707846186.75,
+      "tags": [
+        "液冷",
+        "机器人",
+        "消费电子"
+      ]
+    },
+    {
+      "code": "113039.SH",
+      "name": "嘉泽转债",
+      "stockCode": "601619.SH",
+      "stockName": "嘉泽新能",
+      "listedDate": "2020-09-17",
+      "industry1": "公用事业",
+      "industry2": "电力",
+      "industry3": "风力发电",
+      "floatMarketCap": 11272892041.63,
+      "tags": []
+    },
+    {
+      "code": "127070.SZ",
+      "name": "大中转债",
+      "stockCode": "001203.SZ",
+      "stockName": "大中矿业",
+      "listedDate": "2022-10-11",
+      "industry1": "钢铁",
+      "industry2": "冶钢原料",
+      "industry3": "铁矿石",
+      "floatMarketCap": 33863507068.46,
+      "tags": []
+    },
+    {
+      "code": "123270.SZ",
+      "name": "盛德转债",
+      "stockCode": "300881.SZ",
+      "stockName": "盛德鑫泰",
+      "listedDate": "2026-06-12",
+      "industry1": "钢铁",
+      "industry2": "特钢Ⅱ",
+      "industry3": "特钢Ⅲ",
+      "floatMarketCap": 1832981562.5,
+      "tags": [
+        "次新债",
+        "小盘"
+      ]
+    },
+    {
+      "code": "111025.SH",
+      "name": "圣泉转债",
+      "stockCode": "605589.SH",
+      "stockName": "圣泉集团",
+      "listedDate": "2026-07-21",
+      "industry1": "基础化工",
+      "industry2": "塑料",
+      "industry3": "合成树脂",
+      "floatMarketCap": 28862756211.76,
+      "tags": [
+        "次新债",
+        "PCB",
+        "能化",
+        "半导体",
+        "半导体材料",
+        "光刻机",
+        "航天",
+        "环保"
+      ]
+    },
+    {
+      "code": "113615.SH",
+      "name": "金诚转债",
+      "stockCode": "603979.SH",
+      "stockName": "金诚信",
+      "listedDate": "2021-01-14",
+      "industry1": "有色金属",
+      "industry2": "工业金属",
+      "industry3": "铜",
+      "floatMarketCap": 46310361139.2,
+      "tags": []
+    },
+    {
+      "code": "118016.SH",
+      "name": "京源转债",
+      "stockCode": "688096.SH",
+      "stockName": "京源环保",
+      "listedDate": "2022-08-25",
+      "industry1": "环保",
+      "industry2": "环境治理",
+      "industry3": "水务及水治理",
+      "floatMarketCap": 1834983022.1500003,
+      "tags": [
+        "小盘",
+        "环保"
+      ]
+    },
+    {
+      "code": "118059.SH",
+      "name": "颀中转债",
+      "stockCode": "688352.SH",
+      "stockName": "颀中科技",
+      "listedDate": "2025-11-21",
+      "industry1": "电子",
+      "industry2": "半导体",
+      "industry3": "集成电路封测",
+      "floatMarketCap": 5096840495.24,
+      "tags": [
+        "次新债",
+        "半导体"
+      ]
+    },
+    {
+      "code": "110097.SH",
+      "name": "天润转债",
+      "stockCode": "600419.SH",
+      "stockName": "天润乳业",
+      "listedDate": "2024-11-15",
+      "industry1": "食品饮料",
+      "industry2": "饮料乳品",
+      "industry3": "乳品",
+      "floatMarketCap": 2729203089.2000003,
+      "tags": [
+        "小盘",
+        "饮料"
+      ]
+    },
+    {
+      "code": "118069.SH",
+      "name": "爱科转债",
+      "stockCode": "688092.SH",
+      "stockName": "爱科科技",
+      "listedDate": "2026-07-09",
+      "industry1": "机械设备",
+      "industry2": "专用设备",
+      "industry3": "其他专用设备",
+      "floatMarketCap": 1745031551.3999999,
+      "tags": [
+        "次新债",
+        "小盘",
+        "机器人",
+        "航天"
+      ]
+    },
+    {
+      "code": "123272.SZ",
+      "name": "中汽转债",
+      "stockCode": "301215.SZ",
+      "stockName": "中汽股份",
+      "listedDate": "2026-06-30",
+      "industry1": "汽车",
+      "industry2": "汽车服务",
+      "industry3": "汽车综合服务",
+      "floatMarketCap": 7088064000,
+      "tags": [
+        "次新债"
+      ]
+    },
+    {
+      "code": "123258.SZ",
+      "name": "胜蓝转02",
+      "stockCode": "300843.SZ",
+      "stockName": "胜蓝股份",
+      "listedDate": "2025-09-10",
+      "industry1": "电子",
+      "industry2": "消费电子",
+      "industry3": "消费电子零部件及组装",
+      "floatMarketCap": 16420703640.380001,
+      "tags": [
+        "次新债",
+        "液冷",
+        "机器人",
+        "消费电子",
+        "铜缆"
+      ]
+    },
+    {
+      "code": "127037.SZ",
+      "name": "银轮转债",
+      "stockCode": "002126.SZ",
+      "stockName": "银轮股份",
+      "listedDate": "2021-07-09",
+      "industry1": "汽车",
+      "industry2": "汽车零部件",
+      "industry3": "底盘与发动机系统",
+      "floatMarketCap": 30565470130.64,
+      "tags": [
+        "液冷",
+        "机器人"
+      ]
+    },
+    {
+      "code": "113052.SH",
+      "name": "兴业转债",
+      "stockCode": "601166.SH",
+      "stockName": "兴业银行",
+      "listedDate": "2022-01-14",
+      "industry1": "银行",
+      "industry2": "股份制银行Ⅱ",
+      "industry3": "股份制银行Ⅲ",
+      "floatMarketCap": 399978044795.69995,
+      "tags": [
+        "银行"
+      ]
+    },
+    {
+      "code": "118013.SH",
+      "name": "道通转债",
+      "stockCode": "688208.SH",
+      "stockName": "道通科技",
+      "listedDate": "2022-07-28",
+      "industry1": "计算机",
+      "industry2": "计算机设备",
+      "industry3": "其他计算机设备",
+      "floatMarketCap": 19656490971.32,
+      "tags": [
+        "AI应用",
+        "机器人"
+      ]
+    },
+    {
+      "code": "123091.SZ",
+      "name": "长海转债",
+      "stockCode": "300196.SZ",
+      "stockName": "长海股份",
+      "listedDate": "2021-01-15",
+      "industry1": "建筑材料",
+      "industry2": "玻璃玻纤",
+      "industry3": "玻纤制造",
+      "floatMarketCap": 3925304030.48,
+      "tags": [
+        "小盘",
+        "玻纤"
+      ]
+    },
+    {
+      "code": "118051.SH",
+      "name": "皓元转债",
+      "stockCode": "688131.SH",
+      "stockName": "皓元医药",
+      "listedDate": "2024-12-19",
+      "industry1": "医药生物",
+      "industry2": "医疗服务",
+      "industry3": "医疗研发外包",
+      "floatMarketCap": 16572553630.24,
+      "tags": [
+        "医药"
+      ]
+    },
+    {
+      "code": "123275.SZ",
+      "name": "肇民转债",
+      "stockCode": "301000.SZ",
+      "stockName": "肇民科技",
+      "listedDate": "2026-07-24",
+      "industry1": "汽车",
+      "industry2": "汽车零部件",
+      "industry3": "其他汽车零部件",
+      "floatMarketCap": 5519887769.44,
+      "tags": [
+        "次新债",
+        "机器人"
+      ]
+    },
+    {
+      "code": "118072.SH",
+      "name": "鼎通转债",
+      "stockCode": "688668.SH",
+      "stockName": "鼎通科技",
+      "listedDate": "2026-07-17",
+      "industry1": "通信",
+      "industry2": "通信设备",
+      "industry3": "通信网络设备及器件",
+      "floatMarketCap": 26500410909.68,
+      "tags": [
+        "次新债",
+        "液冷",
+        "铜缆"
+      ]
+    },
+    {
+      "code": "127114.SZ",
+      "name": "宜化转债",
+      "stockCode": "000422.SZ",
+      "stockName": "湖北宜化",
+      "listedDate": "2026-07-14",
+      "industry1": "基础化工",
+      "industry2": "农化制品",
+      "industry3": "氮肥",
+      "floatMarketCap": 14013464024.560001,
+      "tags": [
+        "次新债",
+        "小盘",
+        "能化",
+        "半导体材料",
+        "光刻机"
+      ]
+    },
+    {
+      "code": "113042.SH",
+      "name": "上银转债",
+      "stockCode": "601229.SH",
+      "stockName": "上海银行",
+      "listedDate": "2021-02-10",
+      "industry1": "银行",
+      "industry2": "城商行Ⅱ",
+      "industry3": "城商行Ⅲ",
+      "floatMarketCap": 134275416064.65001,
+      "tags": [
+        "银行"
+      ]
+    },
+    {
+      "code": "123266.SZ",
+      "name": "博士转债",
+      "stockCode": "300622.SZ",
+      "stockName": "博士眼镜",
+      "listedDate": "2026-04-07",
+      "industry1": "商贸零售",
+      "industry2": "专业连锁Ⅱ",
+      "industry3": "专业连锁Ⅲ",
+      "floatMarketCap": 3487125487.56,
+      "tags": [
+        "次新债",
+        "小盘",
+        "消费电子"
+      ]
+    },
+    {
+      "code": "113677.SH",
+      "name": "华懋转债",
+      "stockCode": "603306.SH",
+      "stockName": "华懋科技",
+      "listedDate": "2023-10-12",
+      "industry1": "汽车",
+      "industry2": "汽车零部件",
+      "industry3": "车身附件及饰件",
+      "floatMarketCap": 19071210942.36,
+      "tags": [
+        "光模块",
+        "半导体材料",
+        "光刻机"
+      ]
+    },
+    {
+      "code": "123245.SZ",
+      "name": "集智转债",
+      "stockCode": "300553.SZ",
+      "stockName": "集智股份",
+      "listedDate": "2024-08-28",
+      "industry1": "机械设备",
+      "industry2": "通用设备",
+      "industry3": "仪器仪表",
+      "floatMarketCap": 3132133893.7200003,
+      "tags": [
+        "小盘",
+        "机器人",
+        "航天"
+      ]
+    },
+    {
+      "code": "123213.SZ",
+      "name": "天源转债",
+      "stockCode": "301127.SZ",
+      "stockName": "武汉天源",
+      "listedDate": "2023-08-16",
+      "industry1": "环保",
+      "industry2": "环境治理",
+      "industry3": "水务及水治理",
+      "floatMarketCap": 7807259029.19,
+      "tags": [
+        "环保"
+      ]
+    },
+    {
+      "code": "113658.SH",
+      "name": "密卫转债",
+      "stockCode": "603713.SH",
+      "stockName": "密尔克卫",
+      "listedDate": "2022-10-25",
+      "industry1": "交通运输",
+      "industry2": "物流",
+      "industry3": "仓储物流",
+      "floatMarketCap": 9344965727.4,
+      "tags": []
+    },
+    {
+      "code": "113702.SH",
+      "name": "斯达转债",
+      "stockCode": "603290.SH",
+      "stockName": "斯达半导",
+      "listedDate": "2026-05-11",
+      "industry1": "电子",
+      "industry2": "半导体",
+      "industry3": "分立器件",
+      "floatMarketCap": 19275219278.34,
+      "tags": [
+        "次新债",
+        "半导体"
+      ]
+    },
+    {
+      "code": "123263.SZ",
+      "name": "鼎捷转债",
+      "stockCode": "300378.SZ",
+      "stockName": "鼎捷数智",
+      "listedDate": "2025-12-31",
+      "industry1": "计算机",
+      "industry2": "软件开发",
+      "industry3": "横向通用软件",
+      "floatMarketCap": 9087983822.64,
+      "tags": [
+        "次新债",
+        "AI应用",
+        "机器人",
+        "半导体"
+      ]
+    },
+    {
+      "code": "118062.SH",
+      "name": "天准转债",
+      "stockCode": "688003.SH",
+      "stockName": "天准科技",
+      "listedDate": "2025-12-31",
+      "industry1": "机械设备",
+      "industry2": "自动化设备",
+      "industry3": "其他自动化设备",
+      "floatMarketCap": 13401023340.8,
+      "tags": [
+        "次新债",
+        "PCB",
+        "机器人",
+        "半导体"
+      ]
+    },
+    {
+      "code": "113056.SH",
+      "name": "重银转债",
+      "stockCode": "601963.SH",
+      "stockName": "重庆银行",
+      "listedDate": "2022-04-14",
+      "industry1": "银行",
+      "industry2": "城商行Ⅱ",
+      "industry3": "城商行Ⅲ",
+      "floatMarketCap": 23228921781.16,
+      "tags": [
+        "银行"
+      ]
+    },
+    {
+      "code": "113699.SH",
+      "name": "金25转债",
+      "stockCode": "603979.SH",
+      "stockName": "金诚信",
+      "listedDate": "2025-10-27",
+      "industry1": "有色金属",
+      "industry2": "工业金属",
+      "industry3": "铜",
+      "floatMarketCap": 46310361139.2,
+      "tags": [
+        "次新债"
+      ]
+    },
+    {
+      "code": "113705.SH",
+      "name": "豪26转债",
+      "stockCode": "603809.SH",
+      "stockName": "豪能股份",
+      "listedDate": "2026-07-10",
+      "industry1": "汽车",
+      "industry2": "汽车零部件",
+      "industry3": "底盘与发动机系统",
+      "floatMarketCap": 8715135002.29,
+      "tags": [
+        "次新债",
+        "机器人",
+        "航天"
+      ]
+    },
+    {
+      "code": "113053.SH",
+      "name": "隆22转债",
+      "stockCode": "601012.SH",
+      "stockName": "隆基绿能",
+      "listedDate": "2022-02-17",
+      "industry1": "电力设备",
+      "industry2": "光伏设备",
+      "industry3": "光伏电池组件",
+      "floatMarketCap": 98439020209.98,
+      "tags": [
+        "半导体材料",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "123154.SZ",
+      "name": "火星转债",
+      "stockCode": "300894.SZ",
+      "stockName": "火星人",
+      "listedDate": "2022-08-23",
+      "industry1": "家用电器",
+      "industry2": "厨卫电器",
+      "industry3": "厨房电器",
+      "floatMarketCap": 3390733302.83,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "123257.SZ",
+      "name": "安克转债",
+      "stockCode": "300866.SZ",
+      "stockName": "安克创新",
+      "listedDate": "2025-07-04",
+      "industry1": "电子",
+      "industry2": "消费电子",
+      "industry3": "品牌消费电子",
+      "floatMarketCap": 37528248559.83,
+      "tags": [
+        "半导体",
+        "消费电子"
+      ]
+    },
+    {
+      "code": "128136.SZ",
+      "name": "立讯转债",
+      "stockCode": "002475.SZ",
+      "stockName": "立讯精密",
+      "listedDate": "2020-12-02",
+      "industry1": "电子",
+      "industry2": "消费电子",
+      "industry3": "消费电子零部件及组装",
+      "floatMarketCap": 421045320254.27997,
+      "tags": [
+        "算力租赁",
+        "液冷",
+        "机器人",
+        "光模块",
+        "消费电子",
+        "铜缆"
+      ]
+    },
+    {
+      "code": "127092.SZ",
+      "name": "运机转债",
+      "stockCode": "001288.SZ",
+      "stockName": "运机集团",
+      "listedDate": "2023-10-20",
+      "industry1": "机械设备",
+      "industry2": "专用设备",
+      "industry3": "能源及重型设备",
+      "floatMarketCap": 3857573615.7999997,
+      "tags": [
+        "小盘",
+        "AI应用",
+        "机器人"
+      ]
+    },
+    {
+      "code": "127055.SZ",
+      "name": "精装转债",
+      "stockCode": "002989.SZ",
+      "stockName": "中天精装",
+      "listedDate": "2022-03-24",
+      "industry1": "建筑装饰",
+      "industry2": "装修装饰Ⅱ",
+      "industry3": "装修装饰Ⅲ",
+      "floatMarketCap": 3913175667.0400004,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "118050.SH",
+      "name": "航宇转债",
+      "stockCode": "688239.SH",
+      "stockName": "航宇科技",
+      "listedDate": "2024-09-10",
+      "industry1": "国防军工",
+      "industry2": "航空装备Ⅱ",
+      "industry3": "航空装备Ⅲ",
+      "floatMarketCap": 7768227590.5,
+      "tags": [
+        "航天"
+      ]
+    },
+    {
+      "code": "128142.SZ",
+      "name": "新乳转债",
+      "stockCode": "002946.SZ",
+      "stockName": "新乳业",
+      "listedDate": "2021-01-19",
+      "industry1": "食品饮料",
+      "industry2": "饮料乳品",
+      "industry3": "乳品",
+      "floatMarketCap": 15517037495.999998,
+      "tags": [
+        "饮料"
+      ]
+    },
+    {
+      "code": "123247.SZ",
+      "name": "万凯转债",
+      "stockCode": "301216.SZ",
+      "stockName": "万凯新材",
+      "listedDate": "2024-09-05",
+      "industry1": "基础化工",
+      "industry2": "塑料",
+      "industry3": "其他塑料制品",
+      "floatMarketCap": 8588511937.5199995,
+      "tags": [
+        "小盘",
+        "机器人",
+        "能化",
+        "环保"
+      ]
+    },
+    {
+      "code": "127045.SZ",
+      "name": "牧原转债",
+      "stockCode": "002714.SZ",
+      "stockName": "牧原股份",
+      "listedDate": "2021-09-10",
+      "industry1": "农林牧渔",
+      "industry2": "养殖业",
+      "industry3": "生猪养殖",
+      "floatMarketCap": 128792400594.26,
+      "tags": []
+    },
+    {
+      "code": "111012.SH",
+      "name": "福新转债",
+      "stockCode": "605488.SH",
+      "stockName": "福莱新材",
+      "listedDate": "2023-02-07",
+      "industry1": "基础化工",
+      "industry2": "塑料",
+      "industry3": "膜材料",
+      "floatMarketCap": 6769742670.35,
+      "tags": [
+        "机器人",
+        "能化",
+        "环保",
+        "消费电子"
+      ]
+    },
+    {
+      "code": "113661.SH",
+      "name": "福22转债",
+      "stockCode": "603806.SH",
+      "stockName": "福斯特",
+      "listedDate": "2022-12-22",
+      "industry1": "电力设备",
+      "industry2": "光伏设备",
+      "industry3": "光伏辅材",
+      "floatMarketCap": 38270299448.34,
+      "tags": [
+        "PCB",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "127046.SZ",
+      "name": "百润转债",
+      "stockCode": "002568.SZ",
+      "stockName": "百润股份",
+      "listedDate": "2021-11-03",
+      "industry1": "食品饮料",
+      "industry2": "非白酒",
+      "industry3": "其他酒类",
+      "floatMarketCap": 15699435738.6,
+      "tags": [
+        "饮料"
+      ]
+    },
+    {
+      "code": "118070.SH",
+      "name": "南芯转债",
+      "stockCode": "688484.SH",
+      "stockName": "南芯科技",
+      "listedDate": "2026-07-10",
+      "industry1": "电子",
+      "industry2": "半导体",
+      "industry3": "模拟芯片设计",
+      "floatMarketCap": 14566207570.2,
+      "tags": [
+        "次新债",
+        "半导体"
+      ]
+    },
+    {
+      "code": "127056.SZ",
+      "name": "中特转债",
+      "stockCode": "000708.SZ",
+      "stockName": "中信特钢",
+      "listedDate": "2022-04-15",
+      "industry1": "钢铁",
+      "industry2": "特钢Ⅱ",
+      "industry3": "特钢Ⅲ",
+      "floatMarketCap": 75606099197.44,
+      "tags": [
+        "油气",
+        "航天"
+      ]
+    },
+    {
+      "code": "127110.SZ",
+      "name": "广核转债",
+      "stockCode": "003816.SZ",
+      "stockName": "中国广核",
+      "listedDate": "2025-07-25",
+      "industry1": "公用事业",
+      "industry2": "电力",
+      "industry3": "核力发电",
+      "floatMarketCap": 162454296311.65,
+      "tags": []
+    },
+    {
+      "code": "127084.SZ",
+      "name": "柳工转2",
+      "stockCode": "000528.SZ",
+      "stockName": "柳 工",
+      "listedDate": "2023-04-20",
+      "industry1": "机械设备",
+      "industry2": "工程机械",
+      "industry3": "工程机械整机",
+      "floatMarketCap": 17867324382.059998,
+      "tags": [
+        "小盘",
+        "机器人"
+      ]
+    },
+    {
+      "code": "118036.SH",
+      "name": "力合转债",
+      "stockCode": "688589.SH",
+      "stockName": "力合微",
+      "listedDate": "2023-07-20",
+      "industry1": "电子",
+      "industry2": "半导体",
+      "industry3": "数字芯片设计",
+      "floatMarketCap": 2485117657.8,
+      "tags": [
+        "小盘",
+        "半导体"
+      ]
+    },
+    {
+      "code": "127089.SZ",
+      "name": "晶澳转债",
+      "stockCode": "002459.SZ",
+      "stockName": "晶澳科技",
+      "listedDate": "2023-08-04",
+      "industry1": "电力设备",
+      "industry2": "光伏设备",
+      "industry3": "光伏电池组件",
+      "floatMarketCap": 24833879093.46,
+      "tags": [
+        "半导体材料",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "118060.SH",
+      "name": "瑞可转债",
+      "stockCode": "688800.SH",
+      "stockName": "瑞可达",
+      "listedDate": "2025-12-12",
+      "industry1": "电子",
+      "industry2": "其他电子Ⅱ",
+      "industry3": "其他电子Ⅲ",
+      "floatMarketCap": 14015609269.2,
+      "tags": [
+        "次新债",
+        "机器人",
+        "航天",
+        "铜缆"
+      ]
+    },
+    {
+      "code": "123107.SZ",
+      "name": "温氏转债",
+      "stockCode": "300498.SZ",
+      "stockName": "温氏股份",
+      "listedDate": "2021-04-21",
+      "industry1": "农林牧渔",
+      "industry2": "养殖业",
+      "industry3": "生猪养殖",
+      "floatMarketCap": 83777448763.21,
+      "tags": []
+    },
+    {
+      "code": "113062.SH",
+      "name": "常银转债",
+      "stockCode": "601128.SH",
+      "stockName": "常熟银行",
+      "listedDate": "2022-10-17",
+      "industry1": "银行",
+      "industry2": "农商行Ⅱ",
+      "industry3": "农商行Ⅲ",
+      "floatMarketCap": 23457792538.92,
+      "tags": [
+        "小盘",
+        "银行"
+      ]
+    },
+    {
+      "code": "118034.SH",
+      "name": "晶能转债",
+      "stockCode": "688223.SH",
+      "stockName": "晶科能源",
+      "listedDate": "2023-05-19",
+      "industry1": "电力设备",
+      "industry2": "光伏设备",
+      "industry3": "光伏电池组件",
+      "floatMarketCap": 44569249212.74,
+      "tags": [
+        "电力设备"
+      ]
+    },
+    {
+      "code": "123178.SZ",
+      "name": "花园转债",
+      "stockCode": "300401.SZ",
+      "stockName": "花园生物",
+      "listedDate": "2023-03-23",
+      "industry1": "医药生物",
+      "industry2": "化学制药",
+      "industry3": "原料药",
+      "floatMarketCap": 6657497182.98,
+      "tags": [
+        "医药"
+      ]
+    },
+    {
+      "code": "113691.SH",
+      "name": "和邦转债",
+      "stockCode": "603077.SH",
+      "stockName": "和邦生物",
+      "listedDate": "2024-11-19",
+      "industry1": "基础化工",
+      "industry2": "农化制品",
+      "industry3": "磷肥及磷化工",
+      "floatMarketCap": 20931135465.36,
+      "tags": [
+        "小盘",
+        "油气",
+        "能化"
+      ]
+    },
+    {
+      "code": "113043.SH",
+      "name": "财通转债",
+      "stockCode": "601108.SH",
+      "stockName": "财通证券",
+      "listedDate": "2020-12-28",
+      "industry1": "非银金融",
+      "industry2": "证券Ⅱ",
+      "industry3": "证券Ⅲ",
+      "floatMarketCap": 38914784136.200005,
+      "tags": [
+        "AI应用"
+      ]
+    },
+    {
+      "code": "110081.SH",
+      "name": "闻泰转债",
+      "stockCode": "600745.SH",
+      "stockName": "*ST闻泰",
+      "listedDate": "2021-08-20",
+      "industry1": "电子",
+      "industry2": "半导体",
+      "industry3": "分立器件",
+      "floatMarketCap": 21133490840.91,
+      "tags": [
+        "ST",
+        "半导体"
+      ]
+    },
+    {
+      "code": "113051.SH",
+      "name": "节能转债",
+      "stockCode": "601016.SH",
+      "stockName": "节能风电",
+      "listedDate": "2021-07-22",
+      "industry1": "公用事业",
+      "industry2": "电力",
+      "industry3": "风力发电",
+      "floatMarketCap": 21375429620.7,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "123207.SZ",
+      "name": "冠中转债",
+      "stockCode": "300948.SZ",
+      "stockName": "冠中生态",
+      "listedDate": "2023-08-09",
+      "industry1": "建筑装饰",
+      "industry2": "基础建设",
+      "industry3": "园林工程",
+      "floatMarketCap": 2631389995.52,
+      "tags": [
+        "小盘",
+        "环保"
+      ]
+    },
+    {
+      "code": "113058.SH",
+      "name": "友发转债",
+      "stockCode": "601686.SH",
+      "stockName": "友发集团",
+      "listedDate": "2022-04-26",
+      "industry1": "钢铁",
+      "industry2": "普钢",
+      "industry3": "钢铁管材",
+      "floatMarketCap": 7692606095.2,
+      "tags": []
+    },
+    {
+      "code": "127104.SZ",
+      "name": "姚记转债",
+      "stockCode": "002605.SZ",
+      "stockName": "姚记科技",
+      "listedDate": "2024-02-26",
+      "industry1": "传媒",
+      "industry2": "游戏Ⅱ",
+      "industry3": "游戏Ⅲ",
+      "floatMarketCap": 6277594346.24,
+      "tags": []
+    },
+    {
+      "code": "110077.SH",
+      "name": "洪城转债",
+      "stockCode": "600461.SH",
+      "stockName": "洪城环境",
+      "listedDate": "2020-12-17",
+      "industry1": "环保",
+      "industry2": "环境治理",
+      "industry3": "水务及水治理",
+      "floatMarketCap": 11981183055.960001,
+      "tags": [
+        "小盘",
+        "油气",
+        "环保"
+      ]
+    },
+    {
+      "code": "128135.SZ",
+      "name": "洽洽转债",
+      "stockCode": "002557.SZ",
+      "stockName": "洽洽食品",
+      "listedDate": "2020-11-18",
+      "industry1": "食品饮料",
+      "industry2": "休闲食品",
+      "industry3": "零食",
+      "floatMarketCap": 10302212728.08,
+      "tags": [
+        "小盘",
+        "食品"
+      ]
+    },
+    {
+      "code": "127109.SZ",
+      "name": "电化转债",
+      "stockCode": "002125.SZ",
+      "stockName": "湘潭电化",
+      "listedDate": "2025-07-04",
+      "industry1": "电力设备",
+      "industry2": "电池",
+      "industry3": "电池化学品",
+      "floatMarketCap": 7768312598.34,
+      "tags": [
+        "环保",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "128129.SZ",
+      "name": "青农转债",
+      "stockCode": "002958.SZ",
+      "stockName": "青农商行",
+      "listedDate": "2020-09-18",
+      "industry1": "银行",
+      "industry2": "农商行Ⅱ",
+      "industry3": "农商行Ⅲ",
+      "floatMarketCap": 17243407203.44,
+      "tags": [
+        "小盘",
+        "银行"
+      ]
+    },
+    {
+      "code": "113659.SH",
+      "name": "莱克转债",
+      "stockCode": "603355.SH",
+      "stockName": "莱克电气",
+      "listedDate": "2022-11-15",
+      "industry1": "家用电器",
+      "industry2": "小家电",
+      "industry3": "清洁小家电",
+      "floatMarketCap": 15997773007.8,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "113673.SH",
+      "name": "岱美转债",
+      "stockCode": "603730.SH",
+      "stockName": "岱美股份",
+      "listedDate": "2023-08-10",
+      "industry1": "汽车",
+      "industry2": "汽车零部件",
+      "industry3": "车身附件及饰件",
+      "floatMarketCap": 20626499337.6,
+      "tags": []
+    },
+    {
+      "code": "113633.SH",
+      "name": "科沃转债",
+      "stockCode": "603486.SH",
+      "stockName": "科沃斯",
+      "listedDate": "2021-12-29",
+      "industry1": "家用电器",
+      "industry2": "小家电",
+      "industry3": "清洁小家电",
+      "floatMarketCap": 34785304365.450005,
+      "tags": [
+        "机器人"
+      ]
+    },
+    {
+      "code": "127030.SZ",
+      "name": "盛虹转债",
+      "stockCode": "000301.SZ",
+      "stockName": "东方盛虹",
+      "listedDate": "2021-04-21",
+      "industry1": "石油石化",
+      "industry2": "炼化及贸易",
+      "industry3": "炼油化工",
+      "floatMarketCap": 77780550480.70999,
+      "tags": [
+        "油气",
+        "能化"
+      ]
+    },
+    {
+      "code": "123195.SZ",
+      "name": "蓝晓转02",
+      "stockCode": "300487.SZ",
+      "stockName": "蓝晓科技",
+      "listedDate": "2023-05-08",
+      "industry1": "基础化工",
+      "industry2": "塑料",
+      "industry3": "合成树脂",
+      "floatMarketCap": 18040697487.97,
+      "tags": [
+        "能化",
+        "半导体",
+        "环保"
+      ]
+    },
+    {
+      "code": "123268.SZ",
+      "name": "本川转债",
+      "stockCode": "300964.SZ",
+      "stockName": "本川智能",
+      "listedDate": "2026-05-07",
+      "industry1": "电子",
+      "industry2": "元件",
+      "industry3": "印制电路板",
+      "floatMarketCap": 3700345240.02,
+      "tags": [
+        "次新债",
+        "小盘",
+        "PCB",
+        "机器人",
+        "光模块",
+        "航天"
+      ]
+    },
+    {
+      "code": "123064.SZ",
+      "name": "万孚转债",
+      "stockCode": "300482.SZ",
+      "stockName": "万孚生物",
+      "listedDate": "2020-09-23",
+      "industry1": "医药生物",
+      "industry2": "医疗器械",
+      "industry3": "体外诊断",
+      "floatMarketCap": 7500358138.080001,
+      "tags": [
+        "医药"
+      ]
+    },
+    {
+      "code": "123243.SZ",
+      "name": "严牌转债",
+      "stockCode": "301081.SZ",
+      "stockName": "严牌股份",
+      "listedDate": "2024-07-26",
+      "industry1": "环保",
+      "industry2": "环保设备Ⅱ",
+      "industry3": "环保设备Ⅲ",
+      "floatMarketCap": 2404207735.65,
+      "tags": [
+        "小盘",
+        "环保"
+      ]
+    },
+    {
+      "code": "110085.SH",
+      "name": "通22转债",
+      "stockCode": "600438.SH",
+      "stockName": "通威股份",
+      "listedDate": "2022-03-18",
+      "industry1": "电力设备",
+      "industry2": "光伏设备",
+      "industry3": "硅料硅片",
+      "floatMarketCap": 52583254179.2,
+      "tags": [
+        "半导体",
+        "半导体材料",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "113646.SH",
+      "name": "永吉转债",
+      "stockCode": "603058.SH",
+      "stockName": "永吉股份",
+      "listedDate": "2022-05-17",
+      "industry1": "轻工制造",
+      "industry2": "包装印刷",
+      "industry3": "纸包装",
+      "floatMarketCap": 3665625923.44,
+      "tags": [
+        "小盘",
+        "半导体"
+      ]
+    },
+    {
+      "code": "111000.SH",
+      "name": "起帆转债",
+      "stockCode": "605222.SH",
+      "stockName": "起帆电缆",
+      "listedDate": "2021-06-17",
+      "industry1": "电力设备",
+      "industry2": "电网设备",
+      "industry3": "线缆部件及其他",
+      "floatMarketCap": 7552082802.37,
+      "tags": [
+        "航天",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "110099.SH",
+      "name": "福能转债",
+      "stockCode": "600483.SH",
+      "stockName": "福能股份",
+      "listedDate": "2025-10-30",
+      "industry1": "公用事业",
+      "industry2": "电力",
+      "industry3": "电能综合服务",
+      "floatMarketCap": 30220193639.829998,
+      "tags": [
+        "次新债"
+      ]
+    },
+    {
+      "code": "113655.SH",
+      "name": "欧22转债",
+      "stockCode": "603833.SH",
+      "stockName": "欧派家居",
+      "listedDate": "2022-09-01",
+      "industry1": "轻工制造",
+      "industry2": "家居用品",
+      "industry3": "定制家居",
+      "floatMarketCap": 21198519771.6,
+      "tags": []
+    },
+    {
+      "code": "127049.SZ",
+      "name": "希望转2",
+      "stockCode": "000876.SZ",
+      "stockName": "新 希 望",
+      "listedDate": "2021-11-29",
+      "industry1": "农林牧渔",
+      "industry2": "饲料",
+      "industry3": "畜禽饲料",
+      "floatMarketCap": 31500045752,
+      "tags": []
+    },
+    {
+      "code": "110084.SH",
+      "name": "贵燃转债",
+      "stockCode": "600903.SH",
+      "stockName": "贵州燃气",
+      "listedDate": "2022-01-18",
+      "industry1": "公用事业",
+      "industry2": "燃气Ⅱ",
+      "industry3": "燃气Ⅲ",
+      "floatMarketCap": 7181788128.7,
+      "tags": [
+        "油气"
+      ]
+    },
+    {
+      "code": "113696.SH",
+      "name": "伯25转债",
+      "stockCode": "603596.SH",
+      "stockName": "伯特利",
+      "listedDate": "2025-07-28",
+      "industry1": "汽车",
+      "industry2": "汽车零部件",
+      "industry3": "底盘与发动机系统",
+      "floatMarketCap": 23455377307.44,
+      "tags": [
+        "机器人"
+      ]
+    },
+    {
+      "code": "127103.SZ",
+      "name": "东南转债",
+      "stockCode": "002135.SZ",
+      "stockName": "东南网架",
+      "listedDate": "2024-01-24",
+      "industry1": "建筑装饰",
+      "industry2": "专业工程",
+      "industry3": "钢结构",
+      "floatMarketCap": 6503323033.4800005,
+      "tags": []
+    },
+    {
+      "code": "127112.SZ",
+      "name": "尚太转债",
+      "stockCode": "001301.SZ",
+      "stockName": "尚太科技",
+      "listedDate": "2026-02-05",
+      "industry1": "电力设备",
+      "industry2": "电池",
+      "industry3": "电池化学品",
+      "floatMarketCap": 14362113806.92,
+      "tags": [
+        "次新债",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "118012.SH",
+      "name": "微芯转债",
+      "stockCode": "688321.SH",
+      "stockName": "微芯生物",
+      "listedDate": "2022-07-28",
+      "industry1": "医药生物",
+      "industry2": "化学制药",
+      "industry3": "化学制剂",
+      "floatMarketCap": 10790603675.460001,
+      "tags": [
+        "医药"
+      ]
+    },
+    {
+      "code": "118063.SH",
+      "name": "金05转债",
+      "stockCode": "688676.SH",
+      "stockName": "金盘科技",
+      "listedDate": "2026-01-14",
+      "industry1": "电力设备",
+      "industry2": "电网设备",
+      "industry3": "输变电设备",
+      "floatMarketCap": 29564134605.199997,
+      "tags": [
+        "次新债",
+        "机器人",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "113605.SH",
+      "name": "大参转债",
+      "stockCode": "603233.SH",
+      "stockName": "大参林",
+      "listedDate": "2020-11-13",
+      "industry1": "医药生物",
+      "industry2": "医药商业",
+      "industry3": "线下药店",
+      "floatMarketCap": 21467407702,
+      "tags": [
+        "小盘",
+        "医药"
+      ]
+    },
+    {
+      "code": "113066.SH",
+      "name": "平煤转债",
+      "stockCode": "601666.SH",
+      "stockName": "平煤股份",
+      "listedDate": "2023-04-10",
+      "industry1": "煤炭",
+      "industry2": "煤炭开采",
+      "industry3": "焦煤",
+      "floatMarketCap": 19730227220.91,
+      "tags": [
+        "小盘",
+        "能化"
+      ]
+    },
+    {
+      "code": "113706.SH",
+      "name": "金帝转债",
+      "stockCode": "603270.SH",
+      "stockName": "金帝股份",
+      "listedDate": "2026-07-10",
+      "industry1": "机械设备",
+      "industry2": "通用设备",
+      "industry3": "金属制品",
+      "floatMarketCap": 1669620507.87,
+      "tags": [
+        "次新债",
+        "小盘",
+        "机器人"
+      ]
+    },
+    {
+      "code": "127050.SZ",
+      "name": "麒麟转债",
+      "stockCode": "002984.SZ",
+      "stockName": "森麒麟",
+      "listedDate": "2021-12-06",
+      "industry1": "汽车",
+      "industry2": "汽车零部件",
+      "industry3": "轮胎轮毂",
+      "floatMarketCap": 10537461989.64,
+      "tags": [
+        "小盘",
+        "航天"
+      ]
+    },
+    {
+      "code": "127038.SZ",
+      "name": "国微转债",
+      "stockCode": "002049.SZ",
+      "stockName": "紫光国微",
+      "listedDate": "2021-07-14",
+      "industry1": "电子",
+      "industry2": "半导体",
+      "industry3": "数字芯片设计",
+      "floatMarketCap": 54819653557.28,
+      "tags": [
+        "半导体",
+        "航天"
+      ]
+    },
+    {
+      "code": "113046.SH",
+      "name": "金田转债",
+      "stockCode": "601609.SH",
+      "stockName": "金田股份",
+      "listedDate": "2021-04-12",
+      "industry1": "有色金属",
+      "industry2": "工业金属",
+      "industry3": "铜",
+      "floatMarketCap": 17009799819.119999,
+      "tags": [
+        "小盘",
+        "液冷",
+        "机器人",
+        "铜缆"
+      ]
+    },
+    {
+      "code": "113648.SH",
+      "name": "巨星转债",
+      "stockCode": "603477.SH",
+      "stockName": "巨星农牧",
+      "listedDate": "2022-05-17",
+      "industry1": "农林牧渔",
+      "industry2": "养殖业",
+      "industry3": "生猪养殖",
+      "floatMarketCap": 7441933161.67,
+      "tags": []
+    },
+    {
+      "code": "111017.SH",
+      "name": "蓝天转债",
+      "stockCode": "605368.SH",
+      "stockName": "蓝天燃气",
+      "listedDate": "2023-09-08",
+      "industry1": "公用事业",
+      "industry2": "燃气Ⅱ",
+      "industry3": "燃气Ⅲ",
+      "floatMarketCap": 4838085144.549999,
+      "tags": [
+        "小盘",
+        "油气"
+      ]
+    },
+    {
+      "code": "113678.SH",
+      "name": "中贝转债",
+      "stockCode": "603220.SH",
+      "stockName": "中贝通信",
+      "listedDate": "2023-11-21",
+      "industry1": "通信",
+      "industry2": "通信服务",
+      "industry3": "通信工程及服务",
+      "floatMarketCap": 7912442399.2,
+      "tags": [
+        "AI应用",
+        "算力租赁",
+        "光模块"
+      ]
+    },
+    {
+      "code": "127082.SZ",
+      "name": "亚科转债",
+      "stockCode": "002540.SZ",
+      "stockName": "亚太科技",
+      "listedDate": "2023-04-27",
+      "industry1": "有色金属",
+      "industry2": "工业金属",
+      "industry3": "铝",
+      "floatMarketCap": 4299588803.58,
+      "tags": [
+        "小盘",
+        "航天"
+      ]
+    },
+    {
+      "code": "123187.SZ",
+      "name": "超达转债",
+      "stockCode": "301186.SZ",
+      "stockName": "超达装备",
+      "listedDate": "2023-04-25",
+      "industry1": "汽车",
+      "industry2": "汽车零部件",
+      "industry3": "其他汽车零部件",
+      "floatMarketCap": 3160974624.9,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "118031.SH",
+      "name": "天23转债",
+      "stockCode": "688599.SH",
+      "stockName": "天合光能",
+      "listedDate": "2023-03-15",
+      "industry1": "电力设备",
+      "industry2": "光伏设备",
+      "industry3": "光伏电池组件",
+      "floatMarketCap": 31788643499.02,
+      "tags": [
+        "航天",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "110092.SH",
+      "name": "三房转债",
+      "stockCode": "600370.SH",
+      "stockName": "*ST三房",
+      "listedDate": "2023-02-07",
+      "industry1": "基础化工",
+      "industry2": "化学纤维",
+      "industry3": "涤纶",
+      "floatMarketCap": 6355806160.66,
+      "tags": [
+        "ST",
+        "能化",
+        "环保"
+      ]
+    },
+    {
+      "code": "110087.SH",
+      "name": "天业转债",
+      "stockCode": "600075.SH",
+      "stockName": "新疆天业",
+      "listedDate": "2022-07-19",
+      "industry1": "基础化工",
+      "industry2": "化学原料",
+      "industry3": "氯碱",
+      "floatMarketCap": 7787555884.079999,
+      "tags": [
+        "能化"
+      ]
+    },
+    {
+      "code": "110076.SH",
+      "name": "华海转债",
+      "stockCode": "600521.SH",
+      "stockName": "华海药业",
+      "listedDate": "2020-11-25",
+      "industry1": "医药生物",
+      "industry2": "化学制药",
+      "industry3": "化学制剂",
+      "floatMarketCap": 25034056717.12,
+      "tags": [
+        "医药"
+      ]
+    },
+    {
+      "code": "111014.SH",
+      "name": "李子转债",
+      "stockCode": "605337.SH",
+      "stockName": "李子园",
+      "listedDate": "2023-07-13",
+      "industry1": "食品饮料",
+      "industry2": "饮料乳品",
+      "industry3": "软饮料",
+      "floatMarketCap": 3768391627.98,
+      "tags": [
+        "小盘",
+        "饮料"
+      ]
+    },
+    {
+      "code": "123216.SZ",
+      "name": "科顺转债",
+      "stockCode": "300737.SZ",
+      "stockName": "科顺股份",
+      "listedDate": "2023-08-23",
+      "industry1": "建筑材料",
+      "industry2": "装修建材",
+      "industry3": "防水材料",
+      "floatMarketCap": 4329424882.4,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "123259.SZ",
+      "name": "锦浪转02",
+      "stockCode": "300763.SZ",
+      "stockName": "锦浪科技",
+      "listedDate": "2025-11-06",
+      "industry1": "电力设备",
+      "industry2": "光伏设备",
+      "industry3": "逆变器",
+      "floatMarketCap": 19186344813.44,
+      "tags": [
+        "次新债",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "110075.SH",
+      "name": "南航转债",
+      "stockCode": "600029.SH",
+      "stockName": "南方航空",
+      "listedDate": "2020-11-03",
+      "industry1": "交通运输",
+      "industry2": "航空机场",
+      "industry3": "航空运输",
+      "floatMarketCap": 70754104113,
+      "tags": []
+    },
+    {
+      "code": "127061.SZ",
+      "name": "美锦转债",
+      "stockCode": "000723.SZ",
+      "stockName": "美锦能源",
+      "listedDate": "2022-05-30",
+      "industry1": "煤炭",
+      "industry2": "焦炭Ⅱ",
+      "industry3": "焦炭Ⅲ",
+      "floatMarketCap": 15866585511.619999,
+      "tags": [
+        "油气",
+        "机器人",
+        "能化",
+        "环保"
+      ]
+    },
+    {
+      "code": "110086.SH",
+      "name": "精工转债",
+      "stockCode": "600496.SH",
+      "stockName": "精工钢构",
+      "listedDate": "2022-05-23",
+      "industry1": "建筑装饰",
+      "industry2": "专业工程",
+      "industry3": "钢结构",
+      "floatMarketCap": 6547513220.71,
+      "tags": []
+    },
+    {
+      "code": "127053.SZ",
+      "name": "豪美转债",
+      "stockCode": "002988.SZ",
+      "stockName": "豪美新材",
+      "listedDate": "2022-03-04",
+      "industry1": "有色金属",
+      "industry2": "工业金属",
+      "industry3": "铝",
+      "floatMarketCap": 5061039088.96,
+      "tags": []
+    },
+    {
+      "code": "113652.SH",
+      "name": "伟22转债",
+      "stockCode": "603568.SH",
+      "stockName": "伟明环保",
+      "listedDate": "2022-08-12",
+      "industry1": "环保",
+      "industry2": "环境治理",
+      "industry3": "固废治理",
+      "floatMarketCap": 31341398495.4,
+      "tags": [
+        "环保"
+      ]
+    },
+    {
+      "code": "123133.SZ",
+      "name": "佩蒂转债",
+      "stockCode": "300673.SZ",
+      "stockName": "佩蒂股份",
+      "listedDate": "2022-01-21",
+      "industry1": "农林牧渔",
+      "industry2": "饲料",
+      "industry3": "宠物食品",
+      "floatMarketCap": 2057113532.68,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "127064.SZ",
+      "name": "杭氧转债",
+      "stockCode": "002430.SZ",
+      "stockName": "杭氧股份",
+      "listedDate": "2022-07-05",
+      "industry1": "基础化工",
+      "industry2": "化学制品",
+      "industry3": "其他化学制品",
+      "floatMarketCap": 22482788320.739998,
+      "tags": [
+        "油气",
+        "能化",
+        "半导体",
+        "航天"
+      ]
+    },
+    {
+      "code": "127025.SZ",
+      "name": "冀东转债",
+      "stockCode": "000401.SZ",
+      "stockName": "金隅冀东",
+      "listedDate": "2020-12-02",
+      "industry1": "建筑材料",
+      "industry2": "水泥",
+      "industry3": "水泥制造",
+      "floatMarketCap": 9630758158.08,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "123271.SZ",
+      "name": "通合转债",
+      "stockCode": "300491.SZ",
+      "stockName": "通合科技",
+      "listedDate": "2026-06-17",
+      "industry1": "电力设备",
+      "industry2": "其他电源设备Ⅱ",
+      "industry3": "其他电源设备Ⅲ",
+      "floatMarketCap": 3850172079.81,
+      "tags": [
+        "次新债",
+        "小盘",
+        "电源",
+        "航天",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "113610.SH",
+      "name": "灵康转债",
+      "stockCode": "603669.SH",
+      "stockName": "灵康药业",
+      "listedDate": "2020-12-22",
+      "industry1": "医药生物",
+      "industry2": "化学制药",
+      "industry3": "化学制剂",
+      "floatMarketCap": 3839464979.35,
+      "tags": [
+        "小盘",
+        "医药"
+      ]
+    },
+    {
+      "code": "113695.SH",
+      "name": "华辰转债",
+      "stockCode": "603097.SH",
+      "stockName": "江苏华辰",
+      "listedDate": "2025-07-10",
+      "industry1": "电力设备",
+      "industry2": "电网设备",
+      "industry3": "输变电设备",
+      "floatMarketCap": 4066649500.8,
+      "tags": [
+        "小盘",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "113693.SH",
+      "name": "志邦转债",
+      "stockCode": "603801.SH",
+      "stockName": "志邦家居",
+      "listedDate": "2025-04-08",
+      "industry1": "轻工制造",
+      "industry2": "家居用品",
+      "industry3": "定制家居",
+      "floatMarketCap": 2523582116.23,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "123192.SZ",
+      "name": "科思转债",
+      "stockCode": "300856.SZ",
+      "stockName": "科思股份",
+      "listedDate": "2023-05-11",
+      "industry1": "美容护理",
+      "industry2": "化妆品",
+      "industry3": "化妆品制造及其他",
+      "floatMarketCap": 5121454840.22,
+      "tags": []
+    },
+    {
+      "code": "123092.SZ",
+      "name": "天壕转债",
+      "stockCode": "300332.SZ",
+      "stockName": "天壕能源",
+      "listedDate": "2021-01-15",
+      "industry1": "公用事业",
+      "industry2": "燃气Ⅱ",
+      "industry3": "燃气Ⅲ",
+      "floatMarketCap": 3818594270.2000003,
+      "tags": [
+        "小盘",
+        "油气",
+        "环保"
+      ]
+    },
+    {
+      "code": "123269.SZ",
+      "name": "金杨转债",
+      "stockCode": "301210.SZ",
+      "stockName": "金杨精密",
+      "listedDate": "2026-05-11",
+      "industry1": "电力设备",
+      "industry2": "电池",
+      "industry3": "锂电池",
+      "floatMarketCap": 1390995422,
+      "tags": [
+        "次新债",
+        "小盘",
+        "机器人",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "127040.SZ",
+      "name": "国泰转债",
+      "stockCode": "002091.SZ",
+      "stockName": "江苏国泰",
+      "listedDate": "2021-08-10",
+      "industry1": "商贸零售",
+      "industry2": "贸易Ⅱ",
+      "industry3": "贸易Ⅲ",
+      "floatMarketCap": 12738857964.45,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "123150.SZ",
+      "name": "九强转债",
+      "stockCode": "300406.SZ",
+      "stockName": "九强生物",
+      "listedDate": "2022-07-20",
+      "industry1": "医药生物",
+      "industry2": "医疗器械",
+      "industry3": "体外诊断",
+      "floatMarketCap": 4938656133.72,
+      "tags": [
+        "小盘",
+        "医药"
+      ]
+    },
+    {
+      "code": "123119.SZ",
+      "name": "康泰转2",
+      "stockCode": "300601.SZ",
+      "stockName": "康泰生物",
+      "listedDate": "2021-08-05",
+      "industry1": "医药生物",
+      "industry2": "生物制品",
+      "industry3": "疫苗",
+      "floatMarketCap": 11299984759.6,
+      "tags": [
+        "医药"
+      ]
+    },
+    {
+      "code": "113703.SH",
+      "name": "翔26转债",
+      "stockCode": "603112.SH",
+      "stockName": "华翔股份",
+      "listedDate": "2026-07-07",
+      "industry1": "家用电器",
+      "industry2": "家电零部件Ⅱ",
+      "industry3": "家电零部件Ⅲ",
+      "floatMarketCap": 7773179106.139999,
+      "tags": [
+        "次新债",
+        "机器人"
+      ]
+    },
+    {
+      "code": "123183.SZ",
+      "name": "海顺转债",
+      "stockCode": "300501.SZ",
+      "stockName": "海顺新材",
+      "listedDate": "2023-04-20",
+      "industry1": "轻工制造",
+      "industry2": "包装印刷",
+      "industry3": "综合包装",
+      "floatMarketCap": 2689061344.3,
+      "tags": [
+        "小盘",
+        "医药"
+      ]
+    },
+    {
+      "code": "113049.SH",
+      "name": "长汽转债",
+      "stockCode": "601633.SH",
+      "stockName": "长城汽车",
+      "listedDate": "2021-07-08",
+      "industry1": "汽车",
+      "industry2": "乘用车",
+      "industry3": "综合乘用车",
+      "floatMarketCap": 104560951427.18,
+      "tags": []
+    },
+    {
+      "code": "127088.SZ",
+      "name": "赫达转债",
+      "stockCode": "002810.SZ",
+      "stockName": "山东赫达",
+      "listedDate": "2023-07-19",
+      "industry1": "基础化工",
+      "industry2": "化学制品",
+      "industry3": "其他化学制品",
+      "floatMarketCap": 6252530109.76,
+      "tags": [
+        "能化"
+      ]
+    },
+    {
+      "code": "113692.SH",
+      "name": "保隆转债",
+      "stockCode": "603197.SH",
+      "stockName": "保隆科技",
+      "listedDate": "2024-11-27",
+      "industry1": "汽车",
+      "industry2": "汽车零部件",
+      "industry3": "其他汽车零部件",
+      "floatMarketCap": 6117077119.19,
+      "tags": []
+    },
+    {
+      "code": "128127.SZ",
+      "name": "文科转债",
+      "stockCode": "002775.SZ",
+      "stockName": "文科股份",
+      "listedDate": "2020-09-11",
+      "industry1": "建筑装饰",
+      "industry2": "基础建设",
+      "industry3": "园林工程",
+      "floatMarketCap": 2300039767.08,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "123237.SZ",
+      "name": "佳禾转债",
+      "stockCode": "300793.SZ",
+      "stockName": "佳禾智能",
+      "listedDate": "2024-01-24",
+      "industry1": "电子",
+      "industry2": "消费电子",
+      "industry3": "消费电子零部件及组装",
+      "floatMarketCap": 4100413352.52,
+      "tags": [
+        "小盘",
+        "机器人",
+        "消费电子"
+      ]
+    },
+    {
+      "code": "118024.SH",
+      "name": "冠宇转债",
+      "stockCode": "688772.SH",
+      "stockName": "珠海冠宇",
+      "listedDate": "2022-11-17",
+      "industry1": "电力设备",
+      "industry2": "电池",
+      "industry3": "锂电池",
+      "floatMarketCap": 16675796491.6,
+      "tags": [
+        "机器人",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "113059.SH",
+      "name": "福莱转债",
+      "stockCode": "601865.SH",
+      "stockName": "福莱特",
+      "listedDate": "2022-06-13",
+      "industry1": "电力设备",
+      "industry2": "光伏设备",
+      "industry3": "光伏辅材",
+      "floatMarketCap": 19162337231.52,
+      "tags": [
+        "电力设备"
+      ]
+    },
+    {
+      "code": "123065.SZ",
+      "name": "宝莱转债",
+      "stockCode": "300246.SZ",
+      "stockName": "宝莱特",
+      "listedDate": "2020-09-24",
+      "industry1": "医药生物",
+      "industry2": "医疗器械",
+      "industry3": "医疗设备",
+      "floatMarketCap": 4073297265.1800003,
+      "tags": [
+        "小盘",
+        "医药",
+        "消费电子"
+      ]
+    },
+    {
+      "code": "127047.SZ",
+      "name": "帝欧转债",
+      "stockCode": "002798.SZ",
+      "stockName": "帝欧水华",
+      "listedDate": "2021-11-26",
+      "industry1": "轻工制造",
+      "industry2": "家居用品",
+      "industry3": "瓷砖地板",
+      "floatMarketCap": 2738770632.7999997,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "118065.SH",
+      "name": "艾为转债",
+      "stockCode": "688798.SH",
+      "stockName": "艾为电子",
+      "listedDate": "2026-02-26",
+      "industry1": "电子",
+      "industry2": "半导体",
+      "industry3": "模拟芯片设计",
+      "floatMarketCap": 7290769420.400001,
+      "tags": [
+        "次新债",
+        "电源",
+        "半导体"
+      ]
+    },
+    {
+      "code": "123211.SZ",
+      "name": "阳谷转债",
+      "stockCode": "300121.SZ",
+      "stockName": "阳谷华泰",
+      "listedDate": "2023-08-14",
+      "industry1": "基础化工",
+      "industry2": "橡胶",
+      "industry3": "橡胶助剂",
+      "floatMarketCap": 4010660333.92,
+      "tags": [
+        "小盘",
+        "能化"
+      ]
+    },
+    {
+      "code": "110098.SH",
+      "name": "南药转债",
+      "stockCode": "600713.SH",
+      "stockName": "南京医药",
+      "listedDate": "2025-01-20",
+      "industry1": "医药生物",
+      "industry2": "医药商业",
+      "industry3": "医药流通",
+      "floatMarketCap": 6539355519.84,
+      "tags": [
+        "医药"
+      ]
+    },
+    {
+      "code": "123114.SZ",
+      "name": "三角转债",
+      "stockCode": "300775.SZ",
+      "stockName": "三角防务",
+      "listedDate": "2021-06-11",
+      "industry1": "国防军工",
+      "industry2": "航空装备Ⅱ",
+      "industry3": "航空装备Ⅲ",
+      "floatMarketCap": 11297422271.25,
+      "tags": [
+        "小盘",
+        "航天"
+      ]
+    },
+    {
+      "code": "118027.SH",
+      "name": "宏图转债",
+      "stockCode": "688066.SH",
+      "stockName": "*ST航图",
+      "listedDate": "2022-12-22",
+      "industry1": "计算机",
+      "industry2": "IT服务Ⅱ",
+      "industry3": "IT服务Ⅲ",
+      "floatMarketCap": 2125068395.19,
+      "tags": [
+        "小盘",
+        "AI应用",
+        "ST",
+        "航天"
+      ]
+    },
+    {
+      "code": "111002.SH",
+      "name": "特纸转债",
+      "stockCode": "605007.SH",
+      "stockName": "五洲特纸",
+      "listedDate": "2021-12-30",
+      "industry1": "轻工制造",
+      "industry2": "造纸",
+      "industry3": "特种纸",
+      "floatMarketCap": 7441368975.04,
+      "tags": []
+    },
+    {
+      "code": "127111.SZ",
+      "name": "金威转债",
+      "stockCode": "002626.SZ",
+      "stockName": "金达威",
+      "listedDate": "2025-09-08",
+      "industry1": "食品饮料",
+      "industry2": "食品加工",
+      "industry3": "保健品",
+      "floatMarketCap": 8629533602.800001,
+      "tags": [
+        "次新债",
+        "小盘",
+        "食品"
+      ]
+    },
+    {
+      "code": "113640.SH",
+      "name": "苏利转债",
+      "stockCode": "603585.SH",
+      "stockName": "苏利股份",
+      "listedDate": "2022-03-10",
+      "industry1": "基础化工",
+      "industry2": "农化制品",
+      "industry3": "农药",
+      "floatMarketCap": 2689004389.23,
+      "tags": [
+        "小盘",
+        "能化"
+      ]
+    },
+    {
+      "code": "123122.SZ",
+      "name": "富瀚转债",
+      "stockCode": "300613.SZ",
+      "stockName": "富瀚微",
+      "listedDate": "2021-08-24",
+      "industry1": "电子",
+      "industry2": "半导体",
+      "industry3": "数字芯片设计",
+      "floatMarketCap": 12353174547.92,
+      "tags": [
+        "半导体"
+      ]
+    },
+    {
+      "code": "113701.SH",
+      "name": "祥和转债",
+      "stockCode": "603500.SH",
+      "stockName": "祥和实业",
+      "listedDate": "2026-03-26",
+      "industry1": "机械设备",
+      "industry2": "轨交设备Ⅱ",
+      "industry3": "轨交设备Ⅲ",
+      "floatMarketCap": 2810546633.0499997,
+      "tags": [
+        "次新债",
+        "小盘"
+      ]
+    },
+    {
+      "code": "110093.SH",
+      "name": "神马转债",
+      "stockCode": "600810.SH",
+      "stockName": "神马股份",
+      "listedDate": "2023-04-20",
+      "industry1": "基础化工",
+      "industry2": "化学纤维",
+      "industry3": "锦纶",
+      "floatMarketCap": 6862781600.800001,
+      "tags": [
+        "能化",
+        "航天"
+      ]
+    },
+    {
+      "code": "113643.SH",
+      "name": "风语转债",
+      "stockCode": "603466.SH",
+      "stockName": "风语筑",
+      "listedDate": "2022-04-22",
+      "industry1": "传媒",
+      "industry2": "数字媒体",
+      "industry3": "其他数字媒体",
+      "floatMarketCap": 6073198903.320001,
+      "tags": [
+        "AI应用",
+        "机器人"
+      ]
+    },
+    {
+      "code": "113682.SH",
+      "name": "益丰转债",
+      "stockCode": "603939.SH",
+      "stockName": "益丰药房",
+      "listedDate": "2024-03-27",
+      "industry1": "医药生物",
+      "industry2": "医药商业",
+      "industry3": "线下药店",
+      "floatMarketCap": 27557681206.78,
+      "tags": [
+        "医药"
+      ]
+    },
+    {
+      "code": "123124.SZ",
+      "name": "晶瑞转2",
+      "stockCode": "300655.SZ",
+      "stockName": "晶瑞电材",
+      "listedDate": "2021-09-07",
+      "industry1": "电子",
+      "industry2": "电子化学品Ⅱ",
+      "industry3": "电子化学品Ⅲ",
+      "floatMarketCap": 13188746696.16,
+      "tags": [
+        "半导体",
+        "半导体材料",
+        "光刻机"
+      ]
+    },
+    {
+      "code": "123112.SZ",
+      "name": "万讯转债",
+      "stockCode": "300112.SZ",
+      "stockName": "万讯自控",
+      "listedDate": "2021-04-23",
+      "industry1": "机械设备",
+      "industry2": "通用设备",
+      "industry3": "仪器仪表",
+      "floatMarketCap": 1705920949.46,
+      "tags": [
+        "小盘",
+        "机器人",
+        "航天"
+      ]
+    },
+    {
+      "code": "113048.SH",
+      "name": "晶科转债",
+      "stockCode": "601778.SH",
+      "stockName": "晶科科技",
+      "listedDate": "2021-05-31",
+      "industry1": "公用事业",
+      "industry2": "电力",
+      "industry3": "光伏发电",
+      "floatMarketCap": 13402960192.800001,
+      "tags": []
+    },
+    {
+      "code": "127099.SZ",
+      "name": "盛航转债",
+      "stockCode": "001205.SZ",
+      "stockName": "盛航股份",
+      "listedDate": "2023-12-28",
+      "industry1": "交通运输",
+      "industry2": "航运港口",
+      "industry3": "航运",
+      "floatMarketCap": 2210911889.12,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "123160.SZ",
+      "name": "泰福转债",
+      "stockCode": "300992.SZ",
+      "stockName": "泰福泵业",
+      "listedDate": "2022-10-25",
+      "industry1": "机械设备",
+      "industry2": "通用设备",
+      "industry3": "其他通用设备",
+      "floatMarketCap": 1658805142.86,
+      "tags": [
+        "小盘",
+        "液冷",
+        "环保"
+      ]
+    },
+    {
+      "code": "118068.SH",
+      "name": "迪威转债",
+      "stockCode": "688377.SH",
+      "stockName": "迪威尔",
+      "listedDate": "2026-06-30",
+      "industry1": "机械设备",
+      "industry2": "专用设备",
+      "industry3": "能源及重型设备",
+      "floatMarketCap": 4365446980.2300005,
+      "tags": [
+        "次新债",
+        "小盘",
+        "油气"
+      ]
+    },
+    {
+      "code": "118007.SH",
+      "name": "山石转债",
+      "stockCode": "688030.SH",
+      "stockName": "山石网科",
+      "listedDate": "2022-04-21",
+      "industry1": "计算机",
+      "industry2": "软件开发",
+      "industry3": "横向通用软件",
+      "floatMarketCap": 2845924355.72,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "123222.SZ",
+      "name": "博俊转债",
+      "stockCode": "300926.SZ",
+      "stockName": "博俊科技",
+      "listedDate": "2023-09-28",
+      "industry1": "汽车",
+      "industry2": "汽车零部件",
+      "industry3": "其他汽车零部件",
+      "floatMarketCap": 5477111156.2,
+      "tags": []
+    },
+    {
+      "code": "123149.SZ",
+      "name": "通裕转债",
+      "stockCode": "300185.SZ",
+      "stockName": "通裕重工",
+      "listedDate": "2022-07-15",
+      "industry1": "电力设备",
+      "industry2": "风电设备",
+      "industry3": "风电零部件",
+      "floatMarketCap": 10847013593.22,
+      "tags": [
+        "航天",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "127105.SZ",
+      "name": "龙星转债",
+      "stockCode": "002442.SZ",
+      "stockName": "龙星科技",
+      "listedDate": "2024-03-06",
+      "industry1": "基础化工",
+      "industry2": "橡胶",
+      "industry3": "炭黑",
+      "floatMarketCap": 2339591250.92,
+      "tags": [
+        "小盘",
+        "能化"
+      ]
+    },
+    {
+      "code": "118066.SH",
+      "name": "统联转债",
+      "stockCode": "688210.SH",
+      "stockName": "统联精密",
+      "listedDate": "2026-03-20",
+      "industry1": "电子",
+      "industry2": "消费电子",
+      "industry3": "消费电子零部件及组装",
+      "floatMarketCap": 4168988820.04,
+      "tags": [
+        "次新债",
+        "小盘",
+        "消费电子"
+      ]
+    },
+    {
+      "code": "123264.SZ",
+      "name": "双乐转债",
+      "stockCode": "301036.SZ",
+      "stockName": "双乐股份",
+      "listedDate": "2026-01-16",
+      "industry1": "基础化工",
+      "industry2": "化学制品",
+      "industry3": "涂料油墨",
+      "floatMarketCap": 1415021772.15,
+      "tags": [
+        "次新债",
+        "小盘",
+        "能化",
+        "半导体材料",
+        "光刻机"
+      ]
+    },
+    {
+      "code": "123071.SZ",
+      "name": "天能转债",
+      "stockCode": "300569.SZ",
+      "stockName": "天能重工",
+      "listedDate": "2020-11-25",
+      "industry1": "电力设备",
+      "industry2": "风电设备",
+      "industry3": "风电零部件",
+      "floatMarketCap": 4986078431.49,
+      "tags": [
+        "小盘",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "123262.SZ",
+      "name": "神宇转债",
+      "stockCode": "300563.SZ",
+      "stockName": "神宇股份",
+      "listedDate": "2025-12-30",
+      "industry1": "通信",
+      "industry2": "通信设备",
+      "industry3": "通信线缆及配套",
+      "floatMarketCap": 2831145541.54,
+      "tags": [
+        "次新债",
+        "小盘",
+        "医药",
+        "航天",
+        "铜缆"
+      ]
+    },
+    {
+      "code": "113070.SH",
+      "name": "渝水转债",
+      "stockCode": "601158.SH",
+      "stockName": "重庆水务",
+      "listedDate": "2025-02-13",
+      "industry1": "环保",
+      "industry2": "环境治理",
+      "industry3": "水务及水治理",
+      "floatMarketCap": 20256127102.18,
+      "tags": [
+        "小盘",
+        "环保"
+      ]
+    },
+    {
+      "code": "113054.SH",
+      "name": "绿动转债",
+      "stockCode": "601330.SH",
+      "stockName": "绿色动力",
+      "listedDate": "2022-03-23",
+      "industry1": "环保",
+      "industry2": "环境治理",
+      "industry3": "固废治理",
+      "floatMarketCap": 7200611643.68,
+      "tags": [
+        "环保"
+      ]
+    },
+    {
+      "code": "127113.SZ",
+      "name": "长高转债",
+      "stockCode": "002452.SZ",
+      "stockName": "长高电气",
+      "listedDate": "2026-03-30",
+      "industry1": "电力设备",
+      "industry2": "电网设备",
+      "industry3": "输变电设备",
+      "floatMarketCap": 5574965182.400001,
+      "tags": [
+        "次新债",
+        "航天",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "113698.SH",
+      "name": "凯众转债",
+      "stockCode": "603037.SH",
+      "stockName": "凯众股份",
+      "listedDate": "2025-09-10",
+      "industry1": "汽车",
+      "industry2": "汽车零部件",
+      "industry3": "底盘与发动机系统",
+      "floatMarketCap": 2624238191.48,
+      "tags": [
+        "次新债",
+        "小盘"
+      ]
+    },
+    {
+      "code": "123155.SZ",
+      "name": "中陆转债",
+      "stockCode": "301040.SZ",
+      "stockName": "中环海陆",
+      "listedDate": "2022-08-31",
+      "industry1": "电力设备",
+      "industry2": "风电设备",
+      "industry3": "风电零部件",
+      "floatMarketCap": 2119419842.16,
+      "tags": [
+        "小盘",
+        "航天",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "123104.SZ",
+      "name": "卫宁转债",
+      "stockCode": "300253.SZ",
+      "stockName": "卫宁健康",
+      "listedDate": "2021-03-31",
+      "industry1": "计算机",
+      "industry2": "软件开发",
+      "industry3": "垂直应用软件",
+      "floatMarketCap": 14076576190.71,
+      "tags": [
+        "AI应用"
+      ]
+    },
+    {
+      "code": "113067.SH",
+      "name": "燃23转债",
+      "stockCode": "601139.SH",
+      "stockName": "深圳燃气",
+      "listedDate": "2023-08-18",
+      "industry1": "公用事业",
+      "industry2": "燃气Ⅱ",
+      "industry3": "燃气Ⅲ",
+      "floatMarketCap": 18842676180.25,
+      "tags": [
+        "小盘",
+        "油气"
+      ]
+    },
+    {
+      "code": "127102.SZ",
+      "name": "浙建转债",
+      "stockCode": "002761.SZ",
+      "stockName": "浙江建投",
+      "listedDate": "2024-01-16",
+      "industry1": "建筑装饰",
+      "industry2": "房屋建设Ⅱ",
+      "industry3": "房屋建设Ⅲ",
+      "floatMarketCap": 8005239406.6,
+      "tags": []
+    },
+    {
+      "code": "123144.SZ",
+      "name": "裕兴转债",
+      "stockCode": "300305.SZ",
+      "stockName": "裕兴股份",
+      "listedDate": "2022-04-27",
+      "industry1": "基础化工",
+      "industry2": "塑料",
+      "industry3": "膜材料",
+      "floatMarketCap": 1623453279.85,
+      "tags": [
+        "小盘",
+        "能化"
+      ]
+    },
+    {
+      "code": "127083.SZ",
+      "name": "山路转债",
+      "stockCode": "000498.SZ",
+      "stockName": "山东路桥",
+      "listedDate": "2023-04-26",
+      "industry1": "建筑装饰",
+      "industry2": "基础建设",
+      "industry3": "基建市政工程",
+      "floatMarketCap": 7391673672.9000025,
+      "tags": []
+    },
+    {
+      "code": "118022.SH",
+      "name": "锂科转债",
+      "stockCode": "688779.SH",
+      "stockName": "五矿新能",
+      "listedDate": "2022-11-07",
+      "industry1": "电力设备",
+      "industry2": "电池",
+      "industry3": "电池化学品",
+      "floatMarketCap": 14700656278.08,
+      "tags": [
+        "电力设备"
+      ]
+    },
+    {
+      "code": "113680.SH",
+      "name": "丽岛转债",
+      "stockCode": "603937.SH",
+      "stockName": "丽岛新材",
+      "listedDate": "2023-12-05",
+      "industry1": "有色金属",
+      "industry2": "工业金属",
+      "industry3": "铝",
+      "floatMarketCap": 2141142907.75,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "110095.SH",
+      "name": "双良转债",
+      "stockCode": "600481.SH",
+      "stockName": "双良节能",
+      "listedDate": "2023-09-08",
+      "industry1": "电力设备",
+      "industry2": "光伏设备",
+      "industry3": "硅料硅片",
+      "floatMarketCap": 8380657233.339999,
+      "tags": [
+        "液冷",
+        "半导体材料",
+        "环保",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "113681.SH",
+      "name": "镇洋转债",
+      "stockCode": "603213.SH",
+      "stockName": "镇洋发展",
+      "listedDate": "2024-01-17",
+      "industry1": "基础化工",
+      "industry2": "化学原料",
+      "industry3": "氯碱",
+      "floatMarketCap": 6166225781.099999,
+      "tags": [
+        "能化"
+      ]
+    },
+    {
+      "code": "118039.SH",
+      "name": "煜邦转债",
+      "stockCode": "688597.SH",
+      "stockName": "煜邦电力",
+      "listedDate": "2023-08-15",
+      "industry1": "电力设备",
+      "industry2": "电网设备",
+      "industry3": "电工仪器仪表",
+      "floatMarketCap": 2023082861.5199997,
+      "tags": [
+        "小盘",
+        "机器人",
+        "航天",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "127031.SZ",
+      "name": "洋丰转债",
+      "stockCode": "000902.SZ",
+      "stockName": "新洋丰",
+      "listedDate": "2021-04-23",
+      "industry1": "基础化工",
+      "industry2": "农化制品",
+      "industry3": "复合肥",
+      "floatMarketCap": 15998965738,
+      "tags": [
+        "小盘",
+        "能化"
+      ]
+    },
+    {
+      "code": "111018.SH",
+      "name": "华康转债",
+      "stockCode": "605077.SH",
+      "stockName": "华康股份",
+      "listedDate": "2024-01-15",
+      "industry1": "基础化工",
+      "industry2": "化学制品",
+      "industry3": "食品及饲料添加剂",
+      "floatMarketCap": 3296720072.16,
+      "tags": [
+        "小盘",
+        "能化"
+      ]
+    },
+    {
+      "code": "113666.SH",
+      "name": "爱玛转债",
+      "stockCode": "603529.SH",
+      "stockName": "爱玛科技",
+      "listedDate": "2023-03-20",
+      "industry1": "汽车",
+      "industry2": "摩托车及其他",
+      "industry3": "其他运输设备",
+      "floatMarketCap": 18459869083.920002,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "128134.SZ",
+      "name": "鸿路转债",
+      "stockCode": "002541.SZ",
+      "stockName": "鸿路钢构",
+      "listedDate": "2020-11-02",
+      "industry1": "建筑装饰",
+      "industry2": "专业工程",
+      "industry3": "钢结构",
+      "floatMarketCap": 10127035208.29,
+      "tags": [
+        "小盘",
+        "机器人"
+      ]
+    },
+    {
+      "code": "113631.SH",
+      "name": "皖天转债",
+      "stockCode": "603689.SH",
+      "stockName": "皖天然气",
+      "listedDate": "2021-12-10",
+      "industry1": "公用事业",
+      "industry2": "燃气Ⅱ",
+      "industry3": "燃气Ⅲ",
+      "floatMarketCap": 3967735574.7,
+      "tags": [
+        "小盘",
+        "油气"
+      ]
+    },
+    {
+      "code": "123076.SZ",
+      "name": "强力转债",
+      "stockCode": "300429.SZ",
+      "stockName": "强力新材",
+      "listedDate": "2020-12-04",
+      "industry1": "电子",
+      "industry2": "电子化学品Ⅱ",
+      "industry3": "电子化学品Ⅲ",
+      "floatMarketCap": 3868289003.18,
+      "tags": [
+        "小盘",
+        "PCB",
+        "半导体",
+        "半导体材料",
+        "光刻机"
+      ]
+    },
+    {
+      "code": "113688.SH",
+      "name": "国检转债",
+      "stockCode": "603060.SH",
+      "stockName": "国检集团",
+      "listedDate": "2024-11-12",
+      "industry1": "社会服务",
+      "industry2": "专业服务",
+      "industry3": "检测服务",
+      "floatMarketCap": 4333366256.45,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "127060.SZ",
+      "name": "湘佳转债",
+      "stockCode": "002982.SZ",
+      "stockName": "湘佳股份",
+      "listedDate": "2022-06-10",
+      "industry1": "农林牧渔",
+      "industry2": "养殖业",
+      "industry3": "肉鸡养殖",
+      "floatMarketCap": 1507757564.32,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "113686.SH",
+      "name": "泰瑞转债",
+      "stockCode": "603289.SH",
+      "stockName": "泰瑞机器",
+      "listedDate": "2024-07-24",
+      "industry1": "机械设备",
+      "industry2": "专用设备",
+      "industry3": "其他专用设备",
+      "floatMarketCap": 2344249013.26,
+      "tags": [
+        "小盘",
+        "环保"
+      ]
+    },
+    {
+      "code": "113650.SH",
+      "name": "博22转债",
+      "stockCode": "603916.SH",
+      "stockName": "苏博特",
+      "listedDate": "2022-07-28",
+      "industry1": "基础化工",
+      "industry2": "化学制品",
+      "industry3": "其他化学制品",
+      "floatMarketCap": 4203277910,
+      "tags": [
+        "小盘",
+        "能化"
+      ]
+    },
+    {
+      "code": "118044.SH",
+      "name": "赛特转债",
+      "stockCode": "688398.SH",
+      "stockName": "赛特新材",
+      "listedDate": "2023-10-12",
+      "industry1": "基础化工",
+      "industry2": "化学制品",
+      "industry3": "其他化学制品",
+      "floatMarketCap": 3146516343.75,
+      "tags": [
+        "小盘",
+        "能化"
+      ]
+    },
+    {
+      "code": "118020.SH",
+      "name": "芳源转债",
+      "stockCode": "688148.SH",
+      "stockName": "芳源股份",
+      "listedDate": "2022-11-07",
+      "industry1": "电力设备",
+      "industry2": "电池",
+      "industry3": "电池化学品",
+      "floatMarketCap": 3397752532.98,
+      "tags": [
+        "小盘",
+        "半导体材料",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "127108.SZ",
+      "name": "太能转债",
+      "stockCode": "000591.SZ",
+      "stockName": "太阳能",
+      "listedDate": "2025-04-16",
+      "industry1": "公用事业",
+      "industry2": "电力",
+      "industry3": "光伏发电",
+      "floatMarketCap": 17682383997.780003,
+      "tags": [
+        "小盘",
+        "机器人"
+      ]
+    },
+    {
+      "code": "113627.SH",
+      "name": "太平转债",
+      "stockCode": "603877.SH",
+      "stockName": "太平鸟",
+      "listedDate": "2021-08-06",
+      "industry1": "纺织服饰",
+      "industry2": "服装家纺",
+      "industry3": "非运动服装",
+      "floatMarketCap": 6298322175.2,
+      "tags": []
+    },
+    {
+      "code": "111022.SH",
+      "name": "锡振转债",
+      "stockCode": "605319.SH",
+      "stockName": "无锡振华",
+      "listedDate": "2025-07-14",
+      "industry1": "汽车",
+      "industry2": "汽车零部件",
+      "industry3": "其他汽车零部件",
+      "floatMarketCap": 7923932623.72,
+      "tags": [
+        "半导体"
+      ]
+    },
+    {
+      "code": "113634.SH",
+      "name": "珀莱转债",
+      "stockCode": "603605.SH",
+      "stockName": "珀莱雅",
+      "listedDate": "2022-01-04",
+      "industry1": "美容护理",
+      "industry2": "化妆品",
+      "industry3": "品牌化妆品",
+      "floatMarketCap": 24269372043.21,
+      "tags": []
+    },
+    {
+      "code": "123171.SZ",
+      "name": "共同转债",
+      "stockCode": "300966.SZ",
+      "stockName": "共同药业",
+      "listedDate": "2022-12-16",
+      "industry1": "医药生物",
+      "industry2": "化学制药",
+      "industry3": "原料药",
+      "floatMarketCap": 1740333386.3,
+      "tags": [
+        "小盘",
+        "医药"
+      ]
+    },
+    {
+      "code": "123165.SZ",
+      "name": "回天转债",
+      "stockCode": "300041.SZ",
+      "stockName": "回天新材",
+      "listedDate": "2022-11-15",
+      "industry1": "基础化工",
+      "industry2": "化学制品",
+      "industry3": "有机硅",
+      "floatMarketCap": 5618460045.360001,
+      "tags": [
+        "PCB",
+        "能化",
+        "半导体",
+        "航天"
+      ]
+    },
+    {
+      "code": "123142.SZ",
+      "name": "申昊转债",
+      "stockCode": "300853.SZ",
+      "stockName": "申昊科技",
+      "listedDate": "2022-04-11",
+      "industry1": "电力设备",
+      "industry2": "电网设备",
+      "industry3": "电网自动化设备",
+      "floatMarketCap": 2164875975.54,
+      "tags": [
+        "小盘",
+        "机器人",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "111020.SH",
+      "name": "合顺转债",
+      "stockCode": "605166.SH",
+      "stockName": "聚合顺",
+      "listedDate": "2024-08-15",
+      "industry1": "基础化工",
+      "industry2": "化学纤维",
+      "industry3": "锦纶",
+      "floatMarketCap": 2653207417.68,
+      "tags": [
+        "小盘",
+        "能化"
+      ]
+    },
+    {
+      "code": "113649.SH",
+      "name": "丰山转债",
+      "stockCode": "603810.SH",
+      "stockName": "丰山集团",
+      "listedDate": "2022-07-21",
+      "industry1": "基础化工",
+      "industry2": "农化制品",
+      "industry3": "农药",
+      "floatMarketCap": 1810496860.05,
+      "tags": [
+        "小盘",
+        "能化",
+        "半导体材料"
+      ]
+    },
+    {
+      "code": "127034.SZ",
+      "name": "绿茵转债",
+      "stockCode": "002887.SZ",
+      "stockName": "绿茵生态",
+      "listedDate": "2021-05-28",
+      "industry1": "环保",
+      "industry2": "环境治理",
+      "industry3": "综合环境治理",
+      "floatMarketCap": 2052835917.3000002,
+      "tags": [
+        "小盘",
+        "环保"
+      ]
+    },
+    {
+      "code": "128128.SZ",
+      "name": "齐翔转2",
+      "stockCode": "002408.SZ",
+      "stockName": "齐翔腾达",
+      "listedDate": "2020-09-15",
+      "industry1": "石油石化",
+      "industry2": "炼化及贸易",
+      "industry3": "其他石化",
+      "floatMarketCap": 13920510947.199999,
+      "tags": [
+        "小盘",
+        "油气",
+        "能化"
+      ]
+    },
+    {
+      "code": "123194.SZ",
+      "name": "百洋转债",
+      "stockCode": "301015.SZ",
+      "stockName": "百洋医药",
+      "listedDate": "2023-05-05",
+      "industry1": "医药生物",
+      "industry2": "医药商业",
+      "industry3": "医药流通",
+      "floatMarketCap": 11746189495.95,
+      "tags": [
+        "小盘",
+        "医药",
+        "机器人"
+      ]
+    },
+    {
+      "code": "113674.SH",
+      "name": "华设转债",
+      "stockCode": "603018.SH",
+      "stockName": "华设集团",
+      "listedDate": "2023-08-15",
+      "industry1": "建筑装饰",
+      "industry2": "工程咨询服务Ⅱ",
+      "industry3": "工程咨询服务Ⅲ",
+      "floatMarketCap": 4366057384.91,
+      "tags": [
+        "小盘",
+        "AI应用"
+      ]
+    },
+    {
+      "code": "110100.SH",
+      "name": "龙建转债",
+      "stockCode": "600853.SH",
+      "stockName": "龙建股份",
+      "listedDate": "2026-02-12",
+      "industry1": "建筑装饰",
+      "industry2": "基础建设",
+      "industry3": "基建市政工程",
+      "floatMarketCap": 3253964307.66,
+      "tags": [
+        "次新债",
+        "小盘"
+      ]
+    },
+    {
+      "code": "123223.SZ",
+      "name": "九典转02",
+      "stockCode": "300705.SZ",
+      "stockName": "九典制药",
+      "listedDate": "2023-10-13",
+      "industry1": "医药生物",
+      "industry2": "化学制药",
+      "industry3": "化学制剂",
+      "floatMarketCap": 4073109379.56,
+      "tags": [
+        "小盘",
+        "医药"
+      ]
+    },
+    {
+      "code": "127072.SZ",
+      "name": "博实转债",
+      "stockCode": "002698.SZ",
+      "stockName": "博实股份",
+      "listedDate": "2022-11-03",
+      "industry1": "机械设备",
+      "industry2": "自动化设备",
+      "industry3": "机器人",
+      "floatMarketCap": 11311453555,
+      "tags": [
+        "医药",
+        "机器人"
+      ]
+    },
+    {
+      "code": "123179.SZ",
+      "name": "立高转债",
+      "stockCode": "300973.SZ",
+      "stockName": "立高食品",
+      "listedDate": "2023-03-27",
+      "industry1": "食品饮料",
+      "industry2": "休闲食品",
+      "industry3": "烘焙食品",
+      "floatMarketCap": 3082657864,
+      "tags": [
+        "小盘",
+        "食品"
+      ]
+    },
+    {
+      "code": "123172.SZ",
+      "name": "漱玉转债",
+      "stockCode": "301017.SZ",
+      "stockName": "漱玉平民",
+      "listedDate": "2023-01-06",
+      "industry1": "医药生物",
+      "industry2": "医药商业",
+      "industry3": "线下药店",
+      "floatMarketCap": 3412188369,
+      "tags": [
+        "小盘",
+        "医药"
+      ]
+    },
+    {
+      "code": "113636.SH",
+      "name": "甬金转债",
+      "stockCode": "603995.SH",
+      "stockName": "甬金股份",
+      "listedDate": "2021-12-31",
+      "industry1": "钢铁",
+      "industry2": "特钢Ⅱ",
+      "industry3": "特钢Ⅲ",
+      "floatMarketCap": 7370365436.61,
+      "tags": []
+    },
+    {
+      "code": "123252.SZ",
+      "name": "银邦转债",
+      "stockCode": "300337.SZ",
+      "stockName": "银邦股份",
+      "listedDate": "2025-01-24",
+      "industry1": "有色金属",
+      "industry2": "工业金属",
+      "industry3": "铝",
+      "floatMarketCap": 6609014795.190001,
+      "tags": [
+        "医药",
+        "航天"
+      ]
+    },
+    {
+      "code": "123225.SZ",
+      "name": "翔丰转债",
+      "stockCode": "300890.SZ",
+      "stockName": "翔丰华",
+      "listedDate": "2023-10-26",
+      "industry1": "电力设备",
+      "industry2": "电池",
+      "industry3": "电池化学品",
+      "floatMarketCap": 2748859764.85,
+      "tags": [
+        "小盘",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "128138.SZ",
+      "name": "侨银转债",
+      "stockCode": "002973.SZ",
+      "stockName": "侨银股份",
+      "listedDate": "2020-12-24",
+      "industry1": "环保",
+      "industry2": "环境治理",
+      "industry3": "固废治理",
+      "floatMarketCap": 2852524640.44,
+      "tags": [
+        "小盘",
+        "环保"
+      ]
+    },
+    {
+      "code": "127027.SZ",
+      "name": "能化转债",
+      "stockCode": "000552.SZ",
+      "stockName": "甘肃能化",
+      "listedDate": "2021-01-22",
+      "industry1": "煤炭",
+      "industry2": "煤炭开采",
+      "industry3": "动力煤",
+      "floatMarketCap": 9649857073.779999,
+      "tags": [
+        "小盘",
+        "能化"
+      ]
+    },
+    {
+      "code": "127078.SZ",
+      "name": "优彩转债",
+      "stockCode": "002998.SZ",
+      "stockName": "优彩资源",
+      "listedDate": "2023-01-09",
+      "industry1": "基础化工",
+      "industry2": "化学纤维",
+      "industry3": "涤纶",
+      "floatMarketCap": 1985434290.8999999,
+      "tags": [
+        "小盘",
+        "能化",
+        "环保"
+      ]
+    },
+    {
+      "code": "123209.SZ",
+      "name": "聚隆转债",
+      "stockCode": "300644.SZ",
+      "stockName": "南京聚隆",
+      "listedDate": "2023-08-17",
+      "industry1": "基础化工",
+      "industry2": "塑料",
+      "industry3": "改性塑料",
+      "floatMarketCap": 1788961384.0800002,
+      "tags": [
+        "小盘",
+        "机器人",
+        "能化"
+      ]
+    },
+    {
+      "code": "113665.SH",
+      "name": "汇通转债",
+      "stockCode": "603176.SH",
+      "stockName": "汇通集团",
+      "listedDate": "2023-01-11",
+      "industry1": "建筑装饰",
+      "industry2": "基础建设",
+      "industry3": "基建市政工程",
+      "floatMarketCap": 1967338409.28,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "113656.SH",
+      "name": "嘉诚转债",
+      "stockCode": "603535.SH",
+      "stockName": "嘉诚国际",
+      "listedDate": "2022-10-12",
+      "industry1": "交通运输",
+      "industry2": "物流",
+      "industry3": "跨境物流",
+      "floatMarketCap": 3239222218.54,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "111021.SH",
+      "name": "奥锐转债",
+      "stockCode": "605116.SH",
+      "stockName": "奥锐特",
+      "listedDate": "2024-08-15",
+      "industry1": "医药生物",
+      "industry2": "化学制药",
+      "industry3": "原料药",
+      "floatMarketCap": 7928696727.679999,
+      "tags": [
+        "医药"
+      ]
+    },
+    {
+      "code": "110090.SH",
+      "name": "爱迪转债",
+      "stockCode": "600933.SH",
+      "stockName": "爱柯迪",
+      "listedDate": "2022-10-28",
+      "industry1": "汽车",
+      "industry2": "汽车零部件",
+      "industry3": "底盘与发动机系统",
+      "floatMarketCap": 13341777425.6,
+      "tags": [
+        "机器人"
+      ]
+    },
+    {
+      "code": "127068.SZ",
+      "name": "顺博转债",
+      "stockCode": "002996.SZ",
+      "stockName": "顺博合金",
+      "listedDate": "2022-09-07",
+      "industry1": "有色金属",
+      "industry2": "工业金属",
+      "industry3": "铝",
+      "floatMarketCap": 2832772894.3799996,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "111015.SH",
+      "name": "东亚转债",
+      "stockCode": "605177.SH",
+      "stockName": "东亚药业",
+      "listedDate": "2023-08-02",
+      "industry1": "医药生物",
+      "industry2": "化学制药",
+      "industry3": "原料药",
+      "floatMarketCap": 1778658714.1000001,
+      "tags": [
+        "小盘",
+        "医药"
+      ]
+    },
+    {
+      "code": "113638.SH",
+      "name": "台21转债",
+      "stockCode": "603055.SH",
+      "stockName": "台华新材",
+      "listedDate": "2022-01-21",
+      "industry1": "纺织服饰",
+      "industry2": "纺织制造",
+      "industry3": "其他纺织",
+      "floatMarketCap": 7637508610.62,
+      "tags": []
+    },
+    {
+      "code": "123151.SZ",
+      "name": "康医转债",
+      "stockCode": "300869.SZ",
+      "stockName": "康泰医学",
+      "listedDate": "2022-07-20",
+      "industry1": "医药生物",
+      "industry2": "医疗器械",
+      "industry3": "医疗设备",
+      "floatMarketCap": 2903721425.16,
+      "tags": [
+        "小盘",
+        "医药"
+      ]
+    },
+    {
+      "code": "123253.SZ",
+      "name": "永贵转债",
+      "stockCode": "300351.SZ",
+      "stockName": "永贵电器",
+      "listedDate": "2025-03-28",
+      "industry1": "机械设备",
+      "industry2": "轨交设备Ⅱ",
+      "industry3": "轨交设备Ⅲ",
+      "floatMarketCap": 3569309265.9,
+      "tags": [
+        "小盘",
+        "液冷",
+        "机器人",
+        "航天"
+      ]
+    },
+    {
+      "code": "123109.SZ",
+      "name": "昌红转债",
+      "stockCode": "300151.SZ",
+      "stockName": "昌红科技",
+      "listedDate": "2021-04-19",
+      "industry1": "机械设备",
+      "industry2": "专用设备",
+      "industry3": "其他专用设备",
+      "floatMarketCap": 5025350836.81,
+      "tags": [
+        "医药",
+        "半导体"
+      ]
+    },
+    {
+      "code": "118052.SH",
+      "name": "浩瀚转债",
+      "stockCode": "688292.SH",
+      "stockName": "浩瀚深度",
+      "listedDate": "2025-04-07",
+      "industry1": "计算机",
+      "industry2": "计算机设备",
+      "industry3": "其他计算机设备",
+      "floatMarketCap": 2598539105.91,
+      "tags": [
+        "小盘",
+        "AI应用"
+      ]
+    },
+    {
+      "code": "123260.SZ",
+      "name": "卓镁转债",
+      "stockCode": "301398.SZ",
+      "stockName": "星源卓镁",
+      "listedDate": "2025-11-24",
+      "industry1": "汽车",
+      "industry2": "汽车零部件",
+      "industry3": "车身附件及饰件",
+      "floatMarketCap": 3604096367.56,
+      "tags": [
+        "次新债",
+        "小盘"
+      ]
+    },
+    {
+      "code": "123265.SZ",
+      "name": "耐普转02",
+      "stockCode": "300818.SZ",
+      "stockName": "耐普矿机",
+      "listedDate": "2026-01-30",
+      "industry1": "机械设备",
+      "industry2": "通用设备",
+      "industry3": "磨具磨料",
+      "floatMarketCap": 2697614322.78,
+      "tags": [
+        "次新债",
+        "小盘"
+      ]
+    },
+    {
+      "code": "118005.SH",
+      "name": "天奈转债",
+      "stockCode": "688116.SH",
+      "stockName": "天奈科技",
+      "listedDate": "2022-03-01",
+      "industry1": "电力设备",
+      "industry2": "电池",
+      "industry3": "电池化学品",
+      "floatMarketCap": 12535396144.2,
+      "tags": [
+        "机器人",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "127044.SZ",
+      "name": "蒙娜转债",
+      "stockCode": "002918.SZ",
+      "stockName": "蒙娜丽莎",
+      "listedDate": "2021-09-16",
+      "industry1": "轻工制造",
+      "industry2": "家居用品",
+      "industry3": "瓷砖地板",
+      "floatMarketCap": 1964259519.8799999,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "113616.SH",
+      "name": "韦尔转债",
+      "stockCode": "603501.SH",
+      "stockName": "豪威集团",
+      "listedDate": "2021-01-22",
+      "industry1": "电子",
+      "industry2": "半导体",
+      "industry3": "数字芯片设计",
+      "floatMarketCap": 107039782570.1,
+      "tags": [
+        "半导体",
+        "消费电子"
+      ]
+    },
+    {
+      "code": "111024.SH",
+      "name": "澳弘转债",
+      "stockCode": "605058.SH",
+      "stockName": "澳弘电子",
+      "listedDate": "2026-01-16",
+      "industry1": "电子",
+      "industry2": "元件",
+      "industry3": "印制电路板",
+      "floatMarketCap": 3344447808,
+      "tags": [
+        "次新债",
+        "小盘",
+        "PCB",
+        "航天"
+      ]
+    },
+    {
+      "code": "113671.SH",
+      "name": "武进转债",
+      "stockCode": "603878.SH",
+      "stockName": "武进不锈",
+      "listedDate": "2023-08-03",
+      "industry1": "钢铁",
+      "industry2": "普钢",
+      "industry3": "钢铁管材",
+      "floatMarketCap": 2659850933.6400003,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "123090.SZ",
+      "name": "三诺转债",
+      "stockCode": "300298.SZ",
+      "stockName": "三诺生物",
+      "listedDate": "2021-01-12",
+      "industry1": "医药生物",
+      "industry2": "医疗器械",
+      "industry3": "医疗设备",
+      "floatMarketCap": 7324817314.650001,
+      "tags": [
+        "医药"
+      ]
+    },
+    {
+      "code": "123117.SZ",
+      "name": "健帆转债",
+      "stockCode": "300529.SZ",
+      "stockName": "健帆生物",
+      "listedDate": "2021-07-12",
+      "industry1": "医药生物",
+      "industry2": "医疗器械",
+      "industry3": "医疗耗材",
+      "floatMarketCap": 9530678595,
+      "tags": [
+        "小盘",
+        "医药"
+      ]
+    },
+    {
+      "code": "123193.SZ",
+      "name": "海能转债",
+      "stockCode": "300787.SZ",
+      "stockName": "海能实业",
+      "listedDate": "2023-05-09",
+      "industry1": "电子",
+      "industry2": "消费电子",
+      "industry3": "消费电子零部件及组装",
+      "floatMarketCap": 1668562342.83,
+      "tags": [
+        "小盘",
+        "消费电子"
+      ]
+    },
+    {
+      "code": "123113.SZ",
+      "name": "仙乐转债",
+      "stockCode": "300791.SZ",
+      "stockName": "仙乐健康",
+      "listedDate": "2021-05-14",
+      "industry1": "食品饮料",
+      "industry2": "食品加工",
+      "industry3": "保健品",
+      "floatMarketCap": 4421270587.31,
+      "tags": [
+        "小盘",
+        "AI应用",
+        "食品"
+      ]
+    },
+    {
+      "code": "118042.SH",
+      "name": "奥维转债",
+      "stockCode": "688516.SH",
+      "stockName": "奥特维",
+      "listedDate": "2023-09-01",
+      "industry1": "电力设备",
+      "industry2": "光伏设备",
+      "industry3": "光伏加工设备",
+      "floatMarketCap": 11929421358.199999,
+      "tags": [
+        "半导体",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "113647.SH",
+      "name": "禾丰转债",
+      "stockCode": "603609.SH",
+      "stockName": "禾丰股份",
+      "listedDate": "2022-05-18",
+      "industry1": "农林牧渔",
+      "industry2": "饲料",
+      "industry3": "畜禽饲料",
+      "floatMarketCap": 5668184915.91,
+      "tags": []
+    },
+    {
+      "code": "123168.SZ",
+      "name": "惠云转债",
+      "stockCode": "300891.SZ",
+      "stockName": "惠云钛业",
+      "listedDate": "2022-12-14",
+      "industry1": "基础化工",
+      "industry2": "化学原料",
+      "industry3": "钛白粉",
+      "floatMarketCap": 2217603908.8,
+      "tags": [
+        "小盘",
+        "能化",
+        "环保"
+      ]
+    },
+    {
+      "code": "118067.SH",
+      "name": "上26转债",
+      "stockCode": "688533.SH",
+      "stockName": "上声电子",
+      "listedDate": "2026-04-14",
+      "industry1": "汽车",
+      "industry2": "汽车零部件",
+      "industry3": "汽车电子电气系统",
+      "floatMarketCap": 3520824906.06,
+      "tags": [
+        "次新债",
+        "小盘",
+        "半导体"
+      ]
+    },
+    {
+      "code": "111003.SH",
+      "name": "聚合转债",
+      "stockCode": "605166.SH",
+      "stockName": "聚合顺",
+      "listedDate": "2022-04-19",
+      "industry1": "基础化工",
+      "industry2": "化学纤维",
+      "industry3": "锦纶",
+      "floatMarketCap": 2653207417.68,
+      "tags": [
+        "小盘",
+        "能化"
+      ]
+    },
+    {
+      "code": "127059.SZ",
+      "name": "永东转2",
+      "stockCode": "002753.SZ",
+      "stockName": "永东股份",
+      "listedDate": "2022-05-16",
+      "industry1": "基础化工",
+      "industry2": "橡胶",
+      "industry3": "炭黑",
+      "floatMarketCap": 1774733418,
+      "tags": [
+        "小盘",
+        "能化"
+      ]
+    },
+    {
+      "code": "127054.SZ",
+      "name": "双箭转债",
+      "stockCode": "002381.SZ",
+      "stockName": "双箭股份",
+      "listedDate": "2022-03-15",
+      "industry1": "基础化工",
+      "industry2": "橡胶",
+      "industry3": "其他橡胶制品",
+      "floatMarketCap": 1668097270,
+      "tags": [
+        "小盘",
+        "能化"
+      ]
+    },
+    {
+      "code": "123215.SZ",
+      "name": "铭利转债",
+      "stockCode": "301268.SZ",
+      "stockName": "铭利达",
+      "listedDate": "2023-08-23",
+      "industry1": "机械设备",
+      "industry2": "通用设备",
+      "industry3": "金属制品",
+      "floatMarketCap": 4629577619.88,
+      "tags": [
+        "小盘",
+        "液冷"
+      ]
+    },
+    {
+      "code": "127085.SZ",
+      "name": "韵达转债",
+      "stockCode": "002120.SZ",
+      "stockName": "韵达股份",
+      "listedDate": "2023-05-23",
+      "industry1": "交通运输",
+      "industry2": "物流",
+      "industry3": "快递",
+      "floatMarketCap": 19480698997.96,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "118037.SH",
+      "name": "上声转债",
+      "stockCode": "688533.SH",
+      "stockName": "上声电子",
+      "listedDate": "2023-08-01",
+      "industry1": "汽车",
+      "industry2": "汽车零部件",
+      "industry3": "汽车电子电气系统",
+      "floatMarketCap": 3520824906.06,
+      "tags": [
+        "小盘",
+        "半导体"
+      ]
+    },
+    {
+      "code": "127069.SZ",
+      "name": "小熊转债",
+      "stockCode": "002959.SZ",
+      "stockName": "小熊电器",
+      "listedDate": "2022-09-07",
+      "industry1": "家用电器",
+      "industry2": "小家电",
+      "industry3": "厨房小家电",
+      "floatMarketCap": 4825702342.8,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "123189.SZ",
+      "name": "晓鸣转债",
+      "stockCode": "300967.SZ",
+      "stockName": "晓鸣股份",
+      "listedDate": "2023-04-25",
+      "industry1": "农林牧渔",
+      "industry2": "养殖业",
+      "industry3": "肉鸡养殖",
+      "floatMarketCap": 1830767853.06,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "127095.SZ",
+      "name": "广泰转债",
+      "stockCode": "002111.SZ",
+      "stockName": "威海广泰",
+      "listedDate": "2023-11-10",
+      "industry1": "国防军工",
+      "industry2": "航空装备Ⅱ",
+      "industry3": "航空装备Ⅲ",
+      "floatMarketCap": 4667577751.35,
+      "tags": [
+        "小盘",
+        "医药",
+        "机器人",
+        "航天"
+      ]
+    },
+    {
+      "code": "123080.SZ",
+      "name": "海波转债",
+      "stockCode": "300517.SZ",
+      "stockName": "海波重科",
+      "listedDate": "2020-12-22",
+      "industry1": "建筑装饰",
+      "industry2": "专业工程",
+      "industry3": "钢结构",
+      "floatMarketCap": 1141144964,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "123214.SZ",
+      "name": "东宝转债",
+      "stockCode": "300239.SZ",
+      "stockName": "东宝生物",
+      "listedDate": "2023-08-18",
+      "industry1": "医药生物",
+      "industry2": "生物制品",
+      "industry3": "其他生物制品",
+      "floatMarketCap": 2813236361.5499997,
+      "tags": [
+        "小盘",
+        "医药"
+      ]
+    },
+    {
+      "code": "123088.SZ",
+      "name": "威唐转债",
+      "stockCode": "300707.SZ",
+      "stockName": "威唐工业",
+      "listedDate": "2021-01-06",
+      "industry1": "汽车",
+      "industry2": "汽车零部件",
+      "industry3": "其他汽车零部件",
+      "floatMarketCap": 1643995522.75,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "113670.SH",
+      "name": "金23转债",
+      "stockCode": "603180.SH",
+      "stockName": "金牌家居",
+      "listedDate": "2023-05-16",
+      "industry1": "轻工制造",
+      "industry2": "家居用品",
+      "industry3": "定制家居",
+      "floatMarketCap": 2262952243.8,
+      "tags": [
+        "小盘",
+        "AI应用"
+      ]
+    },
+    {
+      "code": "127062.SZ",
+      "name": "垒知转债",
+      "stockCode": "002398.SZ",
+      "stockName": "垒知集团",
+      "listedDate": "2022-05-20",
+      "industry1": "建筑材料",
+      "industry2": "装修建材",
+      "industry3": "其他建材",
+      "floatMarketCap": 2374972581.96,
+      "tags": [
+        "小盘",
+        "AI应用",
+        "医药"
+      ]
+    },
+    {
+      "code": "113679.SH",
+      "name": "芯能转债",
+      "stockCode": "603105.SH",
+      "stockName": "芯能科技",
+      "listedDate": "2023-11-24",
+      "industry1": "公用事业",
+      "industry2": "电力",
+      "industry3": "光伏发电",
+      "floatMarketCap": 3595081786.25,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "127098.SZ",
+      "name": "欧晶转债",
+      "stockCode": "001269.SZ",
+      "stockName": "欧晶科技",
+      "listedDate": "2023-12-15",
+      "industry1": "电力设备",
+      "industry2": "光伏设备",
+      "industry3": "光伏辅材",
+      "floatMarketCap": 3657759077.6600003,
+      "tags": [
+        "小盘",
+        "半导体",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "118032.SH",
+      "name": "建龙转债",
+      "stockCode": "688357.SH",
+      "stockName": "建龙微纳",
+      "listedDate": "2023-04-07",
+      "industry1": "基础化工",
+      "industry2": "化学制品",
+      "industry3": "其他化学制品",
+      "floatMarketCap": 2588548966.25,
+      "tags": [
+        "小盘",
+        "能化"
+      ]
+    },
+    {
+      "code": "123250.SZ",
+      "name": "嘉益转债",
+      "stockCode": "301004.SZ",
+      "stockName": "嘉益股份",
+      "listedDate": "2024-11-26",
+      "industry1": "轻工制造",
+      "industry2": "家居用品",
+      "industry3": "其他家居用品",
+      "floatMarketCap": 5117637300,
+      "tags": []
+    },
+    {
+      "code": "123220.SZ",
+      "name": "易瑞转债",
+      "stockCode": "300942.SZ",
+      "stockName": "易瑞生物",
+      "listedDate": "2023-09-06",
+      "industry1": "医药生物",
+      "industry2": "医疗器械",
+      "industry3": "体外诊断",
+      "floatMarketCap": 2523635285.8500004,
+      "tags": [
+        "小盘",
+        "医药"
+      ]
+    },
+    {
+      "code": "118015.SH",
+      "name": "芯海转债",
+      "stockCode": "688595.SH",
+      "stockName": "芯海科技",
+      "listedDate": "2022-08-18",
+      "industry1": "电子",
+      "industry2": "半导体",
+      "industry3": "数字芯片设计",
+      "floatMarketCap": 3841533403.16,
+      "tags": [
+        "小盘",
+        "半导体",
+        "消费电子"
+      ]
+    },
+    {
+      "code": "113660.SH",
+      "name": "寿22转债",
+      "stockCode": "603896.SH",
+      "stockName": "寿仙谷",
+      "listedDate": "2022-12-12",
+      "industry1": "医药生物",
+      "industry2": "中药Ⅱ",
+      "industry3": "中药Ⅲ",
+      "floatMarketCap": 2937975161.16,
+      "tags": [
+        "小盘",
+        "医药"
+      ]
+    },
+    {
+      "code": "113694.SH",
+      "name": "清源转债",
+      "stockCode": "603628.SH",
+      "stockName": "清源股份",
+      "listedDate": "2025-04-25",
+      "industry1": "电力设备",
+      "industry2": "光伏设备",
+      "industry3": "光伏辅材",
+      "floatMarketCap": 2542102105.82,
+      "tags": [
+        "小盘",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "123175.SZ",
+      "name": "百畅转债",
+      "stockCode": "300614.SZ",
+      "stockName": "百川畅银",
+      "listedDate": "2023-03-17",
+      "industry1": "环保",
+      "industry2": "环境治理",
+      "industry3": "固废治理",
+      "floatMarketCap": 1524186916,
+      "tags": [
+        "小盘",
+        "环保"
+      ]
+    },
+    {
+      "code": "113625.SH",
+      "name": "江山转债",
+      "stockCode": "603208.SH",
+      "stockName": "江山欧派",
+      "listedDate": "2021-07-01",
+      "industry1": "轻工制造",
+      "industry2": "家居用品",
+      "industry3": "定制家居",
+      "floatMarketCap": 1839697969.6200001,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "123224.SZ",
+      "name": "宇邦转债",
+      "stockCode": "301266.SZ",
+      "stockName": "宇邦新材",
+      "listedDate": "2023-10-18",
+      "industry1": "电力设备",
+      "industry2": "光伏设备",
+      "industry3": "光伏辅材",
+      "floatMarketCap": 2685521183.4,
+      "tags": [
+        "小盘",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "113700.SH",
+      "name": "海天转债",
+      "stockCode": "603759.SH",
+      "stockName": "海天股份",
+      "listedDate": "2026-03-12",
+      "industry1": "环保",
+      "industry2": "环境治理",
+      "industry3": "水务及水治理",
+      "floatMarketCap": 3320054400,
+      "tags": [
+        "次新债",
+        "小盘",
+        "环保"
+      ]
+    },
+    {
+      "code": "123072.SZ",
+      "name": "乐歌转债",
+      "stockCode": "300729.SZ",
+      "stockName": "乐歌股份",
+      "listedDate": "2020-11-10",
+      "industry1": "轻工制造",
+      "industry2": "家居用品",
+      "industry3": "其他家居用品",
+      "floatMarketCap": 3362865766.25,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "123196.SZ",
+      "name": "正元转02",
+      "stockCode": "300645.SZ",
+      "stockName": "正元智慧",
+      "listedDate": "2023-05-19",
+      "industry1": "计算机",
+      "industry2": "计算机设备",
+      "industry3": "其他计算机设备",
+      "floatMarketCap": 1772156047.68,
+      "tags": [
+        "小盘",
+        "AI应用"
+      ]
+    },
+    {
+      "code": "123229.SZ",
+      "name": "艾录转债",
+      "stockCode": "301062.SZ",
+      "stockName": "上海艾录",
+      "listedDate": "2023-11-20",
+      "industry1": "轻工制造",
+      "industry2": "包装印刷",
+      "industry3": "纸包装",
+      "floatMarketCap": 1692795138.3000002,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "123199.SZ",
+      "name": "山河转债",
+      "stockCode": "300452.SZ",
+      "stockName": "山河药辅",
+      "listedDate": "2023-07-07",
+      "industry1": "医药生物",
+      "industry2": "化学制药",
+      "industry3": "原料药",
+      "floatMarketCap": 2411364400.1800003,
+      "tags": [
+        "小盘",
+        "医药"
+      ]
+    },
+    {
+      "code": "123138.SZ",
+      "name": "丝路转债",
+      "stockCode": "300556.SZ",
+      "stockName": "丝路视觉",
+      "listedDate": "2022-03-22",
+      "industry1": "计算机",
+      "industry2": "软件开发",
+      "industry3": "垂直应用软件",
+      "floatMarketCap": 1673170785.12,
+      "tags": [
+        "小盘",
+        "AI应用"
+      ]
+    },
+    {
+      "code": "111009.SH",
+      "name": "盛泰转债",
+      "stockCode": "605138.SH",
+      "stockName": "盛泰集团",
+      "listedDate": "2022-12-01",
+      "industry1": "纺织服饰",
+      "industry2": "服装家纺",
+      "industry3": "非运动服装",
+      "floatMarketCap": 3094534257.6000004,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "123180.SZ",
+      "name": "浙矿转债",
+      "stockCode": "300837.SZ",
+      "stockName": "浙矿股份",
+      "listedDate": "2023-03-28",
+      "industry1": "机械设备",
+      "industry2": "专用设备",
+      "industry3": "能源及重型设备",
+      "floatMarketCap": 1604866182.26,
+      "tags": [
+        "小盘"
+      ]
+    },
+    {
+      "code": "118010.SH",
+      "name": "洁特转债",
+      "stockCode": "688026.SH",
+      "stockName": "洁特生物",
+      "listedDate": "2022-08-02",
+      "industry1": "医药生物",
+      "industry2": "医疗器械",
+      "industry3": "医疗耗材",
+      "floatMarketCap": 1773639807.2,
+      "tags": [
+        "小盘",
+        "医药"
+      ]
+    },
+    {
+      "code": "127093.SZ",
+      "name": "章鼓转债",
+      "stockCode": "002598.SZ",
+      "stockName": "ST章鼓",
+      "listedDate": "2023-11-03",
+      "industry1": "机械设备",
+      "industry2": "通用设备",
+      "industry3": "其他通用设备",
+      "floatMarketCap": 1865310456.24,
+      "tags": [
+        "小盘",
+        "机器人",
+        "ST"
+      ]
+    },
+    {
+      "code": "110074.SH",
+      "name": "精达转债",
+      "stockCode": "600577.SH",
+      "stockName": "精达股份",
+      "listedDate": "2020-09-21",
+      "industry1": "电力设备",
+      "industry2": "电网设备",
+      "industry3": "线缆部件及其他",
+      "floatMarketCap": 16737865378.75,
+      "tags": [
+        "铜缆",
+        "电力设备"
+      ]
+    },
+    {
+      "code": "113624.SH",
+      "name": "正川转债",
+      "stockCode": "603976.SH",
+      "stockName": "正川股份",
+      "listedDate": "2021-06-01",
+      "industry1": "医药生物",
+      "industry2": "医疗器械",
+      "industry3": "医疗耗材",
+      "floatMarketCap": 4094396274.15,
+      "tags": [
+        "小盘",
+        "医药"
+      ]
+    },
+    {
+      "code": "123188.SZ",
+      "name": "水羊转债",
+      "stockCode": "300740.SZ",
+      "stockName": "水羊股份",
+      "listedDate": "2023-04-25",
+      "industry1": "美容护理",
+      "industry2": "化妆品",
+      "industry3": "品牌化妆品",
+      "floatMarketCap": 8229991310.4,
+      "tags": [
+        "AI应用"
+      ]
+    },
+    {
+      "code": "127033.SZ",
+      "name": "中装转2",
+      "stockCode": "002822.SZ",
+      "stockName": "ST中装",
+      "listedDate": "2021-05-24",
+      "industry1": "建筑装饰",
+      "industry2": "装修装饰Ⅱ",
+      "industry3": "装修装饰Ⅲ",
+      "floatMarketCap": 3260286803.6499996,
+      "tags": [
+        "小盘",
+        "ST"
+      ]
+    }
+  ]
+}

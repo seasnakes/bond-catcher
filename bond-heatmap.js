@@ -1,4 +1,5 @@
 const DATA_URL = "./data/convertible-bond-heatmap.json";
+const TAG_DATA_URL = "./data/convertible-bond-tags.json";
 const SVG_NS = "http://www.w3.org/2000/svg";
 const QUOTE_BATCH_SIZE = 100;
 
@@ -24,6 +25,7 @@ const nodes = {
   size: document.querySelector("#sizeSelect"),
   color: document.querySelector("#colorSelect"),
   sector: document.querySelector("#sectorSelect"),
+  tag: document.querySelector("#tagSelect"),
   search: document.querySelector("#searchInput"),
   refresh: document.querySelector("#refreshButton"),
   legend: document.querySelector("#colorLegend"),
@@ -211,13 +213,30 @@ function binaryLayout(items, x, y, width, height, valueKey) {
 function filteredRows() {
   const query = nodes.search.value.trim().toLowerCase();
   const sector = nodes.sector.value;
+  const tag = nodes.tag.value;
   const groupKey = nodes.group.value;
   return state.rows.filter((row) => {
     if (sector && row[groupKey] !== sector) return false;
+    if (tag && !(row.tags || []).includes(tag)) return false;
     if (!query) return true;
-    return [row.name, row.code, row.stock, row.theme, ...row.topics]
+    return [row.name, row.code, row.stock, row.theme, ...row.topics, ...(row.tags || [])]
       .some((value) => String(value || "").toLowerCase().includes(query));
   });
+}
+
+function updateTagOptions(payload) {
+  nodes.tag.replaceChildren();
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = "全部标签";
+  nodes.tag.append(all);
+  for (const tag of payload.tagOrder || []) {
+    const count = Number(payload.tagCounts?.[tag]) || 0;
+    const option = document.createElement("option");
+    option.value = tag;
+    option.textContent = `${tag}（${count}）`;
+    nodes.tag.append(option);
+  }
 }
 
 function updateSectorOptions() {
@@ -267,6 +286,7 @@ function showTooltip(event, row) {
       <span>发行规模</span><span>${formatNumber(row.issue)}亿元</span>
       <span>信用评级</span><span>${row.rating}</span>
       <span>主线题材</span><span>${row.theme}</span>
+      <span>标签</span><span>${(row.tags || []).join("、") || "未归类"}</span>
     </div>
   `;
   nodes.tooltip.hidden = false;
@@ -446,7 +466,7 @@ function selectBond(row) {
   nodes.selected.hidden = false;
   nodes.selectedName.textContent = `${row.name} · ${row.code}`;
   nodes.selectedMeta.textContent =
-    `${row.stock}｜${row.industry1} / ${row.industry2}｜${row.theme}`;
+    `${row.stock}｜${row.industry1} / ${row.industry2}｜${(row.tags || []).join("、") || row.theme}`;
   nodes.selectedPrice.textContent = formatNumber(row.price, 3);
   nodes.selectedChange.textContent =
     `${row.change > 0 ? "+" : ""}${formatNumber(row.change)}%`;
@@ -686,14 +706,23 @@ async function refreshMiniQmtQuotes() {
 
 async function load() {
   try {
-    const payload = await fetchJson(DATA_URL, 8000);
+    const [payload, tagPayload] = await Promise.all([
+      fetchJson(DATA_URL, 8000),
+      fetchJson(TAG_DATA_URL, 8000),
+    ]);
+    const tagByCode = new Map(
+      (tagPayload.rows || []).map((row) => [row.code, row.tags || []]),
+    );
     state.snapshot = payload;
-    state.rows = Array.isArray(payload.rows) ? payload.rows : [];
+    state.rows = Array.isArray(payload.rows)
+      ? payload.rows.map((row) => ({ ...row, tags: tagByCode.get(row.code) || [] }))
+      : [];
     if (state.rows.length === 0) throw new Error("转债快照为空");
     nodes.note.textContent =
       `基础快照：${payload.asOf}。行业、题材、转股溢价率来自该快照；` +
       "价格、涨跌幅和成交额可用 MiniQMT 刷新。点击矩形进入单债分时详情。";
     nodes.status.textContent = `${payload.asOf} 快照 · ${state.rows.length}只`;
+    updateTagOptions(tagPayload);
     updateSectorOptions();
     render();
     const requestedBond = new URLSearchParams(window.location.search).get("bond");
@@ -719,6 +748,7 @@ nodes.group.addEventListener("change", () => {
 nodes.size.addEventListener("change", render);
 nodes.color.addEventListener("change", render);
 nodes.sector.addEventListener("change", render);
+nodes.tag.addEventListener("change", render);
 nodes.search.addEventListener("input", render);
 nodes.refresh.addEventListener("click", refreshMiniQmtQuotes);
 nodes.openDetail.addEventListener("click", () => openBond(state.selectedRow));

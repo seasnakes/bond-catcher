@@ -5,6 +5,7 @@ const AUCTION_UPDATE_INTERVAL_MS = 3000;
 const BOND_UPDATE_INTERVAL_MS = 5000;
 const SIGNAL_UPDATE_INTERVAL_MS = 2000;
 const SIGNAL_EVENT_LIMIT = 80;
+const SIGNAL_SPARKLINE_LIMIT = 24;
 const STOCK_LIST_STORAGE_KEY = "finance-board-stock-list-v1";
 const STOCK_LIST_VERSION_STORAGE_KEY = "finance-board-stock-list-version-v1";
 const STACK_GROUP_STORAGE_KEY = "finance-board-stack-groups-v1";
@@ -15,6 +16,9 @@ const SPARKLINE_BATCH_SIZE = 24;
 const SPARKLINE_REFRESH_MS = 2 * 60 * 1000;
 const AUCTION_SERIES_BATCH_SIZE = 120;
 const AUCTION_SERIES_MAX_POINTS = 80;
+const AUCTION_SPARK_WIDTH = 60;
+const AUCTION_SPARK_HEIGHT = 18;
+const AUCTION_PRICE_HEIGHT = 12;
 const ADD_SEARCH_DEBOUNCE_MS = 220;
 const ACTIVE_DEFAULT_SECTOR_VERSION = "screenshot-2026-05-18-v1";
 const SIGNAL_EVENT_LABELS = {
@@ -31,8 +35,10 @@ const SIGNAL_EVENT_LABELS = {
   visible_book_support: "五档买盘支撑",
   visible_book_pressure: "五档卖盘压制",
   macd_underwater_golden_cross: "MACD水下金叉",
+  macd_above_water_golden_cross: "MACD水上金叉",
   underwater_golden_cross_purple_confirmed: "水下金叉·紫线确认",
-  purple_line_pullback_reclaim: "回调紫线后收回",
+  purple_line_pullback_reclaim: "回踩紫线后收回",
+  intraday_average_pullback_reclaim: "回踩均线后收回",
   dark_funds_inflow_start: "暗盘资金转入",
   dark_funds_outflow_start: "暗盘资金转出",
   dark_funds_inflow_accelerating: "暗盘流入增强",
@@ -56,21 +62,6 @@ const SIGNAL_EVENT_LABELS = {
   open_low: "低开",
   volume_surge: "分钟放量",
 };
-// 2026-07-30 snapshot: current “可转债” + “热/热债” board groups,
-// filtered to convertible-bond codes and deduplicated.
-const SIGNAL_MONITORED_CODES = Object.freeze([
-  "110074", "110076", "110101", "111004", "111024", "111025", "113048", "113051",
-  "113610", "113615", "113624", "113632", "113636", "113644", "113667", "113673",
-  "113677", "113681", "113691", "113697", "113701", "113703", "113704", "118011",
-  "118012", "118016", "118030", "118034", "118050", "118051", "118053", "118059",
-  "118060", "118062", "118064", "118069", "118071", "123061", "123064", "123091",
-  "123118", "123131", "123149", "123157", "123158", "123160", "123165", "123178",
-  "123207", "123211", "123213", "123216", "123243", "123245", "123253", "123255",
-  "123258", "123259", "123261", "123265", "123266", "123267", "123268", "123269",
-  "123270", "123271", "123273", "127044", "127047", "127067", "127070", "127080",
-  "127088", "127092", "127096", "127104", "127109", "127112", "127114", "128136",
-]);
-
 // Kept as a broad starter-pool reference; the active default is rebuilt from the screenshot text below.
 const LEGACY_DEFAULT_SECTORS = [
   {
@@ -824,11 +815,17 @@ const state = {
   mainRefreshTimer: 0,
   bondRefreshTimer: 0,
   signalEvents: [],
+  signalSparklines: new Map(),
+  signalSparkPending: new Set(),
   signalLatestId: 0,
   signalScope: "focus",
+  signalTypes: new Set(),
+  signalMinDailyAmount: 0,
+  signalMinDailyAmplitude: 0,
   signalPaused: false,
   signalLoading: false,
   signalTimer: 0,
+  signalFilterTimer: 0,
   signalCodeSignature: "",
   signalCodeCount: 0,
 };
@@ -846,6 +843,13 @@ const refreshButton = document.querySelector("#refreshButton");
 const signalMonitor = document.querySelector(".signal-monitor");
 const signalMonitorStatus = document.querySelector("#signalMonitorStatus");
 const signalScope = document.querySelector("#signalScope");
+const signalAmountFilter = document.querySelector("#signalAmountFilter");
+const signalAmplitudeFilter = document.querySelector("#signalAmplitudeFilter");
+const signalTypeFilter = document.querySelector("#signalTypeFilter");
+const signalTypeSummary = document.querySelector("#signalTypeSummary");
+const signalTypeOptions = document.querySelector("#signalTypeOptions");
+const signalTypeClear = document.querySelector("#signalTypeClear");
+const signalTypeSelectAll = document.querySelector("#signalTypeSelectAll");
 const signalPauseButton = document.querySelector("#signalPauseButton");
 const signalFeed = document.querySelector("#signalFeed");
 const editListButton = document.querySelector("#editListButton");
@@ -880,16 +884,30 @@ function embeddedBondUrl(url) {
 function showBondOverlay(url, updateHistory = true) {
   const target = new URL(url, window.location.href);
   target.searchParams.delete("embedded");
+  const targetPath = `${target.pathname}${target.search}`;
+  const embeddedTarget = embeddedBondUrl(target.href);
   saveBoardViewState();
-  bondOverlayFrame.src = embeddedBondUrl(target.href);
+  if (bondOverlayFrame.src !== embeddedTarget) {
+    bondOverlayFrame.src = embeddedTarget;
+  }
   bondOverlay.hidden = false;
   document.body.classList.add("has-bond-overlay");
   if (updateHistory) {
-    window.history.pushState(
-      { ...(window.history.state || {}), bondOverlay: true },
-      "",
-      `${target.pathname}${target.search}`,
-    );
+    const currentState = window.history.state || {};
+    const returnUrl = currentState.bondOverlay
+      ? currentState.bondOverlayReturnUrl || "/"
+      : `${window.location.pathname}${window.location.search}`;
+    const nextState = {
+      ...currentState,
+      bondOverlay: true,
+      bondOverlayTarget: targetPath,
+      bondOverlayReturnUrl: returnUrl,
+    };
+    if (currentState.bondOverlay) {
+      window.history.replaceState(nextState, "", targetPath);
+    } else {
+      window.history.pushState(nextState, "", targetPath);
+    }
   }
 }
 
@@ -900,11 +918,14 @@ function hideBondOverlay() {
 }
 
 function closeBondOverlay() {
-  if (window.history.state?.bondOverlay) {
-    window.history.back();
-  } else {
-    hideBondOverlay();
-  }
+  const currentState = { ...(window.history.state || {}) };
+  const returnUrl = currentState.bondOverlayReturnUrl || "/";
+  delete currentState.bondOverlay;
+  delete currentState.bondOverlayTarget;
+  delete currentState.bondOverlayReturnUrl;
+  window.history.replaceState(currentState, "", returnUrl);
+  hideBondOverlay();
+  restoreBoardViewport(restoreBoardViewState());
 }
 
 function saveBoardViewState() {
@@ -916,6 +937,9 @@ function saveBoardViewState() {
         sort: state.sort,
         range: state.range,
         signalScope: state.signalScope,
+        signalTypes: [...state.signalTypes],
+        signalMinDailyAmount: state.signalMinDailyAmount,
+        signalMinDailyAmplitude: state.signalMinDailyAmplitude,
         signalPaused: state.signalPaused,
         scrollY: window.scrollY,
         signalScrollTop: signalFeed.scrollTop,
@@ -937,11 +961,28 @@ function restoreBoardViewState() {
     state.sort = ["hot", "change", "name"].includes(saved.sort) ? saved.sort : "hot";
     state.range = ["all", "up", "down"].includes(saved.range) ? saved.range : "all";
     state.signalScope = saved.signalScope === "all" ? "all" : "focus";
+    state.signalTypes = new Set(
+      Array.isArray(saved.signalTypes)
+        ? saved.signalTypes.filter((type) => SIGNAL_EVENT_LABELS[type])
+        : [],
+    );
+    state.signalMinDailyAmount = [0, 100_000_000, 200_000_000].includes(
+      Number(saved.signalMinDailyAmount),
+    )
+      ? Number(saved.signalMinDailyAmount)
+      : 0;
+    state.signalMinDailyAmplitude = [0, 0.01, 0.02].includes(
+      Number(saved.signalMinDailyAmplitude),
+    )
+      ? Number(saved.signalMinDailyAmplitude)
+      : 0;
     state.signalPaused = Boolean(saved.signalPaused);
     searchInput.value = state.query;
     sortSelect.value = state.sort;
     rangeSelect.value = state.range;
     signalScope.value = state.signalScope;
+    signalAmountFilter.value = String(state.signalMinDailyAmount);
+    signalAmplitudeFilter.value = String(state.signalMinDailyAmplitude);
     signalPauseButton.classList.toggle("is-paused", state.signalPaused);
     signalPauseButton.textContent = state.signalPaused ? "继续滚动" : "暂停滚动";
     return {
@@ -2206,6 +2247,8 @@ function resetSparklinesIfNewDay() {
   state.sparkCacheDate = today;
   state.sparklines.clear();
   state.sparkPending.clear();
+  state.signalSparklines.clear();
+  state.signalSparkPending.clear();
 }
 
 function shouldFetchSparkline(spark) {
@@ -2376,6 +2419,175 @@ function signalTierLabel(tier) {
   }[tier] || tier || "-";
 }
 
+function updateSignalTypeSummary() {
+  const selected = state.signalTypes.size;
+  signalTypeSummary.textContent = selected
+    ? `类型：${selected}项`
+    : "类型：不限";
+  signalScope.disabled = selected > 0;
+  signalScope.title = selected > 0
+    ? "已启用指定信号类型筛选"
+    : "";
+}
+
+function renderSignalTypeOptions() {
+  signalTypeOptions.replaceChildren();
+  const fragment = document.createDocumentFragment();
+  for (const [type, label] of Object.entries(SIGNAL_EVENT_LABELS)) {
+    const option = document.createElement("label");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = type;
+    checkbox.checked = state.signalTypes.has(type);
+    const text = document.createElement("span");
+    text.textContent = label;
+    text.title = type;
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) state.signalTypes.add(type);
+      else state.signalTypes.delete(type);
+      updateSignalTypeSummary();
+      saveBoardViewState();
+      scheduleSignalTypeRefresh();
+    });
+    option.append(checkbox, text);
+    fragment.append(option);
+  }
+  signalTypeOptions.append(fragment);
+  updateSignalTypeSummary();
+}
+
+function scheduleSignalTypeRefresh() {
+  window.clearTimeout(state.signalFilterTimer);
+  state.signalFilterTimer = window.setTimeout(async () => {
+    await refreshSignalFeed({ reset: true });
+    scheduleSignalRefresh();
+  }, 120);
+}
+
+function signalEventSecid(event) {
+  return normalizeSecidInput(event?.code);
+}
+
+function renderSignalSupport(event) {
+  const support = document.createElement("span");
+  support.className = "signal-support";
+  const entries = [
+    {
+      label: "紫",
+      count: Math.max(0, Number(event.purple_support_count) || 0),
+      className: "is-purple",
+      title: "紫线回踩确认",
+    },
+    {
+      label: "均",
+      count: Math.max(0, Number(event.intraday_average_support_count) || 0),
+      className: "is-average",
+      title: "分时均线回踩确认",
+    },
+  ];
+  for (const entry of entries) {
+    const chip = document.createElement("span");
+    chip.className = `signal-support-chip ${entry.className}${
+      entry.count >= 3 ? " is-strong" : ""
+    }`;
+    chip.title = `${entry.title} ${entry.count} 次`;
+    const icon = document.createElement("span");
+    icon.className = "signal-support-icon";
+    icon.textContent = entry.label;
+    const count = document.createElement("span");
+    count.className = "signal-support-count";
+    count.textContent = String(entry.count);
+    chip.append(icon, count);
+    support.append(chip);
+  }
+  return support;
+}
+
+function renderSignalSparkline(event) {
+  const secid = signalEventSecid(event);
+  const spark = state.signalSparklines.get(secid) || state.sparklines.get(secid);
+  const pending = state.signalSparkPending.has(secid);
+  const speed = Number(event.speed_1m);
+  const tone = quoteClass(
+    Number.isFinite(Number(spark?.change))
+      ? Number(spark.change)
+      : Number.isFinite(speed)
+        ? speed * 100
+        : event.direction === "up"
+          ? 1
+          : event.direction === "down"
+            ? -1
+            : 0,
+  );
+  const box = document.createElement("span");
+  box.className = `signal-sparkline is-${tone}${pending ? " is-loading" : ""}`;
+  box.title = spark?.time ? `今日分时：${spark.time}` : "今日分时";
+  const points = Array.isArray(spark?.points) ? spark.points : [];
+  if (points.length < 2) return box;
+
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 76 22");
+  svg.setAttribute("aria-hidden", "true");
+  const baseline = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  baseline.setAttribute("class", "signal-spark-baseline");
+  baseline.setAttribute("x1", "0");
+  baseline.setAttribute("x2", "76");
+  baseline.setAttribute("y1", "11");
+  baseline.setAttribute("y2", "11");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("class", `spark-${tone}`);
+  path.setAttribute("d", sparklinePath(points, 76, 22));
+  svg.append(baseline, path);
+  box.append(svg);
+  return box;
+}
+
+async function ensureSignalSparklines() {
+  resetSparklinesIfNewDay();
+  const secids = Array.from(
+    new Set(
+      state.signalEvents
+        .slice(0, SIGNAL_SPARKLINE_LIMIT)
+        .map(signalEventSecid)
+        .filter(
+          (secid) =>
+            secid &&
+            !state.signalSparkPending.has(secid) &&
+            shouldFetchSparkline(
+              state.signalSparklines.get(secid) || state.sparklines.get(secid),
+            ),
+        ),
+    ),
+  );
+  if (secids.length === 0) return;
+  secids.forEach((secid) => state.signalSparkPending.add(secid));
+  renderSignalFeed();
+
+  for (const group of chunk(secids, SPARKLINE_BATCH_SIZE)) {
+    try {
+      const sparks = await fetchLocalSparklines(group);
+      for (const [secid, spark] of sparks) {
+        state.signalSparklines.set(secid, spark);
+      }
+      for (const secid of group) {
+        if (!sparks.has(secid)) {
+          state.signalSparklines.set(secid, {
+            secid,
+            points: [],
+            fetchedAt: Date.now(),
+            cacheDate: localDateKey(),
+          });
+        }
+      }
+    } catch (error) {
+      console.warn("Signal sparkline request failed.", error);
+    } finally {
+      group.forEach((secid) => state.signalSparkPending.delete(secid));
+      renderSignalFeed();
+    }
+  }
+}
+
 function renderSignalFeed(newIds = new Set()) {
   signalFeed.replaceChildren();
   if (state.signalEvents.length === 0) {
@@ -2383,7 +2595,9 @@ function renderSignalFeed(newIds = new Set()) {
     empty.className = "signal-empty";
     empty.textContent = state.signalLoading
       ? "正在读取MiniQMT盘中信号…"
-      : "当前筛选范围内暂无信号";
+      : state.signalTypes.size
+        ? "当前勾选的信号类型暂无记录"
+        : "当前筛选范围内暂无信号";
     signalFeed.append(empty);
     return;
   }
@@ -2411,11 +2625,23 @@ function renderSignalFeed(newIds = new Set()) {
 
     const bond = document.createElement("span");
     bond.className = "signal-bond";
-    bond.textContent = event.name || event.code;
+    const bondName = document.createElement("span");
+    bondName.className = "signal-bond-name";
+    bondName.textContent = event.name || event.code;
     const code = document.createElement("small");
     code.className = "signal-code";
     code.textContent = event.code;
-    bond.append(code);
+    const tier = document.createElement("small");
+    tier.className = "signal-tier";
+    tier.textContent = signalTierLabel(event.tier);
+    const tags = document.createElement("span");
+    tags.className = "signal-tags";
+    for (const tag of (event.tags || []).slice(0, 2)) {
+      const chip = document.createElement("small");
+      chip.textContent = tag;
+      tags.append(chip);
+    }
+    bond.append(bondName, code, tier, tags);
 
     const type = document.createElement("span");
     type.className = "signal-type";
@@ -2429,10 +2655,16 @@ function renderSignalFeed(newIds = new Set()) {
     metric.className = "signal-metric";
     metric.textContent = signalMetric(event);
 
-    const tier = document.createElement("span");
-    tier.className = "signal-tier";
-    tier.textContent = signalTierLabel(event.tier);
-    row.append(time, bond, type, price, metric, tier);
+    const detail = document.createElement("span");
+    detail.className = "signal-detail";
+    detail.append(type, renderSignalSparkline(event), price, metric);
+
+    row.append(
+      time,
+      bond,
+      detail,
+      renderSignalSupport(event),
+    );
     fragment.append(row);
   }
   signalFeed.append(fragment);
@@ -2456,22 +2688,22 @@ function updateSignalMonitorStatus(payload = null, error = null) {
   const time = String(payload.generated_at || "").slice(11, 19);
   const dateNote = payload.data_is_stale ? ` · 数据日 ${payload.trading_date}` : "";
   const activeCount = Number(payload.active_monitor_code_count || 0);
-  const sourceNote = activeCount && activeCount !== state.signalCodeCount
-    ? `名单 ${state.signalCodeCount} 只 · QMT有效 ${activeCount} 只`
-    : `固定监控 ${state.signalCodeCount} 只`;
+  const sourceNote = activeCount
+    ? `全市场监控 ${activeCount} 只`
+    : "全市场监控";
   signalMonitorStatus.textContent = payload.monitor_alive
     ? `实时 · ${time} · ${sourceNote} · 展示 ${state.signalEvents.length} 条${dateNote}`
     : `监控已停止 · ${sourceNote} · 展示 ${state.signalEvents.length} 条${dateNote}`;
 }
 
 function monitoredSignalCodes() {
-  return [...SIGNAL_MONITORED_CODES];
+  return [];
 }
 
 async function refreshSignalFeed(options = {}) {
   if (state.signalLoading) return;
   const monitoredCodes = monitoredSignalCodes();
-  const signature = monitoredCodes.join(",");
+  const signature = monitoredCodes.length ? monitoredCodes.join(",") : "*";
   const sourcesChanged = signature !== state.signalCodeSignature;
   state.signalCodeSignature = signature;
   state.signalCodeCount = monitoredCodes.length;
@@ -2480,18 +2712,22 @@ async function refreshSignalFeed(options = {}) {
     state.signalEvents = [];
     renderSignalFeed();
   }
-  if (monitoredCodes.length === 0) {
-    signalMonitor.classList.remove("is-live", "is-error");
-    signalMonitorStatus.textContent = "“可转债”和“热债”分组中暂无转债";
-    return;
-  }
   state.signalLoading = true;
   try {
     const query = new URLSearchParams({
       scope: state.signalScope,
       limit: String(SIGNAL_EVENT_LIMIT),
-      codes: monitoredCodes.join(","),
     });
+    if (monitoredCodes.length) query.set("codes", monitoredCodes.join(","));
+    if (state.signalTypes.size > 0) {
+      query.set("types", [...state.signalTypes].join(","));
+    }
+    if (state.signalMinDailyAmount > 0) {
+      query.set("min_daily_amount", String(state.signalMinDailyAmount));
+    }
+    if (state.signalMinDailyAmplitude > 0) {
+      query.set("min_daily_amplitude", String(state.signalMinDailyAmplitude));
+    }
     if (state.signalLatestId > 0) {
       query.set("after_id", String(state.signalLatestId));
     }
@@ -2513,6 +2749,7 @@ async function refreshSignalFeed(options = {}) {
       ...state.signalEvents.map((event) => Number(event.id || 0)),
     );
     renderSignalFeed(newIds);
+    void ensureSignalSparklines();
     updateSignalMonitorStatus(payload);
   } catch (error) {
     console.warn("MiniQMT signal monitor failed.", error);
@@ -3501,20 +3738,29 @@ function renderAuctionSparkline(stock) {
   )}`;
 
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 68 20");
+  svg.setAttribute("viewBox", `0 0 ${AUCTION_SPARK_WIDTH} ${AUCTION_SPARK_HEIGHT}`);
   svg.setAttribute("aria-hidden", "true");
 
   const amounts = samples.map((sample) => Math.max(0, Number(sample.deltaAmount) || 0));
   const maxAmount = Math.max(...amounts, 0);
   if (maxAmount > 0) {
-    const barWidth = Math.max(0.45, 68 / Math.max(amounts.length, 1) - 0.35);
+    const barWidth = Math.max(
+      0.4,
+      AUCTION_SPARK_WIDTH / Math.max(amounts.length, 1) - 0.3,
+    );
     amounts.forEach((amount, index) => {
       if (amount <= 0) return;
       const height = Math.max(0.6, (amount / maxAmount) * 5);
       const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
       rect.setAttribute("class", "auction-amount-bar");
-      rect.setAttribute("x", ((index / Math.max(amounts.length - 1, 1)) * (68 - barWidth)).toFixed(2));
-      rect.setAttribute("y", (20 - height).toFixed(2));
+      rect.setAttribute(
+        "x",
+        (
+          (index / Math.max(amounts.length - 1, 1))
+          * (AUCTION_SPARK_WIDTH - barWidth)
+        ).toFixed(2),
+      );
+      rect.setAttribute("y", (AUCTION_SPARK_HEIGHT - height).toFixed(2));
       rect.setAttribute("width", barWidth.toFixed(2));
       rect.setAttribute("height", height.toFixed(2));
       svg.append(rect);
@@ -3524,7 +3770,10 @@ function renderAuctionSparkline(stock) {
   if (points.length >= 2) {
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("class", `spark-${tone}`);
-    path.setAttribute("d", sparklinePath(points, 68, 14));
+    path.setAttribute(
+      "d",
+      sparklinePath(points, AUCTION_SPARK_WIDTH, AUCTION_PRICE_HEIGHT),
+    );
     svg.append(path);
   }
   box.append(svg);
@@ -3695,6 +3944,7 @@ async function boot() {
   scheduleMainRefresh();
   scheduleBondRefresh();
   signalScope.value = state.signalScope;
+  renderSignalTypeOptions();
   await refreshSignalFeed({ reset: true });
   scheduleSignalRefresh();
   restoreBoardViewport(restoredView);
@@ -3792,8 +4042,59 @@ refreshButton.addEventListener("click", () => {
 
 signalScope.addEventListener("change", async (event) => {
   state.signalScope = event.target.value === "all" ? "all" : "focus";
+  saveBoardViewState();
   await refreshSignalFeed({ reset: true });
   scheduleSignalRefresh();
+});
+
+signalAmountFilter.addEventListener("change", async (event) => {
+  const amount = Number(event.target.value);
+  state.signalMinDailyAmount = [100_000_000, 200_000_000].includes(amount)
+    ? amount
+    : 0;
+  saveBoardViewState();
+  await refreshSignalFeed({ reset: true });
+  scheduleSignalRefresh();
+});
+
+signalAmplitudeFilter.addEventListener("change", async (event) => {
+  const amplitude = Number(event.target.value);
+  state.signalMinDailyAmplitude = [0.01, 0.02].includes(amplitude)
+    ? amplitude
+    : 0;
+  saveBoardViewState();
+  await refreshSignalFeed({ reset: true });
+  scheduleSignalRefresh();
+});
+
+signalTypeClear.addEventListener("click", () => {
+  state.signalTypes.clear();
+  renderSignalTypeOptions();
+  saveBoardViewState();
+  scheduleSignalTypeRefresh();
+});
+
+signalTypeSelectAll.addEventListener("click", () => {
+  state.signalTypes = new Set(Object.keys(SIGNAL_EVENT_LABELS));
+  renderSignalTypeOptions();
+  saveBoardViewState();
+  scheduleSignalTypeRefresh();
+});
+
+document.addEventListener("click", (event) => {
+  if (
+    signalTypeFilter.open
+    && !signalTypeFilter.contains(event.target)
+  ) {
+    signalTypeFilter.open = false;
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && signalTypeFilter.open) {
+    signalTypeFilter.open = false;
+    signalTypeSummary.focus();
+  }
 });
 
 signalPauseButton.addEventListener("click", () => {

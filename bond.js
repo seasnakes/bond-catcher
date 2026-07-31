@@ -12,8 +12,10 @@ const EVENT_LABELS = {
   visible_book_support: "五档买盘支撑",
   visible_book_pressure: "五档卖盘压制",
   macd_underwater_golden_cross: "MACD水下金叉",
+  macd_above_water_golden_cross: "MACD水上金叉",
   underwater_golden_cross_purple_confirmed: "水下金叉·紫线确认",
-  purple_line_pullback_reclaim: "回调紫线后收回",
+  purple_line_pullback_reclaim: "回踩紫线后收回",
+  intraday_average_pullback_reclaim: "回踩均线后收回",
   dark_funds_inflow_start: "暗盘资金转入",
   dark_funds_outflow_start: "暗盘资金转出",
   dark_funds_inflow_accelerating: "暗盘流入增强",
@@ -40,6 +42,16 @@ const EVENT_LABELS = {
 const params = new URLSearchParams(window.location.search);
 const requestedCode = String(params.get("code") || "").replace(/\D/g, "");
 const requestedName = params.get("name") || "";
+const SHANGHAI_CLOCK_FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Shanghai",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
 const state = {
   payload: null,
   dailyPayload: null,
@@ -58,6 +70,7 @@ const nodes = {
   backLink: document.querySelector(".back-link"),
   name: document.querySelector("#bondName"),
   code: document.querySelector("#bondCode"),
+  tags: document.querySelector("#bondTags"),
   latestPrice: document.querySelector("#latestPrice"),
   latestChange: document.querySelector("#latestChange"),
   barCountLabel: document.querySelector("#barCountLabel"),
@@ -66,6 +79,12 @@ const nodes = {
   latestMinute: document.querySelector("#latestMinute"),
   totalAmountLabel: document.querySelector("#totalAmountLabel"),
   totalAmount: document.querySelector("#totalAmount"),
+  volumeRatioCard: document.querySelector("#volumeRatioCard"),
+  volumeRatio: document.querySelector("#volumeRatio"),
+  purpleSupportCard: document.querySelector("#purpleSupportCard"),
+  purpleSupportCount: document.querySelector("#purpleSupportCount"),
+  averageSupportCard: document.querySelector("#averageSupportCard"),
+  averageSupportCount: document.querySelector("#averageSupportCount"),
   eventCountLabel: document.querySelector("#eventCountLabel"),
   eventCount: document.querySelector("#eventCount"),
   intradayViewButton: document.querySelector("#intradayViewButton"),
@@ -87,29 +106,27 @@ const nodes = {
   dataFootnote: document.querySelector("#dataFootnote"),
 };
 
-function isBoardReferrer() {
-  try {
-    const referrer = new URL(document.referrer);
-    return (
-      referrer.origin === window.location.origin &&
-      ["/", "/index.html"].includes(referrer.pathname)
-    );
-  } catch {
-    return false;
-  }
-}
-
 if (isEmbedded) {
   document.documentElement.classList.add("is-embedded");
 }
 
 const panelDefinitions = [
-  { key: "price", label: "价格", weight: 0.36 },
-  { key: "amount", label: "分钟成交额", weight: 0.13 },
-  { key: "macd", label: "MACD", weight: 0.17 },
-  { key: "dark", label: "暗盘资金", weight: 0.16 },
-  { key: "visible", label: "明盘资金", weight: 0.18 },
+  { key: "price", label: "价格", weight: 0.33 },
+  { key: "amount", label: "分钟成交额", weight: 0.11 },
+  { key: "volumeRatio", label: "量比", weight: 0.10 },
+  { key: "macd", label: "MACD", weight: 0.16 },
+  { key: "dark", label: "暗盘资金", weight: 0.14 },
+  { key: "visible", label: "明盘资金", weight: 0.16 },
 ];
+const INTRADAY_TOTAL_MINUTES = 240;
+const INTRADAY_AXIS_LABELS = [
+  { minute: 0, label: "09:30" },
+  { minute: 60, label: "10:30" },
+  { minute: 120, label: "11:30 / 13:00" },
+  { minute: 180, label: "14:00" },
+  { minute: 240, label: "15:00" },
+];
+const INTRADAY_GRID_MINUTES = [30, 60, 90, 120, 150, 180, 210];
 
 function formatNumber(value, digits = 2) {
   return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "-";
@@ -132,6 +149,63 @@ function toneClass(value) {
 function setStatus(text, tone = "") {
   nodes.connectionStatus.textContent = text;
   nodes.connectionStatus.className = `status-pill${tone ? ` ${tone}` : ""}`;
+}
+
+function shanghaiClockParts(now = new Date()) {
+  const parts = Object.fromEntries(
+    SHANGHAI_CLOCK_FORMATTER.formatToParts(now)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, Number(part.value)]),
+  );
+  const calendarDate = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  return {
+    ...parts,
+    weekday: calendarDate.getUTCDay(),
+    minuteOfDay: parts.hour * 60 + parts.minute,
+  };
+}
+
+function shanghaiInstant(year, month, day, hour, minute) {
+  return Date.UTC(year, month - 1, day, hour - 8, minute);
+}
+
+function marketRefreshWindow(now = new Date()) {
+  const clock = shanghaiClockParts(now);
+  const isWeekday = clock.weekday >= 1 && clock.weekday <= 5;
+  const inMorning = clock.minuteOfDay >= 9 * 60 + 30 && clock.minuteOfDay < 11 * 60 + 31;
+  const inAfternoon = clock.minuteOfDay >= 13 * 60 && clock.minuteOfDay < 15 * 60 + 1;
+  if (isWeekday && (inMorning || inAfternoon)) {
+    return { active: true, nextDelayMs: 0 };
+  }
+
+  let nextAt = 0;
+  if (isWeekday && clock.minuteOfDay < 9 * 60 + 30) {
+    nextAt = shanghaiInstant(clock.year, clock.month, clock.day, 9, 30);
+  } else if (
+    isWeekday &&
+    clock.minuteOfDay >= 11 * 60 + 31 &&
+    clock.minuteOfDay < 13 * 60
+  ) {
+    nextAt = shanghaiInstant(clock.year, clock.month, clock.day, 13, 0);
+  } else {
+    for (let offset = 1; offset <= 7; offset += 1) {
+      const candidate = new Date(Date.UTC(clock.year, clock.month - 1, clock.day + offset));
+      const weekday = candidate.getUTCDay();
+      if (weekday < 1 || weekday > 5) continue;
+      nextAt = shanghaiInstant(
+        candidate.getUTCFullYear(),
+        candidate.getUTCMonth() + 1,
+        candidate.getUTCDate(),
+        9,
+        30,
+      );
+      break;
+    }
+  }
+  return {
+    active: false,
+    nextDelayMs: Math.max(1000, nextAt - now.getTime()),
+  };
 }
 
 async function fetchJson(url, timeoutMs = 8000) {
@@ -276,6 +350,7 @@ function renderDailyPayload(payload) {
   document.title = `${displayName} ${payload.code} · 日K`;
   nodes.name.textContent = displayName;
   nodes.code.textContent = payload.code;
+  renderBondTags(payload.tags || state.payload?.tags || []);
   nodes.latestPrice.textContent = formatNumber(latest.close, 3);
   nodes.latestChange.textContent =
     `${Number(latest.change) > 0 ? "+" : ""}${formatNumber(latest.change, 2)}%`;
@@ -289,6 +364,9 @@ function renderDailyPayload(payload) {
   nodes.totalAmount.textContent = formatAmount(
     rows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0),
   );
+  nodes.volumeRatioCard.hidden = true;
+  nodes.purpleSupportCard.hidden = true;
+  nodes.averageSupportCard.hidden = true;
   nodes.eventCount.textContent =
     `${rangeReturn > 0 ? "+" : ""}${formatNumber(rangeReturn, 2)}%`;
   nodes.eventCount.className = toneClass(rangeReturn);
@@ -301,6 +379,7 @@ function renderPayload(payload) {
   document.title = `${displayName} ${payload.code} · MiniQMT分时指标`;
   nodes.name.textContent = displayName;
   nodes.code.textContent = payload.code;
+  renderBondTags(payload.tags);
   nodes.latestPrice.textContent = formatNumber(payload.latest_price, 3);
   const displayedReturn = Number.isFinite(Number(payload.daily_return))
     ? Number(payload.daily_return)
@@ -318,11 +397,28 @@ function renderPayload(payload) {
   nodes.barCount.textContent = `${payload.bar_count}${payload.complete_session ? " / 241" : ""}`;
   nodes.latestMinute.textContent = payload.latest_minute || "-";
   nodes.totalAmount.textContent = formatAmount(payload.total_amount);
+  nodes.volumeRatioCard.hidden = false;
+  nodes.purpleSupportCard.hidden = false;
+  nodes.averageSupportCard.hidden = false;
+  nodes.volumeRatio.textContent = Number.isFinite(Number(payload.volume_ratio))
+    ? formatNumber(payload.volume_ratio, 2)
+    : "-";
+  nodes.volumeRatio.className =
+    Number(payload.volume_ratio) >= 2 ? "is-hot" : "";
+  const purpleSupportCount = Number(payload.support_counts?.purple) || 0;
+  const averageSupportCount = Number(payload.support_counts?.intraday_average) || 0;
+  nodes.purpleSupportCount.textContent = `${purpleSupportCount}次`;
+  nodes.averageSupportCount.textContent = `${averageSupportCount}次`;
+  nodes.purpleSupportCount.className = purpleSupportCount >= 3 ? "is-hot" : "";
+  nodes.averageSupportCount.className = averageSupportCount >= 3 ? "is-hot" : "";
   nodes.eventCount.textContent = String(payload.events.length);
   renderDates(payload.available_dates, payload.trading_date);
   renderDataAlert(payload);
   renderEvents(payload.events);
-  nodes.dataFootnote.textContent = payload.full_session
+  const autoRefreshPaused = !state.manualDate && !marketRefreshWindow().active;
+  nodes.dataFootnote.textContent = autoRefreshPaused
+    ? `${payload.source || "MiniQMT"} · 当前为非交易时段，自动刷新已暂停；可使用“立即刷新”手动检查。`
+    : payload.full_session
     ? `${payload.source || "MiniQMT"} · 当前为完整交易日数据；黄色均价线按分钟成交额估算，普通行情不等同于Level-2逐笔。`
     : payload.complete_session
       ? "当前分钟数据可用于指标分析，但尚未达到241根完整回放；黄色均价线按分钟成交额估算。"
@@ -331,6 +427,13 @@ function renderPayload(payload) {
 }
 
 function statusText(payload) {
+  if (
+    !state.manualDate &&
+    !marketRefreshWindow().active &&
+    (payload.realtime?.data_is_stale || payload.realtime?.is_latest_trading_date)
+  ) {
+    return "非交易时段 · 自动刷新已暂停";
+  }
   if (payload.realtime?.data_is_stale && !state.manualDate) {
     return "等待今日数据 · 自动重试";
   }
@@ -343,6 +446,7 @@ function statusText(payload) {
 }
 
 function statusTone(payload) {
+  if (!state.manualDate && !marketRefreshWindow().active) return "";
   if (payload.realtime?.data_is_stale && !state.manualDate) return "is-warning";
   if (payload.realtime?.monitor_alive && payload.realtime?.is_latest_trading_date) {
     return "is-live";
@@ -372,9 +476,15 @@ function renderDataAlert(payload) {
     return;
   }
   nodes.dataAlert.className = "data-alert is-stale";
+  if (!marketRefreshWindow().active) {
+    nodes.dataAlert.textContent =
+      `今日数据尚未到达，当前临时显示 ${displayDate(payload.trading_date)}。` +
+      "非交易时段已暂停自动检查，可使用“立即刷新”手动检查。";
+    return;
+  }
   nodes.dataAlert.textContent =
     `今日数据尚未到达，当前临时显示 ${displayDate(payload.trading_date)}。` +
-    "页面会持续检查，并在MiniQMT产生今日数据后自动切换。";
+    "页面会在交易时段持续检查，并在MiniQMT产生今日数据后自动切换。";
 }
 
 function renderDates(dates, selected) {
@@ -436,6 +546,16 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+function renderBondTags(tags = []) {
+  nodes.tags.replaceChildren();
+  for (const tag of tags) {
+    const chip = document.createElement("span");
+    chip.textContent = tag;
+    nodes.tags.append(chip);
+  }
+  nodes.tags.hidden = tags.length === 0;
+}
+
 function scheduleRefresh() {
   window.clearTimeout(state.refreshTimer);
   if (state.view !== "intraday") return;
@@ -443,6 +563,16 @@ function scheduleRefresh() {
   const waitingForToday = !state.manualDate && realtime?.data_is_stale;
   const followingLive = realtime?.monitor_alive && realtime?.is_latest_trading_date;
   if (!waitingForToday && !followingLive) return;
+  const refreshWindow = marketRefreshWindow();
+  if (!refreshWindow.active) {
+    if (!state.manualDate && refreshWindow.nextDelayMs > 0) {
+      state.refreshTimer = window.setTimeout(
+        () => loadBond({ date: "" }),
+        refreshWindow.nextDelayMs,
+      );
+    }
+    return;
+  }
   const date = state.manualDate ? state.payload.trading_date : "";
   state.refreshTimer = window.setTimeout(
     () => loadBond({ date }),
@@ -500,8 +630,38 @@ function domain(values, options = {}) {
   return [min - pad, max + pad];
 }
 
-function xFor(index, panel, length) {
-  return panel.x + (length <= 1 ? 0 : (index / (length - 1)) * panel.width);
+function intradayMinute(time) {
+  const match = /^(\d{2}):(\d{2})$/.exec(String(time || ""));
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const clockMinutes = hour * 60 + minute;
+  const morningStart = 9 * 60 + 30;
+  const morningEnd = 11 * 60 + 30;
+  const afternoonStart = 13 * 60;
+  const afternoonEnd = 15 * 60;
+  if (clockMinutes >= morningStart && clockMinutes <= morningEnd) {
+    return clockMinutes - morningStart;
+  }
+  if (clockMinutes >= afternoonStart && clockMinutes <= afternoonEnd) {
+    return 120 + clockMinutes - afternoonStart;
+  }
+  return null;
+}
+
+function intradayXFor(row, panel) {
+  const minute = intradayMinute(row?.time);
+  const ratio = Number.isFinite(minute)
+    ? Math.max(0, Math.min(1, minute / INTRADAY_TOTAL_MINUTES))
+    : 0;
+  return panel.x + ratio * panel.width;
+}
+
+function seriesXFor(row, index, panel, rows) {
+  if (state.view === "daily") {
+    return dailyXFor(index, panel, dailySlotCount(rows));
+  }
+  return intradayXFor(row, panel);
 }
 
 function yFor(value, panel, range) {
@@ -709,7 +869,14 @@ function drawDailyChart() {
 }
 
 function drawPanels(context, geometry, rows) {
-  const [pricePanel, amountPanel, macdPanel, darkPanel, visiblePanel] = geometry.panels;
+  const [
+    pricePanel,
+    amountPanel,
+    volumeRatioPanel,
+    macdPanel,
+    darkPanel,
+    visiblePanel,
+  ] = geometry.panels;
   for (const panel of geometry.panels) {
     context.fillStyle = "#ffffff";
     context.fillRect(panel.x, panel.y, panel.width, panel.height);
@@ -773,6 +940,36 @@ function drawPanels(context, geometry, rows) {
     row.close >= row.open ? "rgba(223,36,52,.68)" : "rgba(21,148,71,.68)",
   );
 
+  const volumeRatioDomain = domain(
+    rows.map((row) => row.volume_ratio),
+    { includeZero: true, includeValue: 2, padding: 0.05 },
+  );
+  drawLine(
+    context,
+    rows,
+    volumeRatioPanel,
+    volumeRatioDomain,
+    "volume_ratio",
+    "#6546ad",
+    1.45,
+  );
+  drawHorizontalLine(
+    context,
+    volumeRatioPanel,
+    volumeRatioDomain,
+    1,
+    "#9a8bbd",
+    [4, 3],
+  );
+  drawHorizontalLine(
+    context,
+    volumeRatioPanel,
+    volumeRatioDomain,
+    2,
+    "#c4772b",
+    [3, 3],
+  );
+
   const darkDomain = domain(
     rows.flatMap((row) => [row.dark_buy, row.dark_sell]),
     { includeZero: true, padding: 0.08 },
@@ -820,6 +1017,7 @@ function drawPanels(context, geometry, rows) {
   return {
     price: priceDomain,
     amount: amountDomain,
+    volumeRatio: volumeRatioDomain,
     dark: darkDomain,
     macd: macdDomain,
     visible: visibleDomain,
@@ -832,14 +1030,14 @@ function drawHighLowBand(context, rows, panel, range) {
   context.fillStyle = "rgba(31,95,191,.08)";
   context.beginPath();
   rows.forEach((row, index) => {
-    const x = xFor(index, panel, rows.length);
+    const x = seriesXFor(row, index, panel, rows);
     const y = yFor(row.high, panel, range);
     if (index === 0) context.moveTo(x, y);
     else context.lineTo(x, y);
   });
   for (let index = rows.length - 1; index >= 0; index -= 1) {
     context.lineTo(
-      xFor(index, panel, rows.length),
+      intradayXFor(rows[index], panel),
       yFor(rows[index].low, panel, range),
     );
   }
@@ -854,19 +1052,6 @@ function drawHalfHourSeparators(context, panels, rows) {
   const lastPanel = panels.at(-1);
   const top = firstPanel.y;
   const bottom = lastPanel.y + lastPanel.height;
-  const boundaries = [];
-  rows.forEach((row, index) => {
-    const time = String(row.time || "");
-    if (index === 0 || !/:(00|30)$/.test(time)) return;
-    const x = xFor(index, firstPanel, rows.length);
-    const previous = boundaries.at(-1);
-    if (previous && x - previous.x < 14) {
-      previous.x = (previous.x + x) / 2;
-      previous.label = `${previous.label}/${time}`;
-      return;
-    }
-    boundaries.push({ x, label: time });
-  });
   context.save();
   context.strokeStyle = "rgba(93, 105, 94, .38)";
   context.lineWidth = 0.8;
@@ -875,12 +1060,13 @@ function drawHalfHourSeparators(context, panels, rows) {
   context.font = '9px Arial, "Microsoft YaHei", sans-serif';
   context.textAlign = "center";
   context.textBaseline = "bottom";
-  boundaries.forEach(({ x, label }) => {
+  INTRADAY_GRID_MINUTES.forEach((minute) => {
+    const x = firstPanel.x
+      + (minute / INTRADAY_TOTAL_MINUTES) * firstPanel.width;
     context.beginPath();
     context.moveTo(x, top);
     context.lineTo(x, bottom);
     context.stroke();
-    context.fillText(label, x, firstPanel.y + firstPanel.height - 4);
   });
   context.restore();
 }
@@ -902,7 +1088,7 @@ function drawLine(context, rows, panel, range, key, color, width, dash = []) {
       started = false;
       return;
     }
-    const x = xFor(index, panel, rows.length);
+    const x = seriesXFor(row, index, panel, rows);
     const y = yFor(value, panel, range);
     if (!started) {
       context.moveTo(x, y);
@@ -924,20 +1110,29 @@ function drawConditionalLine(context, rows, panel, range, key, colorForRow, widt
     if (!Number.isFinite(previous) || !Number.isFinite(value)) continue;
     context.strokeStyle = colorForRow(rows[index]);
     context.beginPath();
-    context.moveTo(xFor(index - 1, panel, rows.length), yFor(previous, panel, range));
-    context.lineTo(xFor(index, panel, rows.length), yFor(value, panel, range));
+    context.moveTo(
+      intradayXFor(rows[index - 1], panel),
+      yFor(previous, panel, range),
+    );
+    context.lineTo(intradayXFor(rows[index], panel), yFor(value, panel, range));
     context.stroke();
   }
   context.restore();
 }
 
 function drawBars(context, rows, panel, range, colorForRow, valueForRow = (row) => row.amount) {
-  const barWidth = Math.max(1, Math.min(5, (panel.width / rows.length) * 0.72));
+  const slots = state.view === "daily"
+    ? dailySlotCount(rows)
+    : INTRADAY_TOTAL_MINUTES + 1;
+  const barWidth = Math.max(
+    1,
+    Math.min(5, (panel.width / slots) * 0.72),
+  );
   const zeroY = yFor(0, panel, range);
   rows.forEach((row, index) => {
     const value = Number(valueForRow(row));
     if (!Number.isFinite(value)) return;
-    const x = xFor(index, panel, rows.length) - barWidth / 2;
+    const x = seriesXFor(row, index, panel, rows) - barWidth / 2;
     const valueY = yFor(value, panel, range);
     context.fillStyle = colorForRow(row);
     context.fillRect(x, Math.min(zeroY, valueY), barWidth, Math.max(1, Math.abs(zeroY - valueY)));
@@ -967,7 +1162,7 @@ function drawVisibleCrosses(context, rows, panel, range) {
     const previous = Number(rows[index - 1].visible_funds);
     const current = Number(rows[index].visible_funds);
     if (!(previous < 100 && current >= 100)) continue;
-    const x = xFor(index, panel, rows.length);
+    const x = intradayXFor(rows[index], panel);
     const y = yFor(current, panel, range) - 4;
     context.beginPath();
     context.moveTo(x, y - 4);
@@ -1012,18 +1207,23 @@ function drawAxes(context, geometry, rows, domains) {
   });
 
   const lastPanel = geometry.panels.at(-1);
-  const labels = [0, Math.floor((rows.length - 1) / 4), Math.floor((rows.length - 1) / 2), Math.floor(((rows.length - 1) * 3) / 4), rows.length - 1];
   context.textBaseline = "top";
-  labels.forEach((index, labelIndex) => {
-    const x = xFor(index, lastPanel, rows.length);
-    context.textAlign = labelIndex === 0 ? "left" : labelIndex === labels.length - 1 ? "right" : "center";
-    context.fillText(rows[index]?.time || "", x, lastPanel.y + lastPanel.height + 7);
+  INTRADAY_AXIS_LABELS.forEach(({ minute, label }, labelIndex) => {
+    const x = lastPanel.x
+      + (minute / INTRADAY_TOTAL_MINUTES) * lastPanel.width;
+    context.textAlign = labelIndex === 0
+      ? "left"
+      : labelIndex === INTRADAY_AXIS_LABELS.length - 1
+        ? "right"
+        : "center";
+    context.fillText(label, x, lastPanel.y + lastPanel.height + 7);
   });
 }
 
 function formatAxis(value, key) {
   if (key === "amount") return formatAmount(value).replace("元", "");
   if (key === "price") return Number(value).toFixed(2);
+  if (key === "volumeRatio") return `${Number(value).toFixed(2)}x`;
   return Math.abs(value) >= 100 ? Number(value).toFixed(0) : Number(value).toFixed(2);
 }
 
@@ -1038,7 +1238,7 @@ function drawEvents(context, panel, rows, priceDomain) {
     if (index === undefined) continue;
     const lane = lanes.get(index) || 0;
     lanes.set(index, lane + 1);
-    const x = xFor(index, panel, rows.length);
+    const x = intradayXFor(rows[index], panel);
     const up = event.direction !== "down";
     const anchor = Number(event.price) || Number(rows[index].close);
     const y = yFor(anchor, panel, priceDomain) + (up ? -9 - lane * 7 : 9 + lane * 7);
@@ -1060,7 +1260,7 @@ function drawEvents(context, panel, rows, priceDomain) {
 
 function drawCrosshair(context, geometry, rows, index) {
   const panel = geometry.panels[0];
-  const x = xFor(index, panel, rows.length);
+  const x = intradayXFor(rows[index], panel);
   context.save();
   context.strokeStyle = "rgba(48,61,51,.42)";
   context.lineWidth = 0.8;
@@ -1092,7 +1292,23 @@ function selectedIndexFromPointer(event) {
     return index >= 0 && index < rows.length ? index : -1;
   }
   const ratio = Math.max(0, Math.min(1, (x - panel.x) / panel.width));
-  return Math.round(ratio * (rows.length - 1));
+  const targetMinute = ratio * INTRADAY_TOTAL_MINUTES;
+  const latestMinute = intradayMinute(rows.at(-1)?.time);
+  if (Number.isFinite(latestMinute) && targetMinute > latestMinute + 1) {
+    return -1;
+  }
+  let nearestIndex = -1;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  rows.forEach((row, index) => {
+    const minute = intradayMinute(row.time);
+    if (!Number.isFinite(minute)) return;
+    const distance = Math.abs(minute - targetMinute);
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestIndex = index;
+    }
+  });
+  return nearestIndex;
 }
 
 function showTooltip(event) {
@@ -1119,7 +1335,7 @@ function showTooltip(event) {
     <strong>${row.time}　${formatNumber(row.close, 3)}</strong>
     开 ${formatNumber(row.open, 3)}　高 ${formatNumber(row.high, 3)}　低 ${formatNumber(row.low, 3)}<br>
     涨跌幅 ${formatMinuteReturn(row.close)}<br>
-    紫线 ${formatNumber(row.purple, 3)}　成交额 ${formatAmount(row.amount)}<br>
+    紫线 ${formatNumber(row.purple, 3)}　成交额 ${formatAmount(row.amount)}　量比 ${formatNumber(row.volume_ratio, 2)}<br>
     均价≈ ${formatNumber(row.intraday_average, 3)}<br>
     暗盘 ${row.dark_state === "inflow" ? "流入" : "流出"}　MACD ${formatNumber(row.macd, 4)}<br>
     明盘资金 ${formatNumber(row.visible_funds, 2)}
@@ -1195,11 +1411,7 @@ nodes.backLink.addEventListener("click", (event) => {
   if (isEmbedded && window.parent !== window) {
     event.preventDefault();
     window.parent.postMessage({ type: "finance:close-bond-overlay" }, window.location.origin);
-    return;
   }
-  if (!isBoardReferrer() || window.history.length <= 1) return;
-  event.preventDefault();
-  window.history.back();
 });
 window.addEventListener("resize", () => {
   window.clearTimeout(state.resizeTimer);

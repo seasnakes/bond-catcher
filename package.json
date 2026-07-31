@@ -2,6 +2,8 @@
   "scripts": {
     "start": "node server.js",
     "miniqmt:api": "/Users/seasnake/miniconda3/bin/python3 scripts/miniqmt-dashboard-api.py",
+    "build:active-bond-index": "node scripts/build-active-cb-index.js",
+    "build:bond-tags": "node scripts/build-convertible-bond-tags.js",
     "update:stocks": "node scripts/update-a-share-list.js",
     "sync:tdx-sectors": "node scripts/sync-tdx-sectors.js"
   }

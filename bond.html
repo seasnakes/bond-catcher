@@ -16,6 +16,7 @@
           <div>
             <span class="eyebrow">MINIQMT · 只读</span>
             <h1><span id="bondName">可转债</span> <small id="bondCode"></small></h1>
+            <div id="bondTags" class="bond-tags" aria-label="转债标签"></div>
           </div>
           <div class="price-summary">
             <strong id="latestPrice">-</strong>
@@ -49,6 +50,9 @@
         <article><span id="barCountLabel">分钟数</span><strong id="barCount">-</strong></article>
         <article><span id="latestMinuteLabel">最新分钟</span><strong id="latestMinute">-</strong></article>
         <article><span id="totalAmountLabel">累计成交额</span><strong id="totalAmount">-</strong></article>
+        <article id="volumeRatioCard"><span>量比</span><strong id="volumeRatio">-</strong></article>
+        <article id="purpleSupportCard"><span>紫线回踩</span><strong id="purpleSupportCount">-</strong></article>
+        <article id="averageSupportCard"><span>均线回踩</span><strong id="averageSupportCount">-</strong></article>
         <article><span id="eventCountLabel">今日信号</span><strong id="eventCount">-</strong></article>
       </section>
 
@@ -70,7 +74,7 @@
           <span class="legend-note">移动查看详情 · 双击K线进入当日分时</span>
         </div>
         <div id="chartWrap" class="chart-wrap">
-          <canvas id="indicatorChart" aria-label="MiniQMT五栏分时指标图"></canvas>
+          <canvas id="indicatorChart" aria-label="MiniQMT六栏分时指标图"></canvas>
           <div id="chartTooltip" class="chart-tooltip" hidden></div>
         </div>
       </section>
