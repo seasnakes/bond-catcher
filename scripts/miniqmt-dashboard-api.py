@@ -1215,6 +1215,50 @@ def daily_payload(code_input: str, count_input: int = 120) -> dict[str, Any]:
                 "suspend": int(raw.get("suspendFlag") or 0),
             }
         )
+
+    live_tick_error = ""
+    live_tick_added = False
+    try:
+        tick = bridge.full_tick([stored_code]).get(stored_code) or {}
+        tick_date = compact_date(tick.get("timetag"))
+        close = finite_or_none(tick.get("lastPrice"))
+        previous_close = finite_or_none(tick.get("lastClose"))
+        amount = finite_or_none(tick.get("amount")) or 0
+        volume = finite_or_none(tick.get("volume")) or 0
+        if (
+            len(tick_date) == 8
+            and close is not None
+            and close > 0
+            and (amount > 0 or volume > 0)
+            and (not rows or tick_date >= str(rows[-1].get("date") or ""))
+        ):
+            open_price = finite_or_none(tick.get("open")) or close
+            high = finite_or_none(tick.get("high")) or close
+            low = finite_or_none(tick.get("low")) or close
+            change = (
+                (close / previous_close - 1) * 100
+                if previous_close is not None and previous_close > 0
+                else None
+            )
+            live_row = {
+                "date": tick_date,
+                "time": int(tick.get("time") or 0),
+                "open": open_price,
+                "high": max(high, open_price, close),
+                "low": min(low, open_price, close),
+                "close": close,
+                "volume": volume,
+                "amount": amount,
+                "previous_close": previous_close,
+                "change": change,
+                "suspend": 0,
+            }
+            rows = [row for row in rows if row.get("date") != tick_date]
+            rows.append(live_row)
+            live_tick_added = True
+    except Exception as error:
+        live_tick_error = f"{type(error).__name__}: {error}"
+
     rows.sort(key=lambda row: (row["date"], row["time"]))
     rows = rows[-count:]
     if not rows:
@@ -1225,7 +1269,11 @@ def daily_payload(code_input: str, count_input: int = 120) -> dict[str, Any]:
         {
             "ok": True,
             "mode": "read_only",
-            "source": "MiniQMT 1d",
+            "source": (
+                "MiniQMT 1d + full_tick当日K"
+                if live_tick_added
+                else "MiniQMT 1d"
+            ),
             "code": code,
             "monitor_code": stored_code,
             "tags": bond_tags(stored_code),
@@ -1235,6 +1283,7 @@ def daily_payload(code_input: str, count_input: int = 120) -> dict[str, Any]:
             "end_date": rows[-1]["date"],
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "download_error": download_error or None,
+            "live_tick_error": live_tick_error or None,
             "cached": False,
             "rows": rows,
         }
