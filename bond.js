@@ -64,6 +64,8 @@ const state = {
   requestId: 0,
   manualDate: Boolean(params.get("date")),
   intradayDays: Math.max(1, Math.min(5, Number(params.get("days")) || 1)),
+  tagOrder: [],
+  tagDraft: new Set(),
 };
 
 const pageParams = new URLSearchParams(window.location.search);
@@ -74,6 +76,12 @@ const nodes = {
   name: document.querySelector("#bondName"),
   code: document.querySelector("#bondCode"),
   tags: document.querySelector("#bondTags"),
+  manageTagsButton: document.querySelector("#manageTagsButton"),
+  tagEditor: document.querySelector("#tagEditor"),
+  tagOptions: document.querySelector("#tagOptions"),
+  tagEditorStatus: document.querySelector("#tagEditorStatus"),
+  cancelTagsButton: document.querySelector("#cancelTagsButton"),
+  saveTagsButton: document.querySelector("#saveTagsButton"),
   latestPrice: document.querySelector("#latestPrice"),
   latestChange: document.querySelector("#latestChange"),
   barCountLabel: document.querySelector("#barCountLabel"),
@@ -221,6 +229,25 @@ async function fetchJson(url, timeoutMs = 8000) {
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.error || `HTTP ${response.status}`);
+    return payload;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function postJson(url, body, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      cache: "no-store",
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload?.error || `HTTP ${response.status}`);
     return payload;
@@ -631,6 +658,66 @@ function renderBondTags(tags = []) {
   nodes.tags.hidden = tags.length === 0;
 }
 
+function renderTagEditor() {
+  nodes.tagOptions.replaceChildren();
+  for (const tag of state.tagOrder) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = tag;
+    button.setAttribute("aria-pressed", String(state.tagDraft.has(tag)));
+    button.addEventListener("click", () => {
+      if (state.tagDraft.has(tag)) state.tagDraft.delete(tag);
+      else state.tagDraft.add(tag);
+      button.setAttribute("aria-pressed", String(state.tagDraft.has(tag)));
+      nodes.tagEditorStatus.textContent = "有未保存的修改";
+    });
+    nodes.tagOptions.append(button);
+  }
+}
+
+async function openTagEditor() {
+  nodes.manageTagsButton.disabled = true;
+  nodes.tagEditorStatus.textContent = "正在读取标签";
+  nodes.tagEditor.hidden = false;
+  try {
+    const payload = await fetchJson(
+      `/api/miniqmt/tags?${new URLSearchParams({ code: requestedCode })}`,
+    );
+    state.tagOrder = payload.tagOrder || [];
+    state.tagDraft = new Set(payload.rows?.[0]?.tags || state.payload?.tags || []);
+    renderTagEditor();
+    nodes.tagEditorStatus.textContent = "点击标签可选中或取消";
+  } catch (error) {
+    nodes.tagEditorStatus.textContent = error.message || "标签读取失败";
+  } finally {
+    nodes.manageTagsButton.disabled = false;
+  }
+}
+
+async function saveTagEditor() {
+  nodes.saveTagsButton.disabled = true;
+  nodes.cancelTagsButton.disabled = true;
+  nodes.tagEditorStatus.textContent = "正在保存";
+  try {
+    const payload = await postJson("/api/miniqmt/tags", {
+      code: requestedCode,
+      tags: state.tagOrder.filter((tag) => state.tagDraft.has(tag)),
+    });
+    if (state.payload) state.payload.tags = payload.tags;
+    for (const item of state.intradayPayloads) item.tags = payload.tags;
+    renderBondTags(payload.tags);
+    nodes.tagEditorStatus.textContent = "已保存";
+    window.setTimeout(() => {
+      nodes.tagEditor.hidden = true;
+    }, 350);
+  } catch (error) {
+    nodes.tagEditorStatus.textContent = error.message || "标签保存失败";
+  } finally {
+    nodes.saveTagsButton.disabled = false;
+    nodes.cancelTagsButton.disabled = false;
+  }
+}
+
 function scheduleRefresh() {
   window.clearTimeout(state.refreshTimer);
   if (state.view !== "intraday") return;
@@ -929,13 +1016,25 @@ function drawDailyChart() {
       context.fillText(formatAxis(value, key), panel.x - 6, y);
     }
   }
-  const labels = [...new Set([
+  const candidateLabels = [...new Set([
     0,
     Math.floor((chartRows.length - 1) / 4),
     Math.floor((chartRows.length - 1) / 2),
     Math.floor(((chartRows.length - 1) * 3) / 4),
     chartRows.length - 1,
   ])];
+  const minimumLabelGap = Math.max(58, context.measureText("00-00").width + 22);
+  const labels = [];
+  for (const index of [...candidateLabels].reverse()) {
+    const x = dailyXFor(index, amountPanel, slotCount);
+    const nearestX = labels.length
+      ? Math.min(...labels.map((selected) => Math.abs(
+        dailyXFor(selected, amountPanel, slotCount) - x,
+      )))
+      : Number.POSITIVE_INFINITY;
+    if (nearestX >= minimumLabelGap) labels.push(index);
+  }
+  labels.sort((left, right) => left - right);
   context.textBaseline = "top";
   labels.forEach((index, labelIndex) => {
     const x = dailyXFor(index, amountPanel, slotCount);
@@ -1555,6 +1654,17 @@ nodes.intradayDaysSelect.addEventListener("change", () => {
   window.history.replaceState(window.history.state, "", url);
   loadBond({ date: state.manualDate ? nodes.dateSelect.value : "" });
 });
+nodes.manageTagsButton.addEventListener("click", () => {
+  if (!nodes.tagEditor.hidden) {
+    nodes.tagEditor.hidden = true;
+    return;
+  }
+  void openTagEditor();
+});
+nodes.cancelTagsButton.addEventListener("click", () => {
+  nodes.tagEditor.hidden = true;
+});
+nodes.saveTagsButton.addEventListener("click", () => void saveTagEditor());
 nodes.dailyRangeSelect.addEventListener("change", loadDaily);
 nodes.intradayViewButton.addEventListener("click", () => setView("intraday"));
 nodes.dailyViewButton.addEventListener("click", () => setView("daily"));

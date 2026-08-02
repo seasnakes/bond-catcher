@@ -16,7 +16,18 @@
           <div>
             <span class="eyebrow">MINIQMT · 只读</span>
             <h1><span id="bondName">可转债</span> <small id="bondCode"></small></h1>
-            <div id="bondTags" class="bond-tags" aria-label="转债标签"></div>
+            <div class="bond-tag-tools">
+              <div id="bondTags" class="bond-tags" aria-label="转债标签"></div>
+              <button id="manageTagsButton" class="manage-tags-button" type="button">管理标签</button>
+            </div>
+            <section id="tagEditor" class="tag-editor" aria-label="手动管理转债标签" hidden>
+              <div id="tagOptions" class="tag-options"></div>
+              <div class="tag-editor-actions">
+                <span id="tagEditorStatus"></span>
+                <button id="cancelTagsButton" type="button">取消</button>
+                <button id="saveTagsButton" class="is-primary" type="button">保存标签</button>
+              </div>
+            </section>
           </div>
           <div class="price-summary">
             <strong id="latestPrice">-</strong>

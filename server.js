@@ -8,6 +8,8 @@ const PORT = Number(process.env.PORT || 5173);
 const ROOT = __dirname;
 const LOCAL_A_SHARE_LIST_PATH = path.join(ROOT, "data", "a-share-list.json");
 const BOARD_STATE_PATH = path.join(ROOT, "data", "board-state.json");
+const BOND_TAGS_PATH = path.join(ROOT, "data", "convertible-bond-tags.json");
+const BOND_TAG_OVERRIDES_PATH = path.join(ROOT, "data", "convertible-bond-tag-overrides.json");
 const AUCTION_CACHE_PATH = path.join(ROOT, "runtime", "auction-series.json");
 const AUCTION_SAMPLE_INTERVAL_MS = 3000;
 const AUCTION_PERSIST_INTERVAL_MS = 30000;
@@ -147,6 +149,10 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (url.pathname === "/api/miniqmt/tags") {
+      if (request.method === "POST") {
+        await handleBondTagsUpdate(request, response);
+        return;
+      }
       const query = new URLSearchParams();
       for (const key of ["code", "tag"]) {
         const value = url.searchParams.get(key);
@@ -392,6 +398,97 @@ async function handleMiniQmtApi(pathname, response, timeout = 12_000) {
       service: "miniqmt-dashboard",
     });
   }
+}
+
+async function handleBondTagsUpdate(request, response) {
+  const body = await readJsonBody(request, 32 * 1024);
+  const requestedCode = String(body?.code || "").toUpperCase();
+  const requestedTags = Array.isArray(body?.tags)
+    ? [...new Set(body.tags.map((value) => String(value).trim()).filter(Boolean))]
+    : null;
+  if (!requestedCode || !requestedTags) {
+    sendJson(response, 400, { error: "缺少转债代码或标签列表" });
+    return;
+  }
+
+  const [tagPayload, overridePayload] = await Promise.all([
+    readJsonFile(BOND_TAGS_PATH),
+    readJsonFile(BOND_TAG_OVERRIDES_PATH).catch(() => ({
+      description: "可转债标签人工修订。add 添加标签，remove 删除规则标签。",
+      overrides: {},
+    })),
+  ]);
+  const tagOrder = Array.isArray(tagPayload.tagOrder) ? tagPayload.tagOrder.map(String) : [];
+  const invalidTags = requestedTags.filter((tag) => !tagOrder.includes(tag));
+  if (invalidTags.length) {
+    sendJson(response, 400, { error: `未知标签：${invalidTags.join("、")}` });
+    return;
+  }
+  const codeDigits = requestedCode.replace(/\D/g, "").slice(0, 6);
+  const row = (tagPayload.rows || []).find(
+    (item) => String(item.code || "").toUpperCase() === requestedCode
+      || String(item.code || "").replace(/\D/g, "").slice(0, 6) === codeDigits,
+  );
+  if (!row) {
+    sendJson(response, 404, { error: `标签库中未找到转债 ${requestedCode}` });
+    return;
+  }
+
+  const canonicalCode = String(row.code);
+  const currentTags = new Set((row.tags || []).map(String));
+  const desiredTags = new Set(requestedTags);
+  const existing = overridePayload.overrides?.[canonicalCode] || {};
+  const add = new Set((existing.add || []).filter((tag) => tagOrder.includes(tag)));
+  const remove = new Set((existing.remove || []).filter((tag) => tagOrder.includes(tag)));
+  for (const tag of tagOrder) {
+    if (currentTags.has(tag) === desiredTags.has(tag)) continue;
+    if (desiredTags.has(tag)) {
+      if (remove.has(tag)) remove.delete(tag);
+      else add.add(tag);
+    } else {
+      if (add.has(tag)) add.delete(tag);
+      else remove.add(tag);
+    }
+  }
+
+  overridePayload.overrides ||= {};
+  const nextOverride = {
+    add: tagOrder.filter((tag) => add.has(tag)),
+    remove: tagOrder.filter((tag) => remove.has(tag)),
+  };
+  if (nextOverride.add.length || nextOverride.remove.length) {
+    overridePayload.overrides[canonicalCode] = nextOverride;
+  } else {
+    delete overridePayload.overrides[canonicalCode];
+  }
+  row.tags = tagOrder.filter((tag) => desiredTags.has(tag));
+  tagPayload.tagCounts = Object.fromEntries(
+    tagOrder.map((tag) => [
+      tag,
+      (tagPayload.rows || []).filter((item) => (item.tags || []).includes(tag)).length,
+    ]),
+  );
+
+  await Promise.all([
+    writeJsonAtomic(BOND_TAG_OVERRIDES_PATH, overridePayload),
+    writeJsonAtomic(BOND_TAGS_PATH, tagPayload),
+  ]);
+  sendJson(response, 200, {
+    ok: true,
+    code: canonicalCode,
+    tags: row.tags,
+    override: nextOverride,
+  });
+}
+
+async function readJsonFile(filePath) {
+  return JSON.parse(await fs.promises.readFile(filePath, "utf8"));
+}
+
+async function writeJsonAtomic(filePath, payload) {
+  const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  await fs.promises.writeFile(temporaryPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  await fs.promises.rename(temporaryPath, filePath);
 }
 
 async function ensureMiniQmtApi() {
