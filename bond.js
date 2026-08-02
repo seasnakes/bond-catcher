@@ -129,7 +129,9 @@ const INTRADAY_AXIS_LABELS = [
 const INTRADAY_GRID_MINUTES = [30, 60, 90, 120, 150, 180, 210];
 
 function formatNumber(value, digits = 2) {
-  return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "-";
+  return value !== null && value !== undefined && Number.isFinite(Number(value))
+    ? Number(value).toFixed(digits)
+    : "-";
 }
 
 function formatAmount(value) {
@@ -400,11 +402,15 @@ function renderPayload(payload) {
   nodes.volumeRatioCard.hidden = false;
   nodes.purpleSupportCard.hidden = false;
   nodes.averageSupportCard.hidden = false;
-  nodes.volumeRatio.textContent = Number.isFinite(Number(payload.volume_ratio))
+  const hasVolumeRatio =
+    payload.volume_ratio !== null &&
+    payload.volume_ratio !== undefined &&
+    Number.isFinite(Number(payload.volume_ratio));
+  nodes.volumeRatio.textContent = hasVolumeRatio
     ? formatNumber(payload.volume_ratio, 2)
     : "-";
   nodes.volumeRatio.className =
-    Number(payload.volume_ratio) >= 2 ? "is-hot" : "";
+    hasVolumeRatio && Number(payload.volume_ratio) >= 2 ? "is-hot" : "";
   const purpleSupportCount = Number(payload.support_counts?.purple) || 0;
   const averageSupportCount = Number(payload.support_counts?.intraday_average) || 0;
   nodes.purpleSupportCount.textContent = `${purpleSupportCount}次`;

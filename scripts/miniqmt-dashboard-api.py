@@ -561,10 +561,14 @@ def tick_minute_timestamp(tick: dict[str, Any]) -> int:
 
 
 def elapsed_market_minutes(tick: dict[str, Any]) -> int:
-    timestamp = tick_minute_timestamp(tick)
-    if timestamp <= 0:
+    digits = re.sub(r"\D", "", str(tick.get("timetag") or ""))
+    if len(digits) < 12:
         return 0
-    moment = datetime.fromtimestamp(timestamp / 1000)
+    clock = digits[:14] if len(digits) >= 14 else digits[:12] + "00"
+    try:
+        moment = datetime.strptime(clock, "%Y%m%d%H%M%S").replace(second=0)
+    except ValueError:
+        return 0
     morning_start = datetime.strptime("09:30", "%H:%M").time()
     morning_end = datetime.strptime("11:30", "%H:%M").time()
     afternoon_start = datetime.strptime("13:00", "%H:%M").time()
@@ -573,7 +577,9 @@ def elapsed_market_minutes(tick: dict[str, Any]) -> int:
         return int((moment - start).total_seconds() // 60) + 1
     if moment.time() >= afternoon_start:
         start = moment.replace(hour=13, minute=0, second=0, microsecond=0)
-        return 121 + int((moment - start).total_seconds() // 60)
+        return min(240, 121 + int((moment - start).total_seconds() // 60))
+    if moment.time() > morning_end:
+        return 121
     return 0
 
 
@@ -621,15 +627,15 @@ def bond_volume_ratio(
     stored_code: str,
     trading_date: str,
 ) -> tuple[float | None, float | None]:
-    if trading_date != datetime.now().strftime("%Y%m%d"):
-        return None, None
     bridge = MONITOR.BridgeClient(
         f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}",
         timeout=15.0,
     )
     tick = bridge.full_tick([stored_code]).get(stored_code)
     if not isinstance(tick, dict):
-        return None
+        return None, None
+    if compact_date(tick.get("timetag")) != trading_date:
+        return None, None
     source = load_active_index_source()
     candidate = next(
         (
