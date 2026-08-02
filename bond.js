@@ -57,6 +57,7 @@ const state = {
   intradayPayloads: [],
   intradayRows: [],
   dailyPayload: null,
+  metadata: null,
   view: params.get("view") === "daily" ? "daily" : "intraday",
   selectedIndex: -1,
   refreshTimer: 0,
@@ -84,6 +85,15 @@ const nodes = {
   saveTagsButton: document.querySelector("#saveTagsButton"),
   latestPrice: document.querySelector("#latestPrice"),
   latestChange: document.querySelector("#latestChange"),
+  premiumRate: document.querySelector("#premiumRate"),
+  premiumDetail: document.querySelector("#premiumDetail"),
+  circulatingAmount: document.querySelector("#circulatingAmount"),
+  circulatingDetail: document.querySelector("#circulatingDetail"),
+  circulatingMarketValue: document.querySelector("#circulatingMarketValue"),
+  marketValueDetail: document.querySelector("#marketValueDetail"),
+  redeemRiskCard: document.querySelector("#redeemRiskCard"),
+  redeemRisk: document.querySelector("#redeemRisk"),
+  redeemDetail: document.querySelector("#redeemDetail"),
   barCountLabel: document.querySelector("#barCountLabel"),
   barCount: document.querySelector("#barCount"),
   latestMinuteLabel: document.querySelector("#latestMinuteLabel"),
@@ -154,6 +164,49 @@ function formatAmount(value) {
   if (Math.abs(number) >= 1e8) return `${(number / 1e8).toFixed(2)}亿`;
   if (Math.abs(number) >= 1e4) return `${(number / 1e4).toFixed(1)}万`;
   return `${number.toFixed(0)}元`;
+}
+
+function formatPercent(value, digits = 2) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return `${number > 0 ? "+" : ""}${number.toFixed(digits)}%`;
+}
+
+function renderBondMetadata(payload) {
+  state.metadata = payload;
+  nodes.premiumRate.textContent = formatPercent(payload.premium_rate);
+  nodes.premiumRate.className = Number(payload.premium_rate) >= 30 ? "is-hot" : "";
+  nodes.premiumDetail.textContent =
+    `转股价值 ${formatNumber(payload.conversion_value, 2)} · ` +
+    `正股 ${formatNumber(payload.stock_price, 2)} / 转股价 ${formatNumber(payload.conversion_price, 2)}`;
+  nodes.circulatingAmount.textContent = formatAmount(payload.circulating_face_value);
+  nodes.circulatingDetail.textContent =
+    `${payload.circulating_source || "MiniQMT"} · 未转股面值`;
+  nodes.circulatingMarketValue.textContent = formatAmount(payload.circulating_market_value);
+  nodes.marketValueDetail.textContent =
+    `按转债 ${formatNumber(payload.bond_price, 3)} 元计算`;
+
+  const redeem = payload.redeem || {};
+  nodes.redeemRisk.textContent = redeem.status || "-";
+  nodes.redeemRiskCard.dataset.risk = redeem.risk || "unknown";
+  const trigger = Number.isFinite(Number(redeem.trigger_price))
+    ? ` · 触发价 ${formatNumber(redeem.trigger_price, 2)}`
+    : "";
+  nodes.redeemDetail.textContent = `${redeem.countdown || "暂无计数"}${trigger}`;
+  nodes.redeemRiskCard.title = redeem.quality || "公司正式公告优先";
+}
+
+async function loadBondMetadata() {
+  if (!requestedCode) return;
+  try {
+    const query = new URLSearchParams({ code: requestedCode });
+    renderBondMetadata(await fetchJson(`/api/miniqmt/bond-meta?${query}`, 65000));
+  } catch (error) {
+    nodes.premiumDetail.textContent = "估值数据暂不可用";
+    nodes.circulatingDetail.textContent = "流通规模暂不可用";
+    nodes.marketValueDetail.textContent = "流通市值暂不可用";
+    nodes.redeemDetail.textContent = error.message || "强赎计数暂不可用";
+  }
 }
 
 function toneClass(value) {
@@ -1684,4 +1737,5 @@ window.addEventListener("resize", () => {
 nodes.name.textContent = requestedName || "可转债";
 nodes.code.textContent = requestedCode;
 nodes.intradayDaysSelect.value = String(state.intradayDays);
+void loadBondMetadata();
 setView(state.view, { updateUrl: false, force: true });

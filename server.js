@@ -107,6 +107,14 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (url.pathname === "/api/miniqmt/bond-meta") {
+      const query = new URLSearchParams();
+      const code = url.searchParams.get("code");
+      if (code) query.set("code", code);
+      await handleMiniQmtApi(`/bond-meta?${query}`, response, 60_000);
+      return;
+    }
+
     if (url.pathname === "/api/miniqmt/daily") {
       const query = new URLSearchParams();
       for (const key of ["code", "count"]) {

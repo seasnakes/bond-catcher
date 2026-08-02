@@ -78,6 +78,7 @@ HISTORICAL_VOLUME_CACHE: dict[
 FINANCE_ROOT = Path(__file__).resolve().parents[1]
 ACTIVE_INDEX_DATA_PATH = FINANCE_ROOT / "data" / "active-convertible-bond-index.json"
 BOND_TAGS_DATA_PATH = FINANCE_ROOT / "data" / "convertible-bond-tags.json"
+BOND_TAG_SOURCE_DATA_PATH = FINANCE_ROOT / "data" / "convertible-bond-tag-source.json"
 ACTIVE_INDEX_UNIVERSE_PATH = FINANCE_ROOT / "runtime" / "active-index-universes.json"
 ACTIVE_INDEX_CACHE_TTL_SECONDS = 6
 ACTIVE_INDEX_CACHE: tuple[float, dict[str, Any]] | None = None
@@ -90,6 +91,9 @@ ACTIVE_INDEX_TICK_MINUTES: dict[
 ] = {}
 ACTIVE_INDEX_THRESHOLD = 200_000_000
 BOND_TAGS_CACHE: tuple[float, dict[str, Any], dict[str, dict[str, Any]]] | None = None
+BOND_FUNDAMENTALS_CACHE: tuple[float, dict[str, dict[str, Any]]] | None = None
+BOND_METADATA_CACHE_TTL_SECONDS = 300
+BOND_METADATA_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 def load_monitor_module() -> Any:
@@ -148,6 +152,38 @@ def bond_tags(code: str) -> list[str]:
         for value in bond_tag_row(code).get("tags") or []
         if str(value)
     ]
+
+
+def load_bond_fundamentals() -> dict[str, dict[str, Any]]:
+    global BOND_FUNDAMENTALS_CACHE
+    modified_at = BOND_TAG_SOURCE_DATA_PATH.stat().st_mtime
+    if BOND_FUNDAMENTALS_CACHE and BOND_FUNDAMENTALS_CACHE[0] == modified_at:
+        return BOND_FUNDAMENTALS_CACHE[1]
+    payload = read_json(BOND_TAG_SOURCE_DATA_PATH)
+    values = list(payload.get("values") or [])
+    if not values:
+        return {}
+    headers = [str(value) for value in values[0]]
+    by_code: dict[str, dict[str, Any]] = {}
+    for values_row in values[1:]:
+        row = {
+            header: values_row[index] if index < len(values_row) else None
+            for index, header in enumerate(headers)
+        }
+        code = str(row.get("转债代码") or "").upper()
+        if not MARKET_CODE_PATTERN.fullmatch(code):
+            continue
+        by_code[code] = row
+        by_code[code.split(".")[0]] = row
+    BOND_FUNDAMENTALS_CACHE = (modified_at, by_code)
+    return by_code
+
+
+def stock_market_code(value: Any) -> str:
+    code = re.sub(r"\D", "", str(value or ""))[:6]
+    if len(code) != 6:
+        return ""
+    return f"{code}.{'SH' if code.startswith(('5', '6', '9')) else 'SZ'}"
 
 
 def tags_payload(code_input: str = "", tag_input: str = "") -> dict[str, Any]:
@@ -739,6 +775,234 @@ def historical_bond_volume_ratio(
             result = (target_volume / average_volume, average_volume)
     HISTORICAL_VOLUME_CACHE[cache_key] = (time.monotonic(), result)
     return result
+
+
+def stock_daily_closes(
+    bridge: Any,
+    stock_code: str,
+    start_date: str,
+    end_date: str,
+) -> list[dict[str, Any]]:
+    def fetch_rows() -> list[dict[str, Any]]:
+        payload = bridge.get(
+            "/api/market/market_data_ex",
+            {
+                "stocks": stock_code,
+                "period": "1d",
+                "start_time": start_date,
+                "end_time": end_date,
+                "count": "-1",
+                "dividend_type": "none",
+                "fill_data": "false",
+            },
+            timeout=30.0,
+        )
+        return list((payload.get("data") or {}).get(stock_code) or [])
+
+    rows = fetch_rows()
+    if len(rows) < 30:
+        try:
+            bridge.post(
+                "/api/download/history_data2",
+                {
+                    "stocks": [stock_code],
+                    "period": "1d",
+                    "start_time": start_date,
+                    "end_time": end_date,
+                },
+                timeout=90.0,
+            )
+            rows = fetch_rows()
+        except Exception:
+            pass
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        trading_date = compact_date(row.get("index") or row.get("time"))
+        close = finite_or_none(row.get("close"))
+        if len(trading_date) == 8 and close is not None and close > 0:
+            result.append({"date": trading_date, "close": close})
+    result.sort(key=lambda item: item["date"])
+    return result
+
+
+def bond_metadata_payload(code_input: str) -> dict[str, Any]:
+    code = normalize_code(code_input)
+    stored_code = monitor_code(code)
+    cached = BOND_METADATA_CACHE.get(stored_code)
+    if cached and time.monotonic() - cached[0] < BOND_METADATA_CACHE_TTL_SECONDS:
+        return {**cached[1], "cached": True}
+
+    source_row = load_bond_fundamentals().get(stored_code) or {}
+    tag_row = bond_tag_row(stored_code)
+    stock_code = stock_market_code(
+        source_row.get("正股代码") or tag_row.get("stockCode")
+    )
+    conversion_price = finite_or_none(source_row.get("转股价"))
+    redeem_trigger_price = finite_or_none(source_row.get("强赎触发价"))
+    issue_scale = finite_or_none(source_row.get("发行规模_亿元"))
+    conversion_start_date = compact_date(source_row.get("开始转股日"))
+
+    bridge = MONITOR.BridgeClient(
+        f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}",
+        timeout=30.0,
+    )
+    requested_codes = [stored_code, stock_code] if stock_code else [stored_code]
+    ticks = bridge.full_tick(requested_codes)
+    details = bridge.details([stored_code])
+    bond_tick = ticks.get(stored_code) or {}
+    stock_tick = ticks.get(stock_code) or {}
+    detail = details.get(stored_code) or {}
+    bond_price = (
+        finite_or_none(bond_tick.get("lastPrice"))
+        or finite_or_none(detail.get("PreClose"))
+    )
+    stock_price = finite_or_none(stock_tick.get("lastPrice"))
+    float_volume = (
+        finite_or_none(detail.get("FloatVolume"))
+        or finite_or_none(detail.get("FloatVolumn"))
+    )
+    total_volume = (
+        finite_or_none(detail.get("TotalVolume"))
+        or finite_or_none(detail.get("TotalVolumn"))
+    )
+    circulating_face_value = (
+        float_volume
+        if float_volume is not None and float_volume > 0
+        else issue_scale * 100_000_000
+        if issue_scale is not None and issue_scale > 0
+        else None
+    )
+    circulating_market_value = (
+        circulating_face_value * bond_price / 100
+        if circulating_face_value is not None
+        and bond_price is not None
+        and bond_price > 0
+        else None
+    )
+    conversion_value = (
+        stock_price / conversion_price * 100
+        if stock_price is not None
+        and stock_price > 0
+        and conversion_price is not None
+        and conversion_price > 0
+        else None
+    )
+    premium_rate = (
+        (bond_price / conversion_value - 1) * 100
+        if bond_price is not None
+        and bond_price > 0
+        and conversion_value is not None
+        and conversion_value > 0
+        else None
+    )
+
+    target_days = 15
+    window_days = 30
+    now = datetime.now()
+    calendar_date = now.strftime("%Y%m%d")
+    price_hit_dates: list[str] = []
+    observed_days = 0
+    history_error = ""
+    before_conversion = bool(
+        len(conversion_start_date) == 8 and conversion_start_date > calendar_date
+    )
+    if stock_code and redeem_trigger_price and not before_conversion:
+        start_date = (now - timedelta(days=120)).strftime("%Y%m%d")
+        try:
+            daily_rows = stock_daily_closes(
+                bridge,
+                stock_code,
+                start_date,
+                calendar_date,
+            )
+            eligible_rows = [
+                row
+                for row in daily_rows
+                if not conversion_start_date or row["date"] >= conversion_start_date
+            ][-window_days:]
+            observed_days = len(eligible_rows)
+            price_hit_dates = [
+                row["date"]
+                for row in eligible_rows
+                if float(row["close"]) >= redeem_trigger_price
+            ]
+        except Exception as error:
+            history_error = f"{type(error).__name__}: {error}"
+
+    price_hit_count = len(price_hit_dates)
+    remaining_hit_days = max(0, target_days - price_hit_count)
+    balance_condition_met = bool(
+        circulating_face_value is not None and circulating_face_value < 30_000_000
+    )
+    price_condition_met = price_hit_count >= target_days
+    if before_conversion:
+        start_moment = datetime.strptime(conversion_start_date, "%Y%m%d")
+        status = "未进入转股期"
+        countdown = f"距开始转股 {max(0, (start_moment.date() - now.date()).days)} 天"
+        risk = "inactive"
+    elif balance_condition_met:
+        status = "余额条件已满足"
+        countdown = "待公司公告确认"
+        risk = "triggered"
+    elif price_condition_met:
+        status = "价格条件已满足"
+        countdown = "待公司公告确认"
+        risk = "triggered"
+    elif observed_days == 0:
+        status = "强赎计数暂不可用"
+        countdown = "缺少正股日线"
+        risk = "unknown"
+    else:
+        status = f"近{window_days}日 {price_hit_count}/{target_days}"
+        countdown = f"尚差 {remaining_hit_days} 个满足日"
+        risk = "high" if remaining_hit_days <= 3 else "watch" if price_hit_count else "low"
+
+    payload = clean_json(
+        {
+            "ok": True,
+            "mode": "read_only",
+            "cached": False,
+            "generated_at": now.isoformat(timespec="seconds"),
+            "source": "MiniQMT full_tick + instrument detail + 本地条款快照",
+            "code": code,
+            "monitor_code": stored_code,
+            "name": source_row.get("转债简称") or tag_row.get("name"),
+            "stock_code": stock_code,
+            "stock_name": source_row.get("正股简称") or tag_row.get("stockName"),
+            "bond_price": bond_price,
+            "stock_price": stock_price,
+            "conversion_price": conversion_price,
+            "conversion_value": conversion_value,
+            "premium_rate": premium_rate,
+            "circulating_face_value": circulating_face_value,
+            "circulating_market_value": circulating_market_value,
+            "issue_face_value": issue_scale * 100_000_000 if issue_scale else total_volume,
+            "circulating_source": (
+                "MiniQMT FloatVolume"
+                if float_volume is not None and float_volume > 0
+                else "发行规模回退值"
+            ),
+            "redeem": {
+                "risk": risk,
+                "status": status,
+                "countdown": countdown,
+                "trigger_price": redeem_trigger_price,
+                "window_days": window_days,
+                "target_days": target_days,
+                "observed_days": observed_days,
+                "price_hit_count": price_hit_count,
+                "remaining_hit_days": remaining_hit_days,
+                "price_condition_met": price_condition_met,
+                "balance_condition_met": balance_condition_met,
+                "conversion_start_date": conversion_start_date,
+                "latest_hit_date": price_hit_dates[-1] if price_hit_dates else None,
+                "quality": "按近30个交易日正股收盘价与当前强赎触发价估算；公司公告优先",
+                "history_error": history_error or None,
+            },
+        }
+    )
+    BOND_METADATA_CACHE[stored_code] = (time.monotonic(), payload)
+    return payload
 
 
 def elapsed_market_minutes_from_clock(value: Any) -> int:
@@ -2171,6 +2435,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     (query.get("date") or [""])[0],
                 )
                 self.send_payload(200, payload)
+                return
+            if parsed.path == "/bond-meta":
+                self.send_payload(
+                    200,
+                    bond_metadata_payload((query.get("code") or [""])[0]),
+                )
                 return
             if parsed.path == "/daily":
                 payload = daily_payload(

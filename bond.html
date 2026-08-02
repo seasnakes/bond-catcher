@@ -68,6 +68,29 @@
         <div id="dataAlert" class="data-alert" hidden></div>
       </header>
 
+      <section class="bond-fundamentals" aria-label="可转债估值与条款摘要">
+        <article>
+          <span>转股溢价率</span>
+          <strong id="premiumRate">-</strong>
+          <small id="premiumDetail">正在读取正股与转股价</small>
+        </article>
+        <article>
+          <span>剩余流通规模</span>
+          <strong id="circulatingAmount">-</strong>
+          <small id="circulatingDetail">按未转股面值统计</small>
+        </article>
+        <article>
+          <span>流通市值</span>
+          <strong id="circulatingMarketValue">-</strong>
+          <small id="marketValueDetail">流通面值 × 转债价格 ÷ 100</small>
+        </article>
+        <article id="redeemRiskCard" class="redeem-risk-card">
+          <span>强赎风险倒计时</span>
+          <strong id="redeemRisk">-</strong>
+          <small id="redeemDetail">正在核对近30个交易日</small>
+        </article>
+      </section>
+
       <section class="metrics" aria-label="数据摘要">
         <article><span id="barCountLabel">分钟数</span><strong id="barCount">-</strong></article>
         <article><span id="latestMinuteLabel">最新分钟</span><strong id="latestMinute">-</strong></article>

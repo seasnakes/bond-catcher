@@ -44,10 +44,53 @@ select {
 .indicator-header,
 .chart-card,
 .events-card,
+.bond-fundamentals article,
 .metrics article {
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.97);
   box-shadow: 0 2px 8px rgba(37, 51, 31, 0.08);
+}
+
+.bond-fundamentals {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.bond-fundamentals article {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.bond-fundamentals span,
+.bond-fundamentals small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.bond-fundamentals strong {
+  overflow: hidden;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bond-fundamentals strong.is-hot,
+.redeem-risk-card[data-risk="high"] strong {
+  color: #bb6b08;
+}
+
+.redeem-risk-card[data-risk="triggered"] {
+  border-color: #e1a2a2;
+  background: #fff4f4;
+}
+
+.redeem-risk-card[data-risk="triggered"] strong {
+  color: var(--red);
 }
 
 .indicator-header {
@@ -582,6 +625,10 @@ h1 small {
   }
 
   .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .bond-fundamentals {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
