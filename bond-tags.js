@@ -6,6 +6,7 @@ const state = {
   tagCounts: {},
   selectedTag: params.get("tag") || "",
   quotes: new Map(),
+  searchAliases: new Map(),
   editingRow: null,
   editDraft: new Set(),
   quickAddRow: null,
@@ -119,7 +120,17 @@ function editDistance(left, right) {
 }
 
 function rowSearchValues(row) {
-  return [row.code, row.name, row.stockCode, row.stockName, row.industry1, row.industry2, row.industry3]
+  return [
+    row.code,
+    row.name,
+    row.stockCode,
+    row.stockName,
+    row.industry1,
+    row.industry2,
+    row.industry3,
+    ...(row.tags || []),
+    ...(state.searchAliases.get(row.code) || []),
+  ]
     .map(normalizeSearchValue)
     .filter(Boolean);
 }
@@ -445,8 +456,13 @@ async function loadQuotes() {
 
 async function initialize() {
   try {
-    const payload = await fetchJson("/api/miniqmt/tags", { timeout: 20000 });
+    const [payload, aliasPayload] = await Promise.all([
+      fetchJson("/api/miniqmt/tags", { timeout: 20000 }),
+      fetchJson("./data/convertible-bond-search-aliases.json", { timeout: 20000 })
+        .catch(() => ({ aliases: {} })),
+    ]);
     state.rows = payload.rows || [];
+    state.searchAliases = new Map(Object.entries(aliasPayload.aliases || {}));
     state.tagOrder = payload.tagOrder || [];
     state.tagCounts = payload.tagCounts || {};
     if (!state.tagOrder.includes(state.selectedTag)) state.selectedTag = "";

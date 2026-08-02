@@ -1,0 +1,1842 @@
+{
+  "aliases" : {
+    "110074.SH" : [
+      "jingdazhuanzhai",
+      "jdzz",
+      "jingdagufen",
+      "jdgf"
+    ],
+    "110075.SH" : [
+      "nanhangzhuanzhai",
+      "nhzz",
+      "nanfanghangkong",
+      "nfhk"
+    ],
+    "110076.SH" : [
+      "huahaizhuanzhai",
+      "hhzz",
+      "huahaiyaoye",
+      "hhyy"
+    ],
+    "110077.SH" : [
+      "hongchengzhuanzhai",
+      "hczz",
+      "hongchenghuanjing",
+      "hchj"
+    ],
+    "110081.SH" : [
+      "wentaizhuanzhai",
+      "wtzz",
+      "stwentai",
+      "swt"
+    ],
+    "110084.SH" : [
+      "guiranzhuanzhai",
+      "grzz",
+      "guizhouranqi",
+      "gzrq"
+    ],
+    "110085.SH" : [
+      "tong22zhuanzhai",
+      "tz",
+      "tongweigufen",
+      "twgf"
+    ],
+    "110086.SH" : [
+      "jinggongzhuanzhai",
+      "jgzz",
+      "jinggongganggou",
+      "jggg"
+    ],
+    "110087.SH" : [
+      "tianyezhuanzhai",
+      "tyzz",
+      "xinjiangtianye",
+      "xjty"
+    ],
+    "110090.SH" : [
+      "aidizhuanzhai",
+      "adzz",
+      "aikedi",
+      "akd"
+    ],
+    "110092.SH" : [
+      "sanfangzhuanzhai",
+      "sfzz",
+      "stsanfang",
+      "ssf"
+    ],
+    "110093.SH" : [
+      "shenmazhuanzhai",
+      "smzz",
+      "shenmagufen",
+      "smgf"
+    ],
+    "110095.SH" : [
+      "shuangliangzhuanzhai",
+      "slzz",
+      "shuangliangjieneng",
+      "sljn"
+    ],
+    "110097.SH" : [
+      "tianrunzhuanzhai",
+      "trzz",
+      "tianrunruye",
+      "trry"
+    ],
+    "110098.SH" : [
+      "nanyaozhuanzhai",
+      "nyzz",
+      "nanjingyiyao",
+      "njyy"
+    ],
+    "110099.SH" : [
+      "funengzhuanzhai",
+      "fnzz",
+      "funenggufen",
+      "fngf"
+    ],
+    "110100.SH" : [
+      "longjianzhuanzhai",
+      "ljzz",
+      "longjiangufen",
+      "ljgf"
+    ],
+    "110101.SH" : [
+      "baotaizhuanzhai",
+      "btzz",
+      "baotaigufen",
+      "btgf"
+    ],
+    "111000.SH" : [
+      "qifanzhuanzhai",
+      "qfzz",
+      "qifandianlan",
+      "qfdl"
+    ],
+    "111002.SH" : [
+      "tezhizhuanzhai",
+      "tzzz",
+      "wuzhoutezhi",
+      "wztz"
+    ],
+    "111003.SH" : [
+      "juhezhuanzhai",
+      "jhzz",
+      "juheshun",
+      "jhs"
+    ],
+    "111004.SH" : [
+      "mingxinzhuanzhai",
+      "mxzz",
+      "mingxinxuteng",
+      "mxxt"
+    ],
+    "111009.SH" : [
+      "shengtaizhuanzhai",
+      "stzz",
+      "shengtaijituan",
+      "stjt"
+    ],
+    "111012.SH" : [
+      "fuxinzhuanzhai",
+      "fxzz",
+      "fulaixincai",
+      "flxc"
+    ],
+    "111014.SH" : [
+      "lizizhuanzhai",
+      "lzzz",
+      "liziyuan",
+      "lzy"
+    ],
+    "111015.SH" : [
+      "dongyazhuanzhai",
+      "dyzz",
+      "dongyayaoye",
+      "dyyy"
+    ],
+    "111017.SH" : [
+      "lantianzhuanzhai",
+      "ltzz",
+      "lantianranqi",
+      "ltrq"
+    ],
+    "111018.SH" : [
+      "huakangzhuanzhai",
+      "hkzz",
+      "huakanggufen",
+      "hkgf"
+    ],
+    "111020.SH" : [
+      "heshunzhuanzhai",
+      "hszz",
+      "juheshun",
+      "jhs"
+    ],
+    "111021.SH" : [
+      "aoruizhuanzhai",
+      "arzz",
+      "aoruite",
+      "art"
+    ],
+    "111022.SH" : [
+      "xizhenzhuanzhai",
+      "xzzz",
+      "wuxizhenhua",
+      "wxzh"
+    ],
+    "111024.SH" : [
+      "aohongzhuanzhai",
+      "ahzz",
+      "aohongdianzi",
+      "ahdz"
+    ],
+    "111025.SH" : [
+      "shengquanzhuanzhai",
+      "sqzz",
+      "shengquanjituan",
+      "sqjt"
+    ],
+    "113039.SH" : [
+      "jiazezhuanzhai",
+      "jzzz",
+      "jiazexinneng",
+      "jzxn"
+    ],
+    "113042.SH" : [
+      "shangyinzhuanzhai",
+      "syzz",
+      "shanghaiyinxing",
+      "shyx"
+    ],
+    "113043.SH" : [
+      "caitongzhuanzhai",
+      "ctzz",
+      "caitongzhengquan",
+      "ctzq"
+    ],
+    "113046.SH" : [
+      "jintianzhuanzhai",
+      "jtzz",
+      "jintiangufen",
+      "jtgf"
+    ],
+    "113048.SH" : [
+      "jingkezhuanzhai",
+      "jkzz",
+      "jingkekeji",
+      "jkkj"
+    ],
+    "113049.SH" : [
+      "zhangqizhuanzhai",
+      "zqzz",
+      "zhangchengqiche",
+      "zcqc"
+    ],
+    "113051.SH" : [
+      "jienengzhuanzhai",
+      "jnzz",
+      "jienengfengdian",
+      "jnfd"
+    ],
+    "113052.SH" : [
+      "xingyezhuanzhai",
+      "xyzz",
+      "xingyeyinxing",
+      "xyyx"
+    ],
+    "113053.SH" : [
+      "long22zhuanzhai",
+      "lz",
+      "longjiluneng",
+      "ljln"
+    ],
+    "113054.SH" : [
+      "ludongzhuanzhai",
+      "ldzz",
+      "lusedongli",
+      "lsdl"
+    ],
+    "113056.SH" : [
+      "zhongyinzhuanzhai",
+      "zyzz",
+      "chongqingyinxing",
+      "cqyx"
+    ],
+    "113058.SH" : [
+      "youfazhuanzhai",
+      "yfzz",
+      "youfajituan",
+      "yfjt"
+    ],
+    "113059.SH" : [
+      "fulaizhuanzhai",
+      "flzz",
+      "fulaite",
+      "flt"
+    ],
+    "113062.SH" : [
+      "changyinzhuanzhai",
+      "cyzz",
+      "changshuyinxing",
+      "csyx"
+    ],
+    "113066.SH" : [
+      "pingmeizhuanzhai",
+      "pmzz",
+      "pingmeigufen",
+      "pmgf"
+    ],
+    "113067.SH" : [
+      "ran23zhuanzhai",
+      "rz",
+      "shenzhenranqi",
+      "szrq"
+    ],
+    "113070.SH" : [
+      "yushuizhuanzhai",
+      "yszz",
+      "chongqingshuiwu",
+      "cqsw"
+    ],
+    "113605.SH" : [
+      "dacanzhuanzhai",
+      "dczz",
+      "dacanlin",
+      "dcl"
+    ],
+    "113610.SH" : [
+      "lingkangzhuanzhai",
+      "lkzz",
+      "lingkangyaoye",
+      "lkyy"
+    ],
+    "113615.SH" : [
+      "jinchengzhuanzhai",
+      "jczz",
+      "jinchengxin",
+      "jcx"
+    ],
+    "113616.SH" : [
+      "weierzhuanzhai",
+      "wezz",
+      "haoweijituan",
+      "hwjt"
+    ],
+    "113624.SH" : [
+      "zhengchuanzhuanzhai",
+      "zczz",
+      "zhengchuangufen",
+      "zcgf"
+    ],
+    "113625.SH" : [
+      "jiangshanzhuanzhai",
+      "jszz",
+      "jiangshanoupai",
+      "jsop"
+    ],
+    "113627.SH" : [
+      "taipingzhuanzhai",
+      "tpzz",
+      "taipingniao",
+      "tpn"
+    ],
+    "113631.SH" : [
+      "wantianzhuanzhai",
+      "wtzz",
+      "wantianranqi",
+      "wtrq"
+    ],
+    "113633.SH" : [
+      "kewozhuanzhai",
+      "kwzz",
+      "kewosi",
+      "kws"
+    ],
+    "113634.SH" : [
+      "polaizhuanzhai",
+      "plzz",
+      "polaiya",
+      "ply"
+    ],
+    "113636.SH" : [
+      "yongjinzhuanzhai",
+      "yjzz",
+      "yongjingufen",
+      "yjgf"
+    ],
+    "113638.SH" : [
+      "tai21zhuanzhai",
+      "tz",
+      "taihuaxincai",
+      "thxc"
+    ],
+    "113640.SH" : [
+      "sulizhuanzhai",
+      "slzz",
+      "suligufen",
+      "slgf"
+    ],
+    "113643.SH" : [
+      "fengyuzhuanzhai",
+      "fyzz",
+      "fengyuzhu",
+      "fyz"
+    ],
+    "113646.SH" : [
+      "yongjizhuanzhai",
+      "yjzz",
+      "yongjigufen",
+      "yjgf"
+    ],
+    "113647.SH" : [
+      "hefengzhuanzhai",
+      "hfzz",
+      "hefenggufen",
+      "hfgf"
+    ],
+    "113648.SH" : [
+      "juxingzhuanzhai",
+      "jxzz",
+      "juxingnongmu",
+      "jxnm"
+    ],
+    "113649.SH" : [
+      "fengshanzhuanzhai",
+      "fszz",
+      "fengshanjituan",
+      "fsjt"
+    ],
+    "113650.SH" : [
+      "bo22zhuanzhai",
+      "bz",
+      "subote",
+      "sbt"
+    ],
+    "113652.SH" : [
+      "wei22zhuanzhai",
+      "wz",
+      "weiminghuanbao",
+      "wmhb"
+    ],
+    "113655.SH" : [
+      "ou22zhuanzhai",
+      "oz",
+      "oupaijiaju",
+      "opjj"
+    ],
+    "113656.SH" : [
+      "jiachengzhuanzhai",
+      "jczz",
+      "jiachengguoji",
+      "jcgj"
+    ],
+    "113658.SH" : [
+      "miweizhuanzhai",
+      "mwzz",
+      "mierkewei",
+      "mekw"
+    ],
+    "113659.SH" : [
+      "laikezhuanzhai",
+      "lkzz",
+      "laikedianqi",
+      "lkdq"
+    ],
+    "113660.SH" : [
+      "shou22zhuanzhai",
+      "sz",
+      "shouxiangu",
+      "sxg"
+    ],
+    "113661.SH" : [
+      "fu22zhuanzhai",
+      "fz",
+      "fusite",
+      "fst"
+    ],
+    "113665.SH" : [
+      "huitongzhuanzhai",
+      "htzz",
+      "huitongjituan",
+      "htjt"
+    ],
+    "113666.SH" : [
+      "aimazhuanzhai",
+      "amzz",
+      "aimakeji",
+      "amkj"
+    ],
+    "113667.SH" : [
+      "chun23zhuanzhai",
+      "cz",
+      "chunqiudianzi",
+      "cqdz"
+    ],
+    "113670.SH" : [
+      "jin23zhuanzhai",
+      "jz",
+      "jinpaijiaju",
+      "jpjj"
+    ],
+    "113671.SH" : [
+      "wujinzhuanzhai",
+      "wjzz",
+      "wujinbuxiu",
+      "wjbx"
+    ],
+    "113673.SH" : [
+      "daimeizhuanzhai",
+      "dmzz",
+      "daimeigufen",
+      "dmgf"
+    ],
+    "113674.SH" : [
+      "huashezhuanzhai",
+      "hszz",
+      "huashejituan",
+      "hsjt"
+    ],
+    "113677.SH" : [
+      "huamaozhuanzhai",
+      "hmzz",
+      "huamaokeji",
+      "hmkj"
+    ],
+    "113678.SH" : [
+      "zhongbeizhuanzhai",
+      "zbzz",
+      "zhongbeitongxin",
+      "zbtx"
+    ],
+    "113679.SH" : [
+      "xinnengzhuanzhai",
+      "xnzz",
+      "xinnengkeji",
+      "xnkj"
+    ],
+    "113680.SH" : [
+      "lidaozhuanzhai",
+      "ldzz",
+      "lidaoxincai",
+      "ldxc"
+    ],
+    "113681.SH" : [
+      "zhenyangzhuanzhai",
+      "zyzz",
+      "zhenyangfazhan",
+      "zyfz"
+    ],
+    "113682.SH" : [
+      "yifengzhuanzhai",
+      "yfzz",
+      "yifengyaofang",
+      "yfyf"
+    ],
+    "113686.SH" : [
+      "tairuizhuanzhai",
+      "trzz",
+      "tairuijiqi",
+      "trjq"
+    ],
+    "113688.SH" : [
+      "guojianzhuanzhai",
+      "gjzz",
+      "guojianjituan",
+      "gjjt"
+    ],
+    "113691.SH" : [
+      "hebangzhuanzhai",
+      "hbzz",
+      "hebangshengwu",
+      "hbsw"
+    ],
+    "113692.SH" : [
+      "baolongzhuanzhai",
+      "blzz",
+      "baolongkeji",
+      "blkj"
+    ],
+    "113693.SH" : [
+      "zhibangzhuanzhai",
+      "zbzz",
+      "zhibangjiaju",
+      "zbjj"
+    ],
+    "113694.SH" : [
+      "qingyuanzhuanzhai",
+      "qyzz",
+      "qingyuangufen",
+      "qygf"
+    ],
+    "113695.SH" : [
+      "huachenzhuanzhai",
+      "hczz",
+      "jiangsuhuachen",
+      "jshc"
+    ],
+    "113696.SH" : [
+      "bo25zhuanzhai",
+      "bz",
+      "boteli",
+      "btl"
+    ],
+    "113697.SH" : [
+      "yingliuzhuanzhai",
+      "ylzz",
+      "yingliugufen",
+      "ylgf"
+    ],
+    "113698.SH" : [
+      "kaizhongzhuanzhai",
+      "kzzz",
+      "kaizhonggufen",
+      "kzgf"
+    ],
+    "113699.SH" : [
+      "jin25zhuanzhai",
+      "jz",
+      "jinchengxin",
+      "jcx"
+    ],
+    "113700.SH" : [
+      "haitianzhuanzhai",
+      "htzz",
+      "haitiangufen",
+      "htgf"
+    ],
+    "113701.SH" : [
+      "xianghezhuanzhai",
+      "xhzz",
+      "xiangheshiye",
+      "xhsy"
+    ],
+    "113702.SH" : [
+      "sidazhuanzhai",
+      "sdzz",
+      "sidabandao",
+      "sdbd"
+    ],
+    "113703.SH" : [
+      "xiang26zhuanzhai",
+      "xz",
+      "huaxianggufen",
+      "hxgf"
+    ],
+    "113704.SH" : [
+      "chunfengzhuanzhai",
+      "cfzz",
+      "chunfengdongli",
+      "cfdl"
+    ],
+    "113705.SH" : [
+      "hao26zhuanzhai",
+      "hz",
+      "haonenggufen",
+      "hngf"
+    ],
+    "113706.SH" : [
+      "jindizhuanzhai",
+      "jdzz",
+      "jindigufen",
+      "jdgf"
+    ],
+    "118005.SH" : [
+      "tiannaizhuanzhai",
+      "tnzz",
+      "tiannaikeji",
+      "tnkj"
+    ],
+    "118007.SH" : [
+      "shanshizhuanzhai",
+      "sszz",
+      "shanshiwangke",
+      "sswk"
+    ],
+    "118010.SH" : [
+      "jietezhuanzhai",
+      "jtzz",
+      "jieteshengwu",
+      "jtsw"
+    ],
+    "118012.SH" : [
+      "weixinzhuanzhai",
+      "wxzz",
+      "weixinshengwu",
+      "wxsw"
+    ],
+    "118013.SH" : [
+      "daotongzhuanzhai",
+      "dtzz",
+      "daotongkeji",
+      "dtkj"
+    ],
+    "118015.SH" : [
+      "xinhaizhuanzhai",
+      "xhzz",
+      "xinhaikeji",
+      "xhkj"
+    ],
+    "118016.SH" : [
+      "jingyuanzhuanzhai",
+      "jyzz",
+      "jingyuanhuanbao",
+      "jyhb"
+    ],
+    "118020.SH" : [
+      "fangyuanzhuanzhai",
+      "fyzz",
+      "fangyuangufen",
+      "fygf"
+    ],
+    "118022.SH" : [
+      "likezhuanzhai",
+      "lkzz",
+      "wukuangxinneng",
+      "wkxn"
+    ],
+    "118024.SH" : [
+      "guanyuzhuanzhai",
+      "gyzz",
+      "zhuhaiguanyu",
+      "zhgy"
+    ],
+    "118027.SH" : [
+      "hongtuzhuanzhai",
+      "htzz",
+      "sthangtu",
+      "sht"
+    ],
+    "118030.SH" : [
+      "ruichuangzhuanzhai",
+      "rczz",
+      "ruichuangweina",
+      "rcwn"
+    ],
+    "118031.SH" : [
+      "tian23zhuanzhai",
+      "tz",
+      "tianheguangneng",
+      "thgn"
+    ],
+    "118032.SH" : [
+      "jianlongzhuanzhai",
+      "jlzz",
+      "jianlongweina",
+      "jlwn"
+    ],
+    "118034.SH" : [
+      "jingnengzhuanzhai",
+      "jnzz",
+      "jingkenengyuan",
+      "jkny"
+    ],
+    "118035.SH" : [
+      "guolizhuanzhai",
+      "glzz",
+      "guolidianzi",
+      "gldz"
+    ],
+    "118036.SH" : [
+      "lihezhuanzhai",
+      "lhzz",
+      "lihewei",
+      "lhw"
+    ],
+    "118037.SH" : [
+      "shangshengzhuanzhai",
+      "sszz",
+      "shangshengdianzi",
+      "ssdz"
+    ],
+    "118039.SH" : [
+      "yubangzhuanzhai",
+      "ybzz",
+      "yubangdianli",
+      "ybdl"
+    ],
+    "118042.SH" : [
+      "aoweizhuanzhai",
+      "awzz",
+      "aotewei",
+      "atw"
+    ],
+    "118044.SH" : [
+      "saitezhuanzhai",
+      "stzz",
+      "saitexincai",
+      "stxc"
+    ],
+    "118050.SH" : [
+      "hangyuzhuanzhai",
+      "hyzz",
+      "hangyukeji",
+      "hykj"
+    ],
+    "118051.SH" : [
+      "haoyuanzhuanzhai",
+      "hyzz",
+      "haoyuanyiyao",
+      "hyyy"
+    ],
+    "118052.SH" : [
+      "haohanzhuanzhai",
+      "hhzz",
+      "haohanshendu",
+      "hhsd"
+    ],
+    "118053.SH" : [
+      "zhengfanzhuanzhai",
+      "zfzz",
+      "zhengfankeji",
+      "zfkj"
+    ],
+    "118056.SH" : [
+      "luweizhuanzhai",
+      "lwzz",
+      "luweiguangdian",
+      "lwgd"
+    ],
+    "118058.SH" : [
+      "weidaozhuanzhai",
+      "wdzz",
+      "weidaonami",
+      "wdnm"
+    ],
+    "118059.SH" : [
+      "qizhongzhuanzhai",
+      "qzzz",
+      "qizhongkeji",
+      "qzkj"
+    ],
+    "118060.SH" : [
+      "ruikezhuanzhai",
+      "rkzz",
+      "ruikeda",
+      "rkd"
+    ],
+    "118061.SH" : [
+      "maolaizhuanzhai",
+      "mlzz",
+      "maolaiguangxue",
+      "mlgx"
+    ],
+    "118062.SH" : [
+      "tianzhunzhuanzhai",
+      "tzzz",
+      "tianzhunkeji",
+      "tzkj"
+    ],
+    "118063.SH" : [
+      "jin05zhuanzhai",
+      "jz",
+      "jinpankeji",
+      "jpkj"
+    ],
+    "118064.SH" : [
+      "lianruizhuanzhai",
+      "lrzz",
+      "lianruixincai",
+      "lrxc"
+    ],
+    "118065.SH" : [
+      "aiweizhuanzhai",
+      "awzz",
+      "aiweidianzi",
+      "awdz"
+    ],
+    "118066.SH" : [
+      "tonglianzhuanzhai",
+      "tlzz",
+      "tonglianjingmi",
+      "tljm"
+    ],
+    "118067.SH" : [
+      "shang26zhuanzhai",
+      "sz",
+      "shangshengdianzi",
+      "ssdz"
+    ],
+    "118068.SH" : [
+      "diweizhuanzhai",
+      "dwzz",
+      "diweier",
+      "dwe"
+    ],
+    "118069.SH" : [
+      "aikezhuanzhai",
+      "akzz",
+      "aikekeji",
+      "akkj"
+    ],
+    "118070.SH" : [
+      "nanxinzhuanzhai",
+      "nxzz",
+      "nanxinkeji",
+      "nxkj"
+    ],
+    "118071.SH" : [
+      "huafengzhuanzhai",
+      "hfzz",
+      "huafengcekong",
+      "hfck"
+    ],
+    "118072.SH" : [
+      "dingtongzhuanzhai",
+      "dtzz",
+      "dingtongkeji",
+      "dtkj"
+    ],
+    "123064.SZ" : [
+      "wanfuzhuanzhai",
+      "wfzz",
+      "wanfushengwu",
+      "wfsw"
+    ],
+    "123065.SZ" : [
+      "baolaizhuanzhai",
+      "blzz",
+      "baolaite",
+      "blt"
+    ],
+    "123071.SZ" : [
+      "tiannengzhuanzhai",
+      "tnzz",
+      "tiannengzhonggong",
+      "tnzg"
+    ],
+    "123072.SZ" : [
+      "legezhuanzhai",
+      "lgzz",
+      "legegufen",
+      "lggf"
+    ],
+    "123076.SZ" : [
+      "qianglizhuanzhai",
+      "qlzz",
+      "qianglixincai",
+      "qlxc"
+    ],
+    "123080.SZ" : [
+      "haibozhuanzhai",
+      "hbzz",
+      "haibozhongke",
+      "hbzk"
+    ],
+    "123088.SZ" : [
+      "weitangzhuanzhai",
+      "wtzz",
+      "weitanggongye",
+      "wtgy"
+    ],
+    "123090.SZ" : [
+      "sannuozhuanzhai",
+      "snzz",
+      "sannuoshengwu",
+      "snsw"
+    ],
+    "123091.SZ" : [
+      "zhanghaizhuanzhai",
+      "zhzz",
+      "zhanghaigufen",
+      "zhgf"
+    ],
+    "123092.SZ" : [
+      "tianhaozhuanzhai",
+      "thzz",
+      "tianhaonengyuan",
+      "thny"
+    ],
+    "123104.SZ" : [
+      "weiningzhuanzhai",
+      "wnzz",
+      "weiningjiankang",
+      "wnjk"
+    ],
+    "123107.SZ" : [
+      "wenshizhuanzhai",
+      "wszz",
+      "wenshigufen",
+      "wsgf"
+    ],
+    "123109.SZ" : [
+      "changhongzhuanzhai",
+      "chzz",
+      "changhongkeji",
+      "chkj"
+    ],
+    "123112.SZ" : [
+      "wanxunzhuanzhai",
+      "wxzz",
+      "wanxunzikong",
+      "wxzk"
+    ],
+    "123113.SZ" : [
+      "xianlezhuanzhai",
+      "xlzz",
+      "xianlejiankang",
+      "xljk"
+    ],
+    "123114.SZ" : [
+      "sanjiaozhuanzhai",
+      "sjzz",
+      "sanjiaofangwu",
+      "sjfw"
+    ],
+    "123117.SZ" : [
+      "jianfanzhuanzhai",
+      "jfzz",
+      "jianfanshengwu",
+      "jfsw"
+    ],
+    "123118.SZ" : [
+      "huichengzhuanzhai",
+      "hczz",
+      "huichenghuanbao",
+      "hchb"
+    ],
+    "123119.SZ" : [
+      "kangtaizhuan2",
+      "ktz",
+      "kangtaishengwu",
+      "ktsw"
+    ],
+    "123122.SZ" : [
+      "fuhanzhuanzhai",
+      "fhzz",
+      "fuhanwei",
+      "fhw"
+    ],
+    "123124.SZ" : [
+      "jingruizhuan2",
+      "jrz",
+      "jingruidiancai",
+      "jrdc"
+    ],
+    "123131.SZ" : [
+      "aofeizhuanzhai",
+      "afzz",
+      "aofeishuju",
+      "afsj"
+    ],
+    "123133.SZ" : [
+      "peidizhuanzhai",
+      "pdzz",
+      "peidigufen",
+      "pdgf"
+    ],
+    "123138.SZ" : [
+      "siluzhuanzhai",
+      "slzz",
+      "silushijue",
+      "slsj"
+    ],
+    "123142.SZ" : [
+      "shenhaozhuanzhai",
+      "shzz",
+      "shenhaokeji",
+      "shkj"
+    ],
+    "123144.SZ" : [
+      "yuxingzhuanzhai",
+      "yxzz",
+      "yuxinggufen",
+      "yxgf"
+    ],
+    "123149.SZ" : [
+      "tongyuzhuanzhai",
+      "tyzz",
+      "tongyuzhonggong",
+      "tyzg"
+    ],
+    "123150.SZ" : [
+      "jiuqiangzhuanzhai",
+      "jqzz",
+      "jiuqiangshengwu",
+      "jqsw"
+    ],
+    "123151.SZ" : [
+      "kangyizhuanzhai",
+      "kyzz",
+      "kangtaiyixue",
+      "ktyx"
+    ],
+    "123154.SZ" : [
+      "huoxingzhuanzhai",
+      "hxzz",
+      "huoxingren",
+      "hxr"
+    ],
+    "123155.SZ" : [
+      "zhongluzhuanzhai",
+      "zlzz",
+      "zhonghuanhailu",
+      "zhhl"
+    ],
+    "123157.SZ" : [
+      "kelanzhuanzhai",
+      "klzz",
+      "kelanruanjian",
+      "klrj"
+    ],
+    "123158.SZ" : [
+      "zhoubangzhuanzhai",
+      "zbzz",
+      "xinzhoubang",
+      "xzb"
+    ],
+    "123160.SZ" : [
+      "taifuzhuanzhai",
+      "tfzz",
+      "taifubengye",
+      "tfby"
+    ],
+    "123165.SZ" : [
+      "huitianzhuanzhai",
+      "htzz",
+      "huitianxincai",
+      "htxc"
+    ],
+    "123168.SZ" : [
+      "huiyunzhuanzhai",
+      "hyzz",
+      "huiyuntaiye",
+      "hyty"
+    ],
+    "123171.SZ" : [
+      "gongtongzhuanzhai",
+      "gtzz",
+      "gongtongyaoye",
+      "gtyy"
+    ],
+    "123172.SZ" : [
+      "shuyuzhuanzhai",
+      "syzz",
+      "shuyupingmin",
+      "sypm"
+    ],
+    "123173.SZ" : [
+      "hengfengzhuanzhai",
+      "hfzz",
+      "hengfengxinxi",
+      "hfxx"
+    ],
+    "123175.SZ" : [
+      "baichangzhuanzhai",
+      "bczz",
+      "baichuanchangyin",
+      "bccy"
+    ],
+    "123176.SZ" : [
+      "jingcezhuan2",
+      "jcz",
+      "jingcedianzi",
+      "jcdz"
+    ],
+    "123178.SZ" : [
+      "huayuanzhuanzhai",
+      "hyzz",
+      "huayuanshengwu",
+      "hysw"
+    ],
+    "123179.SZ" : [
+      "ligaozhuanzhai",
+      "lgzz",
+      "ligaoshipin",
+      "lgsp"
+    ],
+    "123180.SZ" : [
+      "zhekuangzhuanzhai",
+      "zkzz",
+      "zhekuanggufen",
+      "zkgf"
+    ],
+    "123183.SZ" : [
+      "haishunzhuanzhai",
+      "hszz",
+      "haishunxincai",
+      "hsxc"
+    ],
+    "123187.SZ" : [
+      "chaodazhuanzhai",
+      "cdzz",
+      "chaodazhuangbei",
+      "cdzb"
+    ],
+    "123188.SZ" : [
+      "shuiyangzhuanzhai",
+      "syzz",
+      "shuiyanggufen",
+      "sygf"
+    ],
+    "123189.SZ" : [
+      "xiaomingzhuanzhai",
+      "xmzz",
+      "xiaominggufen",
+      "xmgf"
+    ],
+    "123192.SZ" : [
+      "kesizhuanzhai",
+      "kszz",
+      "kesigufen",
+      "ksgf"
+    ],
+    "123193.SZ" : [
+      "hainengzhuanzhai",
+      "hnzz",
+      "hainengshiye",
+      "hnsy"
+    ],
+    "123194.SZ" : [
+      "baiyangzhuanzhai",
+      "byzz",
+      "baiyangyiyao",
+      "byyy"
+    ],
+    "123195.SZ" : [
+      "lanxiaozhuan02",
+      "lxz",
+      "lanxiaokeji",
+      "lxkj"
+    ],
+    "123196.SZ" : [
+      "zhengyuanzhuan02",
+      "zyz",
+      "zhengyuanzhihui",
+      "zyzh"
+    ],
+    "123199.SZ" : [
+      "shanhezhuanzhai",
+      "shzz",
+      "shanheyaofu",
+      "shyf"
+    ],
+    "123207.SZ" : [
+      "guanzhongzhuanzhai",
+      "gzzz",
+      "guanzhongshengtai",
+      "gzst"
+    ],
+    "123209.SZ" : [
+      "julongzhuanzhai",
+      "jlzz",
+      "nanjingjulong",
+      "njjl"
+    ],
+    "123211.SZ" : [
+      "yangguzhuanzhai",
+      "ygzz",
+      "yangguhuatai",
+      "yght"
+    ],
+    "123213.SZ" : [
+      "tianyuanzhuanzhai",
+      "tyzz",
+      "wuhantianyuan",
+      "whty"
+    ],
+    "123214.SZ" : [
+      "dongbaozhuanzhai",
+      "dbzz",
+      "dongbaoshengwu",
+      "dbsw"
+    ],
+    "123215.SZ" : [
+      "minglizhuanzhai",
+      "mlzz",
+      "minglida",
+      "mld"
+    ],
+    "123216.SZ" : [
+      "keshunzhuanzhai",
+      "kszz",
+      "keshungufen",
+      "ksgf"
+    ],
+    "123220.SZ" : [
+      "yiruizhuanzhai",
+      "yrzz",
+      "yiruishengwu",
+      "yrsw"
+    ],
+    "123222.SZ" : [
+      "bojunzhuanzhai",
+      "bjzz",
+      "bojunkeji",
+      "bjkj"
+    ],
+    "123223.SZ" : [
+      "jiudianzhuan02",
+      "jdz",
+      "jiudianzhiyao",
+      "jdzy"
+    ],
+    "123224.SZ" : [
+      "yubangzhuanzhai",
+      "ybzz",
+      "yubangxincai",
+      "ybxc"
+    ],
+    "123225.SZ" : [
+      "xiangfengzhuanzhai",
+      "xfzz",
+      "xiangfenghua",
+      "xfh"
+    ],
+    "123229.SZ" : [
+      "ailuzhuanzhai",
+      "alzz",
+      "shanghaiailu",
+      "shal"
+    ],
+    "123235.SZ" : [
+      "yitianzhuanzhai",
+      "ytzz",
+      "yitianzhineng",
+      "ytzn"
+    ],
+    "123237.SZ" : [
+      "jiahezhuanzhai",
+      "jhzz",
+      "jiahezhineng",
+      "jhzn"
+    ],
+    "123241.SZ" : [
+      "outongzhuanzhai",
+      "otzz",
+      "oulutong",
+      "olt"
+    ],
+    "123243.SZ" : [
+      "yanpaizhuanzhai",
+      "ypzz",
+      "yanpaigufen",
+      "ypgf"
+    ],
+    "123245.SZ" : [
+      "jizhizhuanzhai",
+      "jzzz",
+      "jizhigufen",
+      "jzgf"
+    ],
+    "123247.SZ" : [
+      "wankaizhuanzhai",
+      "wkzz",
+      "wankaixincai",
+      "wkxc"
+    ],
+    "123250.SZ" : [
+      "jiayizhuanzhai",
+      "jyzz",
+      "jiayigufen",
+      "jygf"
+    ],
+    "123252.SZ" : [
+      "yinbangzhuanzhai",
+      "ybzz",
+      "yinbanggufen",
+      "ybgf"
+    ],
+    "123253.SZ" : [
+      "yongguizhuanzhai",
+      "ygzz",
+      "yongguidianqi",
+      "ygdq"
+    ],
+    "123255.SZ" : [
+      "dinglongzhuanzhai",
+      "dlzz",
+      "dinglonggufen",
+      "dlgf"
+    ],
+    "123257.SZ" : [
+      "ankezhuanzhai",
+      "akzz",
+      "ankechuangxin",
+      "akcx"
+    ],
+    "123258.SZ" : [
+      "shenglanzhuan02",
+      "slz",
+      "shenglangufen",
+      "slgf"
+    ],
+    "123259.SZ" : [
+      "jinlangzhuan02",
+      "jlz",
+      "jinlangkeji",
+      "jlkj"
+    ],
+    "123260.SZ" : [
+      "zhuomeizhuanzhai",
+      "zmzz",
+      "xingyuanzhuomei",
+      "xyzm"
+    ],
+    "123261.SZ" : [
+      "pulianzhuanzhai",
+      "plzz",
+      "pulianruanjian",
+      "plrj"
+    ],
+    "123262.SZ" : [
+      "shenyuzhuanzhai",
+      "syzz",
+      "shenyugufen",
+      "sygf"
+    ],
+    "123263.SZ" : [
+      "dingjiezhuanzhai",
+      "djzz",
+      "dingjieshuzhi",
+      "djsz"
+    ],
+    "123264.SZ" : [
+      "shuanglezhuanzhai",
+      "slzz",
+      "shuanglegufen",
+      "slgf"
+    ],
+    "123265.SZ" : [
+      "naipuzhuan02",
+      "npz",
+      "naipukuangji",
+      "npkj"
+    ],
+    "123266.SZ" : [
+      "boshizhuanzhai",
+      "bszz",
+      "boshiyanjing",
+      "bsyj"
+    ],
+    "123267.SZ" : [
+      "kemazhuanzhai",
+      "kmzz",
+      "kemakeji",
+      "kmkj"
+    ],
+    "123268.SZ" : [
+      "benchuanzhuanzhai",
+      "bczz",
+      "benchuanzhineng",
+      "bczn"
+    ],
+    "123269.SZ" : [
+      "jinyangzhuanzhai",
+      "jyzz",
+      "jinyangjingmi",
+      "jyjm"
+    ],
+    "123270.SZ" : [
+      "shengdezhuanzhai",
+      "sdzz",
+      "shengdexintai",
+      "sdxt"
+    ],
+    "123271.SZ" : [
+      "tonghezhuanzhai",
+      "thzz",
+      "tonghekeji",
+      "thkj"
+    ],
+    "123272.SZ" : [
+      "zhongqizhuanzhai",
+      "zqzz",
+      "zhongqigufen",
+      "zqgf"
+    ],
+    "123273.SZ" : [
+      "sanjiangzhuanzhai",
+      "sjzz",
+      "jinsanjiang",
+      "jsj"
+    ],
+    "123274.SZ" : [
+      "weikezhuanzhai",
+      "wkzz",
+      "weikejingmi",
+      "wkjm"
+    ],
+    "123275.SZ" : [
+      "zhaominzhuanzhai",
+      "zmzz",
+      "zhaominkeji",
+      "zmkj"
+    ],
+    "127025.SZ" : [
+      "jidongzhuanzhai",
+      "jdzz",
+      "jinyujidong",
+      "jyjd"
+    ],
+    "127027.SZ" : [
+      "nenghuazhuanzhai",
+      "nhzz",
+      "gansunenghua",
+      "gsnh"
+    ],
+    "127030.SZ" : [
+      "shenghongzhuanzhai",
+      "shzz",
+      "dongfangshenghong",
+      "dfsh"
+    ],
+    "127031.SZ" : [
+      "yangfengzhuanzhai",
+      "yfzz",
+      "xinyangfeng",
+      "xyf"
+    ],
+    "127033.SZ" : [
+      "zhongzhuangzhuan2",
+      "zzz",
+      "stzhongzhuang",
+      "szz"
+    ],
+    "127034.SZ" : [
+      "luyinzhuanzhai",
+      "lyzz",
+      "luyinshengtai",
+      "lyst"
+    ],
+    "127037.SZ" : [
+      "yinlunzhuanzhai",
+      "ylzz",
+      "yinlungufen",
+      "ylgf"
+    ],
+    "127038.SZ" : [
+      "guoweizhuanzhai",
+      "gwzz",
+      "ziguangguowei",
+      "zggw"
+    ],
+    "127040.SZ" : [
+      "guotaizhuanzhai",
+      "gtzz",
+      "jiangsuguotai",
+      "jsgt"
+    ],
+    "127044.SZ" : [
+      "mengnazhuanzhai",
+      "mnzz",
+      "mengnalisha",
+      "mnls"
+    ],
+    "127045.SZ" : [
+      "muyuanzhuanzhai",
+      "myzz",
+      "muyuangufen",
+      "mygf"
+    ],
+    "127046.SZ" : [
+      "bairunzhuanzhai",
+      "brzz",
+      "bairungufen",
+      "brgf"
+    ],
+    "127047.SZ" : [
+      "diouzhuanzhai",
+      "dozz",
+      "dioushuihua",
+      "dosh"
+    ],
+    "127049.SZ" : [
+      "xiwangzhuan2",
+      "xwz",
+      "xinxiwang",
+      "xxw"
+    ],
+    "127050.SZ" : [
+      "qilinzhuanzhai",
+      "qlzz",
+      "senqilin",
+      "sql"
+    ],
+    "127053.SZ" : [
+      "haomeizhuanzhai",
+      "hmzz",
+      "haomeixincai",
+      "hmxc"
+    ],
+    "127054.SZ" : [
+      "shuangjianzhuanzhai",
+      "sjzz",
+      "shuangjiangufen",
+      "sjgf"
+    ],
+    "127055.SZ" : [
+      "jingzhuangzhuanzhai",
+      "jzzz",
+      "zhongtianjingzhuang",
+      "ztjz"
+    ],
+    "127056.SZ" : [
+      "zhongtezhuanzhai",
+      "ztzz",
+      "zhongxintegang",
+      "zxtg"
+    ],
+    "127059.SZ" : [
+      "yongdongzhuan2",
+      "ydz",
+      "yongdonggufen",
+      "ydgf"
+    ],
+    "127060.SZ" : [
+      "xiangjiazhuanzhai",
+      "xjzz",
+      "xiangjiagufen",
+      "xjgf"
+    ],
+    "127061.SZ" : [
+      "meijinzhuanzhai",
+      "mjzz",
+      "meijinnengyuan",
+      "mjny"
+    ],
+    "127062.SZ" : [
+      "leizhizhuanzhai",
+      "lzzz",
+      "leizhijituan",
+      "lzjt"
+    ],
+    "127064.SZ" : [
+      "hangyangzhuanzhai",
+      "hyzz",
+      "hangyanggufen",
+      "hygf"
+    ],
+    "127067.SZ" : [
+      "hengyizhuan2",
+      "hyz",
+      "hengyishihua",
+      "hysh"
+    ],
+    "127068.SZ" : [
+      "shunbozhuanzhai",
+      "sbzz",
+      "shunbohejin",
+      "sbhj"
+    ],
+    "127069.SZ" : [
+      "xiaoxiongzhuanzhai",
+      "xxzz",
+      "xiaoxiongdianqi",
+      "xxdq"
+    ],
+    "127070.SZ" : [
+      "dazhongzhuanzhai",
+      "dzzz",
+      "dazhongkuangye",
+      "dzky"
+    ],
+    "127072.SZ" : [
+      "boshizhuanzhai",
+      "bszz",
+      "boshigufen",
+      "bsgf"
+    ],
+    "127078.SZ" : [
+      "youcaizhuanzhai",
+      "yczz",
+      "youcaiziyuan",
+      "yczy"
+    ],
+    "127080.SZ" : [
+      "shengxunzhuanzhai",
+      "sxzz",
+      "shengxungufen",
+      "sxgf"
+    ],
+    "127082.SZ" : [
+      "yakezhuanzhai",
+      "ykzz",
+      "yataikeji",
+      "ytkj"
+    ],
+    "127083.SZ" : [
+      "shanluzhuanzhai",
+      "slzz",
+      "shandongluqiao",
+      "sdlq"
+    ],
+    "127084.SZ" : [
+      "liugongzhuan2",
+      "lgz",
+      "liugong",
+      "lg"
+    ],
+    "127085.SZ" : [
+      "yundazhuanzhai",
+      "ydzz",
+      "yundagufen",
+      "ydgf"
+    ],
+    "127088.SZ" : [
+      "hedazhuanzhai",
+      "hdzz",
+      "shandongheda",
+      "sdhd"
+    ],
+    "127089.SZ" : [
+      "jingaozhuanzhai",
+      "jazz",
+      "jingaokeji",
+      "jakj"
+    ],
+    "127092.SZ" : [
+      "yunjizhuanzhai",
+      "yjzz",
+      "yunjijituan",
+      "yjjt"
+    ],
+    "127093.SZ" : [
+      "zhangguzhuanzhai",
+      "zgzz",
+      "stzhanggu",
+      "szg"
+    ],
+    "127095.SZ" : [
+      "guangtaizhuanzhai",
+      "gtzz",
+      "weihaiguangtai",
+      "whgt"
+    ],
+    "127096.SZ" : [
+      "taitanzhuanzhai",
+      "ttzz",
+      "taitangufen",
+      "ttgf"
+    ],
+    "127098.SZ" : [
+      "oujingzhuanzhai",
+      "ojzz",
+      "oujingkeji",
+      "ojkj"
+    ],
+    "127099.SZ" : [
+      "shenghangzhuanzhai",
+      "shzz",
+      "shenghanggufen",
+      "shgf"
+    ],
+    "127102.SZ" : [
+      "zhejianzhuanzhai",
+      "zjzz",
+      "zhejiangjiantou",
+      "zjjt"
+    ],
+    "127103.SZ" : [
+      "dongnanzhuanzhai",
+      "dnzz",
+      "dongnanwangjia",
+      "dnwj"
+    ],
+    "127104.SZ" : [
+      "yaojizhuanzhai",
+      "yjzz",
+      "yaojikeji",
+      "yjkj"
+    ],
+    "127105.SZ" : [
+      "longxingzhuanzhai",
+      "lxzz",
+      "longxingkeji",
+      "lxkj"
+    ],
+    "127108.SZ" : [
+      "tainengzhuanzhai",
+      "tnzz",
+      "taiyangneng",
+      "tyn"
+    ],
+    "127109.SZ" : [
+      "dianhuazhuanzhai",
+      "dhzz",
+      "xiangtandianhua",
+      "xtdh"
+    ],
+    "127110.SZ" : [
+      "guanghezhuanzhai",
+      "ghzz",
+      "zhongguoguanghe",
+      "zggh"
+    ],
+    "127111.SZ" : [
+      "jinweizhuanzhai",
+      "jwzz",
+      "jindawei",
+      "jdw"
+    ],
+    "127112.SZ" : [
+      "shangtaizhuanzhai",
+      "stzz",
+      "shangtaikeji",
+      "stkj"
+    ],
+    "127113.SZ" : [
+      "zhanggaozhuanzhai",
+      "zgzz",
+      "zhanggaodianqi",
+      "zgdq"
+    ],
+    "127114.SZ" : [
+      "yihuazhuanzhai",
+      "yhzz",
+      "hubeiyihua",
+      "hbyh"
+    ],
+    "128127.SZ" : [
+      "wenkezhuanzhai",
+      "wkzz",
+      "wenkegufen",
+      "wkgf"
+    ],
+    "128128.SZ" : [
+      "qixiangzhuan2",
+      "qxz",
+      "qixiangtengda",
+      "qxtd"
+    ],
+    "128129.SZ" : [
+      "qingnongzhuanzhai",
+      "qnzz",
+      "qingnongshangxing",
+      "qnsx"
+    ],
+    "128134.SZ" : [
+      "hongluzhuanzhai",
+      "hlzz",
+      "hongluganggou",
+      "hlgg"
+    ],
+    "128135.SZ" : [
+      "qiaqiazhuanzhai",
+      "qqzz",
+      "qiaqiashipin",
+      "qqsp"
+    ],
+    "128136.SZ" : [
+      "lixunzhuanzhai",
+      "lxzz",
+      "lixunjingmi",
+      "lxjm"
+    ],
+    "128138.SZ" : [
+      "qiaoyinzhuanzhai",
+      "qyzz",
+      "qiaoyingufen",
+      "qygf"
+    ],
+    "128142.SZ" : [
+      "xinruzhuanzhai",
+      "xrzz",
+      "xinruye",
+      "xry"
+    ]
+  },
+  "asOf" : "2026-07-31",
+  "count" : 306
+}
