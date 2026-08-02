@@ -11,7 +11,7 @@
     <main class="app-shell">
       <header class="market-bar" aria-label="行情控制">
         <div class="brand">
-          <h1>A股/转债实时板块表</h1>
+          <h1 id="boardTitle">A股/转债实时板块表</h1>
           <p id="marketStatus">正在连接实时行情...</p>
         </div>
         <section class="global-indices" aria-label="市场指数">
@@ -19,6 +19,10 @@
           <div id="globalIndices" class="index-list"></div>
         </section>
         <div class="controls">
+          <div class="view-switch" role="group" aria-label="看板视图">
+            <button id="mainViewButton" class="view-switch-button is-active" type="button" aria-pressed="true">主看板</button>
+            <button id="themeViewButton" class="view-switch-button" type="button" aria-pressed="false">看板二·题材转债</button>
+          </div>
           <label class="search-box">
             <span>搜索</span>
             <input id="searchInput" type="search" placeholder="板块 / 股票 / 转债" autocomplete="off" />
@@ -114,6 +118,14 @@
       </section>
 
       <section id="boardGrid" class="board-grid" aria-live="polite"></section>
+
+      <section id="themeBondBoard" class="theme-bond-board" aria-label="题材转债看板" hidden>
+        <header class="theme-board-head">
+          <div id="themeBoardSummary" class="theme-board-summary">正在读取转债标签…</div>
+          <div id="themeTagFilters" class="theme-tag-filters" aria-label="题材筛选"></div>
+        </header>
+        <div id="themeBondGrid" class="theme-bond-grid" aria-live="polite"></div>
+      </section>
 
       <dialog id="editorDialog" class="editor-dialog">
         <form id="editorForm" method="dialog">

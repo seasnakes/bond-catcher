@@ -12,6 +12,7 @@ const STACK_GROUP_STORAGE_KEY = "finance-board-stack-groups-v1";
 const LOCAL_BACKUP_STORAGE_KEY = "finance-board-local-backup-v1";
 const SPARKLINE_STORAGE_KEY = "finance-board-show-sparklines-v1";
 const BOARD_VIEW_STATE_STORAGE_KEY = "finance-board-view-state-v1";
+const ACTIVE_BOARD_STORAGE_KEY = "finance-board-active-view-v1";
 const SPARKLINE_BATCH_SIZE = 24;
 const SPARKLINE_REFRESH_MS = 2 * 60 * 1000;
 const AUCTION_SERIES_BATCH_SIZE = 120;
@@ -828,11 +829,27 @@ const state = {
   signalFilterTimer: 0,
   signalCodeSignature: "",
   signalCodeCount: 0,
+  activeView: localStorage.getItem(ACTIVE_BOARD_STORAGE_KEY) === "themes" ? "themes" : "main",
+  themeRows: [],
+  themeTagOrder: [],
+  themeQuotes: new Map(),
+  themeLoading: false,
+  themeLoaded: false,
+  themeUpdatedAt: null,
+  activeThemeTag: "all",
+  themeExpandedTags: new Set(),
 };
 let serverPersistTimer = 0;
 let temporaryStatusTimer = 0;
 
 const grid = document.querySelector("#boardGrid");
+const boardTitle = document.querySelector("#boardTitle");
+const mainViewButton = document.querySelector("#mainViewButton");
+const themeViewButton = document.querySelector("#themeViewButton");
+const themeBondBoard = document.querySelector("#themeBondBoard");
+const themeBondGrid = document.querySelector("#themeBondGrid");
+const themeBoardSummary = document.querySelector("#themeBoardSummary");
+const themeTagFilters = document.querySelector("#themeTagFilters");
 const statusNode = document.querySelector("#marketStatus");
 const globalIndicesNode = document.querySelector("#globalIndices");
 const searchInput = document.querySelector("#searchInput");
@@ -941,6 +958,8 @@ function saveBoardViewState() {
         signalMinDailyAmount: state.signalMinDailyAmount,
         signalMinDailyAmplitude: state.signalMinDailyAmplitude,
         signalPaused: state.signalPaused,
+        activeView: state.activeView,
+        activeThemeTag: state.activeThemeTag,
         scrollY: window.scrollY,
         signalScrollTop: signalFeed.scrollTop,
         savedAt: Date.now(),
@@ -977,6 +996,10 @@ function restoreBoardViewState() {
       ? Number(saved.signalMinDailyAmplitude)
       : 0;
     state.signalPaused = Boolean(saved.signalPaused);
+    state.activeView = ["main", "themes"].includes(saved.activeView)
+      ? saved.activeView
+      : state.activeView;
+    state.activeThemeTag = String(saved.activeThemeTag || "all");
     searchInput.value = state.query;
     sortSelect.value = state.sort;
     rangeSelect.value = state.range;
@@ -2993,6 +3016,11 @@ function renderIndexSparkline(item) {
 }
 
 function render() {
+  if (state.activeView === "themes") {
+    renderThemeBondBoard();
+    return;
+  }
+
   if (!isRenaming()) {
     state.needsRenderAfterRename = false;
   }
@@ -3046,6 +3074,235 @@ function render() {
   }
 
   ensureSparklinesFor(sectors);
+}
+
+function marketCodeToSecid(value) {
+  const match = String(value || "").trim().toUpperCase().match(/^(\d{6})\.(SH|SZ)$/);
+  if (!match) return normalizeSecidInput(value);
+  return `${match[2] === "SH" ? "1" : "0"}.${match[1]}`;
+}
+
+function themeBondRows() {
+  return state.themeRows
+    .map((row) => {
+      const secid = marketCodeToSecid(row.code);
+      return {
+        ...row,
+        secid,
+        ...(state.themeQuotes.get(secid) || {}),
+      };
+    })
+    .filter((row) => row.secid && Array.isArray(row.tags) && row.tags.length > 0);
+}
+
+function formatCompactAmount(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return "--";
+  if (amount >= 1e8) return `${(amount / 1e8).toFixed(amount >= 1e9 ? 1 : 2)}亿`;
+  if (amount >= 1e4) return `${(amount / 1e4).toFixed(0)}万`;
+  return `${amount.toFixed(0)}`;
+}
+
+function themeGroupRows(rows, tag) {
+  const query = state.query.trim().toLowerCase();
+  let bonds = rows.filter((row) => row.tags.includes(tag));
+  if (state.range === "up") bonds = bonds.filter((row) => Number(row.change) > 0);
+  if (state.range === "down") bonds = bonds.filter((row) => Number(row.change) < 0);
+  if (query) {
+    bonds = bonds.filter((row) =>
+      `${row.name}${row.code}${row.stockName || ""}${row.tags.join("")}`.toLowerCase().includes(query),
+    );
+  }
+  bonds.sort((left, right) => {
+    if (state.sort === "change") return Number(right.change || 0) - Number(left.change || 0);
+    if (state.sort === "name") return String(left.name).localeCompare(String(right.name), "zh-CN");
+    return Number(right.amount || 0) - Number(left.amount || 0);
+  });
+  return bonds;
+}
+
+function renderThemeTagFilters(rows) {
+  const counts = new Map(
+    state.themeTagOrder.map((tag) => [tag, rows.filter((row) => row.tags.includes(tag)).length]),
+  );
+  if (state.activeThemeTag !== "all" && !counts.has(state.activeThemeTag)) {
+    state.activeThemeTag = "all";
+  }
+  themeTagFilters.replaceChildren();
+  const options = [
+    ["all", "全部题材", state.themeTagOrder.filter((tag) => counts.get(tag) > 0).length],
+    ...state.themeTagOrder.filter((tag) => counts.get(tag) > 0).map((tag) => [tag, tag, counts.get(tag)]),
+  ];
+  for (const [value, label, count] of options) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `theme-tag-filter${state.activeThemeTag === value ? " is-active" : ""}`;
+    button.setAttribute("aria-pressed", String(state.activeThemeTag === value));
+    button.textContent = `${label} ${count}`;
+    button.addEventListener("click", () => {
+      state.activeThemeTag = value;
+      saveBoardViewState();
+      renderThemeBondBoard();
+    });
+    themeTagFilters.append(button);
+  }
+}
+
+function renderThemeBondRow(row) {
+  const tone = quoteClass(Number(row.change));
+  const link = document.createElement("a");
+  link.className = "theme-bond-row";
+  link.href = miniQmtBondUrl(row);
+  link.title = `${row.name} ${row.code} · ${row.stockName || ""}`;
+
+  const name = document.createElement("span");
+  name.className = "theme-bond-name";
+  name.textContent = row.name || row.code;
+
+  const spark = state.showSparklines ? renderSparkline(row) : null;
+  if (spark) spark.classList.add("theme-bond-sparkline");
+
+  const price = document.createElement("span");
+  price.className = "theme-bond-price";
+  price.textContent = formatPrice(Number(row.price), row.secid);
+
+  const change = document.createElement("span");
+  change.className = `theme-bond-change cell-${tone}`;
+  change.textContent = formatSignedPercent(Number(row.change));
+
+  const amount = document.createElement("span");
+  amount.className = "theme-bond-amount";
+  amount.textContent = formatCompactAmount(row.amount);
+
+  link.append(name);
+  if (spark) link.append(spark);
+  link.append(price, change, amount);
+  return link;
+}
+
+function renderThemeGroup(tag, bonds) {
+  const changes = bonds.map((row) => Number(row.change)).filter(Number.isFinite);
+  const average = changes.length
+    ? changes.reduce((sum, value) => sum + value, 0) / changes.length
+    : 0;
+  const tone = quoteClass(average);
+  const expanded = state.themeExpandedTags.has(tag);
+  const visible = expanded ? bonds : bonds.slice(0, 10);
+
+  const card = document.createElement("article");
+  card.className = `theme-group-card is-${tone}`;
+  card.dataset.tag = tag;
+  const head = document.createElement("header");
+  head.className = "theme-group-title";
+  const name = document.createElement("strong");
+  name.textContent = tag;
+  const count = document.createElement("span");
+  count.textContent = `${bonds.length}只`;
+  const change = document.createElement("span");
+  change.className = `theme-group-change cell-${tone}`;
+  change.textContent = formatSignedPercent(average);
+  head.append(name, count, change);
+
+  const list = document.createElement("div");
+  list.className = `theme-group-list${state.showSparklines ? " has-sparks" : ""}`;
+  visible.forEach((row) => list.append(renderThemeBondRow(row)));
+  card.append(head, list);
+
+  if (bonds.length > 10) {
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "theme-group-more";
+    more.textContent = expanded ? "收起" : `展开其余 ${bonds.length - 10} 只`;
+    more.addEventListener("click", () => {
+      if (expanded) state.themeExpandedTags.delete(tag);
+      else state.themeExpandedTags.add(tag);
+      renderThemeBondBoard();
+    });
+    card.append(more);
+  }
+  return card;
+}
+
+function renderThemeBondBoard() {
+  const rows = themeBondRows();
+  renderThemeTagFilters(rows);
+  themeBondGrid.replaceChildren();
+
+  if (state.themeLoading && rows.length === 0) {
+    themeBoardSummary.textContent = "正在读取转债标签和MiniQMT实时行情…";
+    themeBondGrid.innerHTML = '<div class="empty-state">正在加载题材转债…</div>';
+    return;
+  }
+
+  const tags = state.activeThemeTag === "all" ? state.themeTagOrder : [state.activeThemeTag];
+  const groups = tags
+    .map((tag) => [tag, themeGroupRows(rows, tag)])
+    .filter(([, bonds]) => bonds.length > 0);
+  const quoted = rows.filter((row) => Number.isFinite(Number(row.price))).length;
+  const uniqueShown = new Set(groups.flatMap(([, bonds]) => bonds.map((row) => row.code))).size;
+  const time = state.themeUpdatedAt
+    ? state.themeUpdatedAt.toLocaleTimeString("zh-CN", { hour12: false })
+    : "--:--:--";
+  themeBoardSummary.textContent = `${uniqueShown}只转债 · ${groups.length}个题材 · 实时行情 ${quoted}/${rows.length} · ${time}`;
+
+  if (groups.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = state.query ? "没有匹配的题材转债" : "当前筛选下没有转债";
+    themeBondGrid.append(empty);
+    return;
+  }
+  groups.forEach(([tag, bonds]) => themeBondGrid.append(renderThemeGroup(tag, bonds)));
+  ensureSparklinesFor(groups.map(([name, stocks]) => ({ name, stocks })));
+}
+
+async function loadThemeBondBoard(options = {}) {
+  if (state.themeLoading) return;
+  if (state.themeLoaded && !options.force) {
+    renderThemeBondBoard();
+    return;
+  }
+  state.themeLoading = true;
+  renderThemeBondBoard();
+  try {
+    const payload = await fetchJson("/api/miniqmt/tags", 15000);
+    const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+    state.themeRows = rows;
+    state.themeTagOrder = Array.isArray(payload?.tagOrder) ? payload.tagOrder.map(String) : [];
+    const stocks = rows.map((row) => ({ name: row.name, secid: marketCodeToSecid(row.code) }));
+    const live = await fetchMiniQmtQuotes(stocks);
+    state.themeQuotes = live.quotes;
+    state.themeLoaded = true;
+    state.themeUpdatedAt = new Date();
+  } catch (error) {
+    console.warn("Theme bond board request failed.", error);
+    flashStatus(`题材转债读取失败：${error.message}`, 4000);
+  } finally {
+    state.themeLoading = false;
+    renderThemeBondBoard();
+  }
+}
+
+function setActiveView(view) {
+  state.activeView = view === "themes" ? "themes" : "main";
+  localStorage.setItem(ACTIVE_BOARD_STORAGE_KEY, state.activeView);
+  const isThemes = state.activeView === "themes";
+  boardTitle.textContent = isThemes ? "题材转债实时看板" : "A股/转债实时板块表";
+  mainViewButton.classList.toggle("is-active", !isThemes);
+  themeViewButton.classList.toggle("is-active", isThemes);
+  mainViewButton.setAttribute("aria-pressed", String(!isThemes));
+  themeViewButton.setAttribute("aria-pressed", String(isThemes));
+  grid.hidden = isThemes;
+  themeBondBoard.hidden = !isThemes;
+  signalMonitor.hidden = isThemes;
+  editListButton.hidden = isThemes;
+  addSectorButton.hidden = isThemes;
+  addStackButton.hidden = isThemes;
+  bulkEditButton.hidden = isThemes;
+  searchInput.placeholder = isThemes ? "题材 / 转债 / 正股 / 代码" : "板块 / 股票 / 转债";
+  saveBoardViewState();
+  render();
+  if (isThemes) void loadThemeBondBoard();
 }
 
 function buildBoardItems(sectors, forceFlat = false) {
@@ -3911,6 +4168,10 @@ async function refreshBondQuotes(options = {}) {
       state.bondLoading = false;
     }
   }
+
+  if (state.activeView === "themes" && (options.force || marketSession().canAutoRefresh)) {
+    await loadThemeBondBoard({ force: true });
+  }
 }
 
 async function refreshIndices(options = {}) {
@@ -3937,6 +4198,7 @@ async function boot() {
   state.source = "演示数据";
   state.lastUpdated = new Date();
   updateEditModeControls();
+  setActiveView(state.activeView);
   renderIndices();
   render();
   await refreshQuotes({ force: true });
@@ -4012,6 +4274,9 @@ searchInput.addEventListener("input", (event) => {
   state.query = event.target.value;
   render();
 });
+
+mainViewButton.addEventListener("click", () => setActiveView("main"));
+themeViewButton.addEventListener("click", () => setActiveView("themes"));
 
 sortSelect.addEventListener("change", (event) => {
   state.sort = event.target.value;
