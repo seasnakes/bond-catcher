@@ -54,6 +54,8 @@ const SHANGHAI_CLOCK_FORMATTER = new Intl.DateTimeFormat("en-CA", {
 });
 const state = {
   payload: null,
+  intradayPayloads: [],
+  intradayRows: [],
   dailyPayload: null,
   view: params.get("view") === "daily" ? "daily" : "intraday",
   selectedIndex: -1,
@@ -61,6 +63,7 @@ const state = {
   resizeTimer: 0,
   requestId: 0,
   manualDate: Boolean(params.get("date")),
+  intradayDays: Math.max(1, Math.min(5, Number(params.get("days")) || 1)),
 };
 
 const pageParams = new URLSearchParams(window.location.search);
@@ -91,6 +94,8 @@ const nodes = {
   dailyViewButton: document.querySelector("#dailyViewButton"),
   dateControl: document.querySelector("#dateControl"),
   dateSelect: document.querySelector("#dateSelect"),
+  intradayDaysControl: document.querySelector("#intradayDaysControl"),
+  intradayDaysSelect: document.querySelector("#intradayDaysSelect"),
   dailyRangeControl: document.querySelector("#dailyRangeControl"),
   dailyRangeSelect: document.querySelector("#dailyRangeSelect"),
   refreshButton: document.querySelector("#refreshButton"),
@@ -100,6 +105,7 @@ const nodes = {
   canvas: document.querySelector("#indicatorChart"),
   tooltip: document.querySelector("#chartTooltip"),
   eventList: document.querySelector("#eventList"),
+  eventsTitle: document.querySelector("#eventsTitle"),
   intradayLegend: document.querySelector("#intradayLegend"),
   dailyLegend: document.querySelector("#dailyLegend"),
   eventsCard: document.querySelector(".events-card"),
@@ -243,10 +249,27 @@ async function loadBond(options = {}) {
       date ? 120000 : 12000,
     );
     if (requestId !== state.requestId) return;
+    const intradayPayloads = await loadIntradayPayloads(payload, requestId);
+    if (requestId !== state.requestId) return;
     state.payload = payload;
-    state.selectedIndex = Math.max(0, payload.rows.length - 1);
+    state.intradayPayloads = intradayPayloads;
+    state.intradayRows = intradayPayloads.flatMap((dayPayload, dayIndex) =>
+      dayPayload.rows.map((row) => ({
+        ...row,
+        trading_date: dayPayload.trading_date,
+        previous_close: dayPayload.previous_close,
+        _dayIndex: dayIndex,
+        _dayCount: intradayPayloads.length,
+      })),
+    );
+    state.selectedIndex = Math.max(0, state.intradayRows.length - 1);
     renderPayload(payload);
-    setStatus(statusText(payload), statusTone(payload));
+    setStatus(
+      intradayPayloads.length > 1
+        ? `${intradayPayloads.length}日分时 · MiniQMT真实分钟数据`
+        : statusText(payload),
+      statusTone(payload),
+    );
     scheduleRefresh();
   } catch (error) {
     if (requestId !== state.requestId) return;
@@ -257,6 +280,32 @@ async function loadBond(options = {}) {
   }
 }
 
+async function loadIntradayPayloads(mainPayload, requestId) {
+  const dayCount = state.intradayDays;
+  if (dayCount <= 1) return [mainPayload];
+  const dailyQuery = new URLSearchParams({ code: requestedCode, count: "30" });
+  const dailyPayload = await fetchJson(`/api/miniqmt/daily?${dailyQuery}`, 120000);
+  if (requestId !== state.requestId) return [mainPayload];
+  const endDate = String(mainPayload.trading_date || "");
+  const dates = [...new Set((dailyPayload.rows || [])
+    .map((row) => String(row.date || ""))
+    .filter((value) => /^\d{8}$/.test(value) && value <= endDate))]
+    .sort()
+    .slice(-dayCount);
+  if (!dates.includes(endDate)) dates.push(endDate);
+  const selectedDates = dates.sort().slice(-dayCount);
+  const payloads = [];
+  for (const tradingDate of selectedDates) {
+    if (tradingDate === endDate) {
+      payloads.push(mainPayload);
+      continue;
+    }
+    const query = new URLSearchParams({ code: requestedCode, date: tradingDate });
+    payloads.push(await fetchJson(`/api/miniqmt/bond?${query}`, 120000));
+  }
+  return payloads;
+}
+
 function setView(view, options = {}) {
   state.view = view === "daily" ? "daily" : "intraday";
   state.selectedIndex = -1;
@@ -264,6 +313,7 @@ function setView(view, options = {}) {
   nodes.intradayViewButton.classList.toggle("is-active", state.view === "intraday");
   nodes.dailyViewButton.classList.toggle("is-active", state.view === "daily");
   nodes.dateControl.hidden = state.view !== "intraday";
+  nodes.intradayDaysControl.hidden = state.view !== "intraday";
   nodes.dailyRangeControl.hidden = state.view !== "daily";
   nodes.intradayLegend.hidden = state.view !== "intraday";
   nodes.dailyLegend.hidden = state.view !== "daily";
@@ -377,6 +427,8 @@ function renderDailyPayload(payload) {
 }
 
 function renderPayload(payload) {
+  const displayedRows = intradayRows();
+  const displayedPayloads = intradayPayloads();
   const displayName = payload.name || requestedName || "可转债";
   document.title = `${displayName} ${payload.code} · MiniQMT分时指标`;
   nodes.name.textContent = displayName;
@@ -396,9 +448,15 @@ function renderPayload(payload) {
   nodes.totalAmountLabel.textContent = "累计成交额";
   nodes.eventCountLabel.textContent = "今日信号";
   nodes.eventCount.className = "";
-  nodes.barCount.textContent = `${payload.bar_count}${payload.complete_session ? " / 241" : ""}`;
+  nodes.barCount.textContent = displayedPayloads.length > 1
+    ? `${displayedPayloads.length}日 / ${displayedRows.length}分钟`
+    : `${payload.bar_count}${payload.complete_session ? " / 241" : ""}`;
   nodes.latestMinute.textContent = payload.latest_minute || "-";
-  nodes.totalAmount.textContent = formatAmount(payload.total_amount);
+  nodes.totalAmount.textContent = formatAmount(
+    displayedPayloads.length > 1
+      ? displayedRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0)
+      : payload.total_amount,
+  );
   nodes.volumeRatioCard.hidden = false;
   nodes.purpleSupportCard.hidden = false;
   nodes.averageSupportCard.hidden = false;
@@ -417,10 +475,19 @@ function renderPayload(payload) {
   nodes.averageSupportCount.textContent = `${averageSupportCount}次`;
   nodes.purpleSupportCount.className = purpleSupportCount >= 3 ? "is-hot" : "";
   nodes.averageSupportCount.className = averageSupportCount >= 3 ? "is-hot" : "";
-  nodes.eventCount.textContent = String(payload.events.length);
+  nodes.eventCountLabel.textContent = displayedPayloads.length > 1 ? "区间信号" : "今日信号";
+  nodes.eventsTitle.textContent = displayedPayloads.length > 1 ? "区间信号" : "当日信号";
+  nodes.eventCount.textContent = String(
+    displayedPayloads.reduce((sum, item) => sum + item.events.length, 0),
+  );
   renderDates(payload.available_dates, payload.trading_date);
   renderDataAlert(payload);
-  renderEvents(payload.events);
+  renderEvents(
+    displayedPayloads.flatMap((item) => item.events.map((event) => ({
+      ...event,
+      trading_date: item.trading_date,
+    }))),
+  );
   const autoRefreshPaused = !state.manualDate && !marketRefreshWindow().active;
   nodes.dataFootnote.textContent = autoRefreshPaused
     ? `${payload.source || "MiniQMT"} · 当前为非交易时段，自动刷新已暂停；可使用“立即刷新”手动检查。`
@@ -520,7 +587,9 @@ function renderEvents(events) {
     row.className = `event-row ${toneClass(event.direction === "up" ? 1 : event.direction === "down" ? -1 : 0)}`;
     const time = document.createElement("span");
     time.className = "event-time";
-    time.textContent = String(event.event_time || "").slice(11, 19);
+    time.textContent = state.intradayDays > 1
+      ? `${displayDailyDate(event.trading_date).slice(5)} ${String(event.event_time || "").slice(11, 16)}`
+      : String(event.event_time || "").slice(11, 19);
     const type = document.createElement("span");
     type.className = "event-type";
     type.textContent = EVENT_LABELS[event.event_type] || event.event_type;
@@ -655,10 +724,24 @@ function intradayMinute(time) {
   return null;
 }
 
+function intradayPayloads() {
+  return state.intradayPayloads.length ? state.intradayPayloads : state.payload ? [state.payload] : [];
+}
+
+function intradayRows() {
+  return state.intradayRows.length ? state.intradayRows : state.payload?.rows || [];
+}
+
+function intradayDayCount(rows = intradayRows()) {
+  return Math.max(1, Number(rows.at(-1)?._dayCount) || intradayPayloads().length || 1);
+}
+
 function intradayXFor(row, panel) {
   const minute = intradayMinute(row?.time);
+  const dayCount = Math.max(1, Number(row?._dayCount) || intradayDayCount());
+  const dayIndex = Math.max(0, Math.min(dayCount - 1, Number(row?._dayIndex) || 0));
   const ratio = Number.isFinite(minute)
-    ? Math.max(0, Math.min(1, minute / INTRADAY_TOTAL_MINUTES))
+    ? Math.max(0, Math.min(1, (dayIndex + minute / INTRADAY_TOTAL_MINUTES) / dayCount))
     : 0;
   return panel.x + ratio * panel.width;
 }
@@ -691,7 +774,7 @@ function drawChart() {
     drawDailyChart();
     return;
   }
-  const rows = state.payload?.rows || [];
+  const rows = intradayRows();
   if (!rows.length) return;
   const context = setupCanvas();
   const geometry = chartGeometry(nodes.canvas);
@@ -905,21 +988,12 @@ function drawPanels(context, geometry, rows) {
       row.high,
       row.intraday_average,
       row.purple,
-      state.payload?.previous_close,
+      row.previous_close ?? state.payload?.previous_close,
     ]),
     { padding: 0.06 },
   );
   drawHighLowBand(context, rows, pricePanel, priceDomain);
-  if (Number(state.payload?.previous_close) > 0) {
-    drawHorizontalLine(
-      context,
-      pricePanel,
-      priceDomain,
-      Number(state.payload.previous_close),
-      "#7d8998",
-      [4, 4],
-    );
-  }
+  drawPreviousCloseLines(context, rows, pricePanel, priceDomain);
   drawLine(context, rows, pricePanel, priceDomain, "close", "#1f5fbf", 1.55);
   drawLine(
     context,
@@ -1034,22 +1108,51 @@ function drawHighLowBand(context, rows, panel, range) {
   if (rows.length < 2) return;
   context.save();
   context.fillStyle = "rgba(31,95,191,.08)";
-  context.beginPath();
-  rows.forEach((row, index) => {
-    const x = seriesXFor(row, index, panel, rows);
-    const y = yFor(row.high, panel, range);
-    if (index === 0) context.moveTo(x, y);
-    else context.lineTo(x, y);
-  });
-  for (let index = rows.length - 1; index >= 0; index -= 1) {
-    context.lineTo(
-      intradayXFor(rows[index], panel),
-      yFor(rows[index].low, panel, range),
-    );
+  const groups = new Map();
+  for (const row of rows) {
+    const key = row.trading_date || "single";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
   }
-  context.closePath();
-  context.fill();
+  for (const dayRows of groups.values()) {
+    if (dayRows.length < 2) continue;
+    context.beginPath();
+    dayRows.forEach((row, index) => {
+      const x = intradayXFor(row, panel);
+      const y = yFor(row.high, panel, range);
+      if (index === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    });
+    for (let index = dayRows.length - 1; index >= 0; index -= 1) {
+      context.lineTo(intradayXFor(dayRows[index], panel), yFor(dayRows[index].low, panel, range));
+    }
+    context.closePath();
+    context.fill();
+  }
   context.restore();
+}
+
+function drawPreviousCloseLines(context, rows, panel, range) {
+  const dayCount = intradayDayCount(rows);
+  const seen = new Set();
+  for (const row of rows) {
+    const dayIndex = Number(row._dayIndex) || 0;
+    const value = Number(row.previous_close ?? state.payload?.previous_close);
+    if (!(value > 0) || seen.has(dayIndex)) continue;
+    seen.add(dayIndex);
+    const y = yFor(value, panel, range);
+    const startX = panel.x + (dayIndex / dayCount) * panel.width;
+    const endX = panel.x + ((dayIndex + 1) / dayCount) * panel.width;
+    context.save();
+    context.strokeStyle = "#7d8998";
+    context.lineWidth = 0.8;
+    context.setLineDash([4, 4]);
+    context.beginPath();
+    context.moveTo(startX, y);
+    context.lineTo(endX, y);
+    context.stroke();
+    context.restore();
+  }
 }
 
 function drawHalfHourSeparators(context, panels, rows) {
@@ -1066,14 +1169,28 @@ function drawHalfHourSeparators(context, panels, rows) {
   context.font = '9px Arial, "Microsoft YaHei", sans-serif';
   context.textAlign = "center";
   context.textBaseline = "bottom";
-  INTRADAY_GRID_MINUTES.forEach((minute) => {
-    const x = firstPanel.x
-      + (minute / INTRADAY_TOTAL_MINUTES) * firstPanel.width;
-    context.beginPath();
-    context.moveTo(x, top);
-    context.lineTo(x, bottom);
-    context.stroke();
-  });
+  const dayCount = intradayDayCount(rows);
+  for (let dayIndex = 0; dayIndex < dayCount; dayIndex += 1) {
+    INTRADAY_GRID_MINUTES.forEach((minute) => {
+      const x = firstPanel.x
+        + ((dayIndex + minute / INTRADAY_TOTAL_MINUTES) / dayCount) * firstPanel.width;
+      context.beginPath();
+      context.moveTo(x, top);
+      context.lineTo(x, bottom);
+      context.stroke();
+    });
+    if (dayIndex > 0) {
+      const x = firstPanel.x + (dayIndex / dayCount) * firstPanel.width;
+      context.setLineDash([]);
+      context.strokeStyle = "rgba(61, 78, 63, .68)";
+      context.beginPath();
+      context.moveTo(x, top);
+      context.lineTo(x, bottom);
+      context.stroke();
+      context.setLineDash([4, 4]);
+      context.strokeStyle = "rgba(93, 105, 94, .38)";
+    }
+  }
   context.restore();
 }
 
@@ -1096,7 +1213,8 @@ function drawLine(context, rows, panel, range, key, color, width, dash = []) {
     }
     const x = seriesXFor(row, index, panel, rows);
     const y = yFor(value, panel, range);
-    if (!started) {
+    const newDay = index > 0 && row.trading_date !== rows[index - 1].trading_date;
+    if (!started || newDay) {
       context.moveTo(x, y);
       started = true;
     } else {
@@ -1111,6 +1229,7 @@ function drawConditionalLine(context, rows, panel, range, key, colorForRow, widt
   context.save();
   context.lineWidth = width;
   for (let index = 1; index < rows.length; index += 1) {
+    if (rows[index].trading_date !== rows[index - 1].trading_date) continue;
     const previous = Number(rows[index - 1][key]);
     const value = Number(rows[index][key]);
     if (!Number.isFinite(previous) || !Number.isFinite(value)) continue;
@@ -1129,7 +1248,7 @@ function drawConditionalLine(context, rows, panel, range, key, colorForRow, widt
 function drawBars(context, rows, panel, range, colorForRow, valueForRow = (row) => row.amount) {
   const slots = state.view === "daily"
     ? dailySlotCount(rows)
-    : INTRADAY_TOTAL_MINUTES + 1;
+    : (INTRADAY_TOTAL_MINUTES + 1) * intradayDayCount(rows);
   const barWidth = Math.max(
     1,
     Math.min(5, (panel.width / slots) * 0.72),
@@ -1165,6 +1284,7 @@ function drawZeroLine(context, panel, range) {
 function drawVisibleCrosses(context, rows, panel, range) {
   context.fillStyle = "#ad1d2a";
   for (let index = 1; index < rows.length; index += 1) {
+    if (rows[index].trading_date !== rows[index - 1].trading_date) continue;
     const previous = Number(rows[index - 1].visible_funds);
     const current = Number(rows[index].visible_funds);
     if (!(previous < 100 && current >= 100)) continue;
@@ -1214,16 +1334,26 @@ function drawAxes(context, geometry, rows, domains) {
 
   const lastPanel = geometry.panels.at(-1);
   context.textBaseline = "top";
-  INTRADAY_AXIS_LABELS.forEach(({ minute, label }, labelIndex) => {
-    const x = lastPanel.x
-      + (minute / INTRADAY_TOTAL_MINUTES) * lastPanel.width;
-    context.textAlign = labelIndex === 0
-      ? "left"
-      : labelIndex === INTRADAY_AXIS_LABELS.length - 1
-        ? "right"
-        : "center";
-    context.fillText(label, x, lastPanel.y + lastPanel.height + 7);
-  });
+  const dayCount = intradayDayCount(rows);
+  if (dayCount === 1) {
+    INTRADAY_AXIS_LABELS.forEach(({ minute, label }, labelIndex) => {
+      const x = lastPanel.x
+        + (minute / INTRADAY_TOTAL_MINUTES) * lastPanel.width;
+      context.textAlign = labelIndex === 0
+        ? "left"
+        : labelIndex === INTRADAY_AXIS_LABELS.length - 1
+          ? "right"
+          : "center";
+      context.fillText(label, x, lastPanel.y + lastPanel.height + 7);
+    });
+  } else {
+    const dates = [...new Map(rows.map((row) => [row._dayIndex, row.trading_date])).entries()];
+    for (const [dayIndex, tradingDate] of dates) {
+      const centerX = lastPanel.x + ((dayIndex + 0.5) / dayCount) * lastPanel.width;
+      context.textAlign = "center";
+      context.fillText(displayDailyDate(tradingDate).slice(5), centerX, lastPanel.y + lastPanel.height + 7);
+    }
+  }
 }
 
 function formatAxis(value, key) {
@@ -1234,13 +1364,17 @@ function formatAxis(value, key) {
 }
 
 function drawEvents(context, panel, rows, priceDomain) {
-  const events = state.payload?.events || [];
+  const events = intradayPayloads().flatMap((payload) =>
+    payload.events.map((event) => ({ ...event, trading_date: payload.trading_date })),
+  );
   if (!events.length) return;
-  const indexByTime = new Map(rows.map((row, index) => [row.time, index]));
+  const indexByTime = new Map(
+    rows.map((row, index) => [`${row.trading_date}|${row.time}`, index]),
+  );
   const lanes = new Map();
   for (const event of events) {
     const sourceTime = String(event.details?.source_bar_time || event.event_time || "").slice(11, 16);
-    const index = indexByTime.get(sourceTime);
+    const index = indexByTime.get(`${event.trading_date}|${sourceTime}`);
     if (index === undefined) continue;
     const lane = lanes.get(index) || 0;
     lanes.set(index, lane + 1);
@@ -1282,7 +1416,7 @@ function selectedIndexFromPointer(event) {
   const rows =
     state.view === "daily"
       ? state.dailyPayload?.rows || []
-      : state.payload?.rows || [];
+      : intradayRows();
   if (!rows.length) return -1;
   const geometry =
     state.view === "daily"
@@ -1298,14 +1432,14 @@ function selectedIndexFromPointer(event) {
     return index >= 0 && index < rows.length ? index : -1;
   }
   const ratio = Math.max(0, Math.min(1, (x - panel.x) / panel.width));
-  const targetMinute = ratio * INTRADAY_TOTAL_MINUTES;
-  const latestMinute = intradayMinute(rows.at(-1)?.time);
-  if (Number.isFinite(latestMinute) && targetMinute > latestMinute + 1) {
-    return -1;
-  }
+  const dayCount = intradayDayCount(rows);
+  const targetPosition = ratio * dayCount;
+  const targetDay = Math.min(dayCount - 1, Math.floor(targetPosition));
+  const targetMinute = (targetPosition - targetDay) * INTRADAY_TOTAL_MINUTES;
   let nearestIndex = -1;
   let nearestDistance = Number.POSITIVE_INFINITY;
   rows.forEach((row, index) => {
+    if ((Number(row._dayIndex) || 0) !== targetDay) return;
     const minute = intradayMinute(row.time);
     if (!Number.isFinite(minute)) return;
     const distance = Math.abs(minute - targetMinute);
@@ -1332,15 +1466,18 @@ function showTooltip(event) {
     showDailyTooltip(event, index);
     return;
   }
-  const row = state.payload.rows[index];
-  const nearbyEvents = state.payload.events.filter((item) => {
+  const row = intradayRows()[index];
+  const dayPayload = intradayPayloads().find(
+    (item) => item.trading_date === row.trading_date,
+  ) || state.payload;
+  const nearbyEvents = dayPayload.events.filter((item) => {
     const source = String(item.details?.source_bar_time || item.event_time || "").slice(11, 16);
     return source === row.time;
   });
   nodes.tooltip.innerHTML = `
-    <strong>${row.time}　${formatNumber(row.close, 3)}</strong>
+    <strong>${state.intradayDays > 1 ? `${displayDailyDate(row.trading_date)}　` : ""}${row.time}　${formatNumber(row.close, 3)}</strong>
     开 ${formatNumber(row.open, 3)}　高 ${formatNumber(row.high, 3)}　低 ${formatNumber(row.low, 3)}<br>
-    涨跌幅 ${formatMinuteReturn(row.close)}<br>
+    涨跌幅 ${formatMinuteReturn(row.close, row.previous_close)}<br>
     紫线 ${formatNumber(row.purple, 3)}　成交额 ${formatAmount(row.amount)}　量比 ${formatNumber(row.volume_ratio, 2)}<br>
     均价≈ ${formatNumber(row.intraday_average, 3)}<br>
     暗盘 ${row.dark_state === "inflow" ? "流入" : "流出"}　MACD ${formatNumber(row.macd, 4)}<br>
@@ -1379,8 +1516,8 @@ function showDailyTooltip(event, index) {
   drawChart();
 }
 
-function formatMinuteReturn(price) {
-  const previousClose = Number(state.payload?.previous_close);
+function formatMinuteReturn(price, rowPreviousClose = null) {
+  const previousClose = Number(rowPreviousClose ?? state.payload?.previous_close);
   if (!(previousClose > 0) || !Number.isFinite(Number(price))) return "-";
   const value = (Number(price) / previousClose - 1) * 100;
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
@@ -1410,6 +1547,14 @@ nodes.dateSelect.addEventListener("change", () => {
   state.manualDate = true;
   loadBond({ date: nodes.dateSelect.value });
 });
+nodes.intradayDaysSelect.addEventListener("change", () => {
+  state.intradayDays = Math.max(1, Math.min(5, Number(nodes.intradayDaysSelect.value) || 1));
+  const url = new URL(window.location.href);
+  if (state.intradayDays > 1) url.searchParams.set("days", String(state.intradayDays));
+  else url.searchParams.delete("days");
+  window.history.replaceState(window.history.state, "", url);
+  loadBond({ date: state.manualDate ? nodes.dateSelect.value : "" });
+});
 nodes.dailyRangeSelect.addEventListener("change", loadDaily);
 nodes.intradayViewButton.addEventListener("click", () => setView("intraday"));
 nodes.dailyViewButton.addEventListener("click", () => setView("daily"));
@@ -1426,4 +1571,5 @@ window.addEventListener("resize", () => {
 
 nodes.name.textContent = requestedName || "可转债";
 nodes.code.textContent = requestedCode;
+nodes.intradayDaysSelect.value = String(state.intradayDays);
 setView(state.view, { updateUrl: false, force: true });

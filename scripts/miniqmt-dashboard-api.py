@@ -71,6 +71,10 @@ DAILY_CACHE_TTL_SECONDS = 300
 DAILY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 INTRADAY_CACHE_TTL_SECONDS = 300
 INTRADAY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+HISTORICAL_VOLUME_CACHE: dict[
+    str,
+    tuple[float, tuple[float | None, float | None]],
+] = {}
 FINANCE_ROOT = Path(__file__).resolve().parents[1]
 ACTIVE_INDEX_DATA_PATH = FINANCE_ROOT / "data" / "active-convertible-bond-index.json"
 BOND_TAGS_DATA_PATH = FINANCE_ROOT / "data" / "convertible-bond-tags.json"
@@ -678,6 +682,63 @@ def bond_volume_ratio(
         ),
         average5_volume if average5_volume > 0 else None,
     )
+
+
+def historical_bond_volume_ratio(
+    stored_code: str,
+    trading_date: str,
+) -> tuple[float | None, float | None]:
+    cache_key = f"{stored_code}:{trading_date}"
+    cached = HISTORICAL_VOLUME_CACHE.get(cache_key)
+    if cached and time.monotonic() - cached[0] < INTRADAY_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    end_moment = datetime.strptime(trading_date, "%Y%m%d")
+    start_time = (end_moment - timedelta(days=45)).strftime("%Y%m%d")
+    bridge = MONITOR.BridgeClient(
+        f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}",
+        timeout=30.0,
+    )
+    payload = bridge.get(
+        "/api/market/market_data_ex",
+        {
+            "stocks": stored_code,
+            "period": "1d",
+            "start_time": start_time,
+            "end_time": trading_date,
+            "count": "-1",
+            "dividend_type": "none",
+            "fill_data": "false",
+        },
+        timeout=30.0,
+    )
+    daily_rows = []
+    for raw in (payload.get("data") or {}).get(stored_code) or []:
+        row_date = compact_date(raw.get("index") or raw.get("time"))
+        volume = finite_or_none(raw.get("volume"))
+        if len(row_date) == 8 and volume is not None and volume > 0:
+            daily_rows.append((row_date, volume))
+    daily_rows.sort(key=lambda item: item[0])
+    target_index = next(
+        (
+            index
+            for index, (row_date, _) in enumerate(daily_rows)
+            if row_date == trading_date
+        ),
+        -1,
+    )
+    result: tuple[float | None, float | None] = (None, None)
+    if target_index >= 0:
+        previous_volumes = [
+            volume
+            for _, volume in daily_rows[max(0, target_index - 5) : target_index]
+        ]
+        if previous_volumes:
+            average_volume = sum(previous_volumes) / len(previous_volumes)
+            target_volume = daily_rows[target_index][1]
+            result = (target_volume / average_volume, average_volume)
+    HISTORICAL_VOLUME_CACHE[cache_key] = (time.monotonic(), result)
+    return result
 
 
 def elapsed_market_minutes_from_clock(value: Any) -> int:
@@ -1416,6 +1477,7 @@ def historical_minute_rows(
                 "high": high,
                 "low": low,
                 "close": close,
+                "volume": finite_or_none(raw.get("volume")) or 0,
                 "amount": finite_or_none(raw.get("amount")) or 0,
             }
         )
@@ -1547,6 +1609,13 @@ def merge_minute_rows(*sources: list[Any]) -> list[Any]:
     return [by_timestamp[timestamp] for timestamp in sorted(by_timestamp)]
 
 
+def optional_row_value(row: Any, key: str) -> Any:
+    try:
+        return row[key]
+    except (KeyError, IndexError, TypeError):
+        return None
+
+
 def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
     code = normalize_code(code_input)
     stored_code = monitor_code(code)
@@ -1594,7 +1663,7 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
     local_rows = list(minute_rows)
     downloaded_rows: list[dict[str, Any]] = []
     downloaded_previous_close = None
-    if minute_rows_need_backfill(local_rows, trading_date):
+    if date_input or minute_rows_need_backfill(local_rows, trading_date):
         try:
             (
                 downloaded_rows,
@@ -1614,7 +1683,7 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
             live_name,
             live_cumulative_amount,
         ) = live_tick_minute_rows(stored_code, trading_date)
-    minute_rows = merge_minute_rows(downloaded_rows, local_rows, live_rows)
+    minute_rows = merge_minute_rows(local_rows, downloaded_rows, live_rows)
     previous_close = live_previous_close or downloaded_previous_close
     if live_name:
         name = live_name
@@ -1643,10 +1712,16 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
     ]
     indicators = MONITOR.compute_indicator_series(minutes)
     try:
-        volume_ratio, average5_volume = bond_volume_ratio(
-            stored_code,
-            trading_date,
-        )
+        if date_input:
+            volume_ratio, average5_volume = historical_bond_volume_ratio(
+                stored_code,
+                trading_date,
+            )
+        else:
+            volume_ratio, average5_volume = bond_volume_ratio(
+                stored_code,
+                trading_date,
+            )
     except Exception:
         volume_ratio = None
         average5_volume = None
@@ -1654,19 +1729,31 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     cumulative_amount = 0.0
     cumulative_estimated_units = 0.0
+    cumulative_qmt_volume = 0.0
+    has_qmt_volume = any(
+        (finite_or_none(optional_row_value(row, "volume")) or 0) > 0
+        for row in minute_rows
+    )
     for index, row in enumerate(minute_rows):
         amount = float(row["amount"])
         cumulative_amount += amount
         close = float(row["close"])
         if amount > 0 and close > 0:
             cumulative_estimated_units += amount / close
+        cumulative_qmt_volume += (
+            finite_or_none(optional_row_value(row, "volume")) or 0
+        )
         intraday_average = (
             cumulative_amount / cumulative_estimated_units
             if cumulative_estimated_units > 0
             else close
         )
         elapsed_minutes = elapsed_market_minutes_from_clock(row["minute_time"])
-        estimated_qmt_volume = cumulative_estimated_units / MONITOR.CB_VOLUME_MULTIPLIER
+        estimated_qmt_volume = (
+            cumulative_qmt_volume
+            if has_qmt_volume
+            else cumulative_estimated_units / MONITOR.CB_VOLUME_MULTIPLIER
+        )
         minute_volume_ratio = (
             estimated_qmt_volume
             / elapsed_minutes
@@ -1797,7 +1884,9 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
             "full_session": len(rows) >= 241,
             "intraday_average_quality": "estimated_from_minute_amount_and_close",
             "volume_ratio_quality": (
-                "estimated_intraday_path_anchored_to_live_qmt"
+                "historical_qmt_minute_volume_vs_prior_5_day_average"
+                if date_input and volume_ratio is not None and has_qmt_volume
+                else "estimated_intraday_path_anchored_to_live_qmt"
                 if volume_ratio is not None
                 else "unavailable_without_live_qmt_baseline"
             ),

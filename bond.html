@@ -32,6 +32,16 @@
             <span>交易日</span>
             <select id="dateSelect"></select>
           </label>
+          <label id="intradayDaysControl">
+            <span>分时周期</span>
+            <select id="intradayDaysSelect">
+              <option value="1" selected>1日</option>
+              <option value="2">2日</option>
+              <option value="3">3日</option>
+              <option value="4">4日</option>
+              <option value="5">5日</option>
+            </select>
+          </label>
           <label id="dailyRangeControl" hidden>
             <span>区间</span>
             <select id="dailyRangeSelect">
@@ -83,7 +93,7 @@
         <header>
           <div>
             <span class="eyebrow">INTRADAY EVENTS</span>
-            <h2>当日信号</h2>
+            <h2 id="eventsTitle">当日信号</h2>
           </div>
           <span id="dataFootnote">指标由已收盘分钟推导，普通行情不等同于Level-2逐笔。</span>
         </header>
