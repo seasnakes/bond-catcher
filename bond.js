@@ -94,10 +94,9 @@ const nodes = {
   redeemRiskCard: document.querySelector("#redeemRiskCard"),
   redeemRisk: document.querySelector("#redeemRisk"),
   redeemDetail: document.querySelector("#redeemDetail"),
-  barCountLabel: document.querySelector("#barCountLabel"),
-  barCount: document.querySelector("#barCount"),
-  latestMinuteLabel: document.querySelector("#latestMinuteLabel"),
-  latestMinute: document.querySelector("#latestMinute"),
+  redeemAnnouncementLink: document.querySelector("#redeemAnnouncementLink"),
+  stockChange: document.querySelector("#stockChange"),
+  stockSparkline: document.querySelector("#stockSparkline"),
   totalAmountLabel: document.querySelector("#totalAmountLabel"),
   totalAmount: document.querySelector("#totalAmount"),
   volumeRatioCard: document.querySelector("#volumeRatioCard"),
@@ -194,6 +193,70 @@ function renderBondMetadata(payload) {
     : "";
   nodes.redeemDetail.textContent = `${redeem.countdown || "暂无计数"}${trigger}`;
   nodes.redeemRiskCard.title = redeem.quality || "公司正式公告优先";
+  const announcement = redeem.announcement || {};
+  nodes.redeemAnnouncementLink.hidden = !announcement.url;
+  if (announcement.url) {
+    nodes.redeemAnnouncementLink.href = announcement.url;
+    const noticeDate = displayDailyDate(announcement.notice_date);
+    nodes.redeemAnnouncementLink.textContent =
+      `${announcement.status || "强赎公告"}${noticeDate !== "-" ? ` · ${noticeDate}` : ""}`;
+    nodes.redeemAnnouncementLink.title = announcement.title || "查看公司公告";
+  }
+  nodes.stockChange.textContent = formatPercent(payload.stock_change);
+  nodes.stockChange.className = toneClass(payload.stock_change);
+  nodes.stockChange.title = `${payload.stock_name || "正股"} ${payload.stock_code || ""}`;
+  drawStockSparkline(payload.stock_intraday || [], payload.stock_previous_close);
+}
+
+function drawStockSparkline(rows, previousClose) {
+  const canvas = nodes.stockSparkline;
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  if (!(width > 0 && height > 0)) return;
+  const ratio = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  canvas.width = Math.round(width * ratio);
+  canvas.height = Math.round(height * ratio);
+  const context = canvas.getContext("2d");
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  context.clearRect(0, 0, width, height);
+  const points = rows
+    .map((row) => ({ minute: intradayMinute(row.time), price: Number(row.price) }))
+    .filter((row) => Number.isFinite(row.minute) && Number.isFinite(row.price));
+  if (!points.length) {
+    context.fillStyle = "#8a9388";
+    context.font = '11px Arial, "Microsoft YaHei", sans-serif';
+    context.fillText("暂无分时", 6, Math.max(13, height / 2 + 4));
+    return;
+  }
+  const values = points.map((row) => row.price);
+  if (Number.isFinite(Number(previousClose))) values.push(Number(previousClose));
+  let min = Math.min(...values);
+  let max = Math.max(...values);
+  const span = max - min || Math.max(Math.abs(max) * 0.01, 0.01);
+  min -= span * 0.08;
+  max += span * 0.08;
+  const xFor = (minute) => 4 + (minute / INTRADAY_TOTAL_MINUTES) * (width - 8);
+  const yFor = (price) => 3 + ((max - price) / (max - min || 1)) * (height - 6);
+  if (Number.isFinite(Number(previousClose))) {
+    context.strokeStyle = "#b7c0b3";
+    context.setLineDash([3, 3]);
+    context.beginPath();
+    context.moveTo(4, yFor(Number(previousClose)));
+    context.lineTo(width - 4, yFor(Number(previousClose)));
+    context.stroke();
+    context.setLineDash([]);
+  }
+  const latest = points.at(-1).price;
+  context.strokeStyle = latest >= Number(previousClose) ? "#df2434" : "#159447";
+  context.lineWidth = 1.5;
+  context.beginPath();
+  points.forEach((point, index) => {
+    const x = xFor(point.minute);
+    const y = yFor(point.price);
+    if (index === 0) context.moveTo(x, y);
+    else context.lineTo(x, y);
+  });
+  context.stroke();
 }
 
 async function loadBondMetadata() {
@@ -487,12 +550,8 @@ function renderDailyPayload(payload) {
   nodes.latestChange.textContent =
     `${Number(latest.change) > 0 ? "+" : ""}${formatNumber(latest.change, 2)}%`;
   nodes.latestChange.className = toneClass(latest.change);
-  nodes.barCountLabel.textContent = "交易日数";
-  nodes.latestMinuteLabel.textContent = "最新日期";
   nodes.totalAmountLabel.textContent = "区间成交额";
   nodes.eventCountLabel.textContent = "区间涨跌";
-  nodes.barCount.textContent = String(rows.length);
-  nodes.latestMinute.textContent = displayDailyDate(latest.date);
   nodes.totalAmount.textContent = formatAmount(
     rows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0),
   );
@@ -523,15 +582,9 @@ function renderPayload(payload) {
     2,
   )}%`;
   nodes.latestChange.className = toneClass(displayedReturn);
-  nodes.barCountLabel.textContent = "分钟数";
-  nodes.latestMinuteLabel.textContent = "最新分钟";
   nodes.totalAmountLabel.textContent = "累计成交额";
   nodes.eventCountLabel.textContent = "今日信号";
   nodes.eventCount.className = "";
-  nodes.barCount.textContent = displayedPayloads.length > 1
-    ? `${displayedPayloads.length}日 / ${displayedRows.length}分钟`
-    : `${payload.bar_count}${payload.complete_session ? " / 241" : ""}`;
-  nodes.latestMinute.textContent = payload.latest_minute || "-";
   nodes.totalAmount.textContent = formatAmount(
     displayedPayloads.length > 1
       ? displayedRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0)
@@ -1731,7 +1784,15 @@ nodes.backLink.addEventListener("click", (event) => {
 });
 window.addEventListener("resize", () => {
   window.clearTimeout(state.resizeTimer);
-  state.resizeTimer = window.setTimeout(drawChart, 100);
+  state.resizeTimer = window.setTimeout(() => {
+    drawChart();
+    if (state.metadata) {
+      drawStockSparkline(
+        state.metadata.stock_intraday || [],
+        state.metadata.stock_previous_close,
+      );
+    }
+  }, 100);
 });
 
 nodes.name.textContent = requestedName || "可转债";

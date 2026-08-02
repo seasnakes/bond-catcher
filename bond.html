@@ -88,12 +88,16 @@
           <span>强赎风险倒计时</span>
           <strong id="redeemRisk">-</strong>
           <small id="redeemDetail">正在核对近30个交易日</small>
+          <a id="redeemAnnouncementLink" class="redeem-announcement-link" href="#" target="_blank" rel="noreferrer" hidden>查看公司公告</a>
         </article>
       </section>
 
       <section class="metrics" aria-label="数据摘要">
-        <article><span id="barCountLabel">分钟数</span><strong id="barCount">-</strong></article>
-        <article><span id="latestMinuteLabel">最新分钟</span><strong id="latestMinute">-</strong></article>
+        <article id="stockChangeCard"><span>正股涨跌幅</span><strong id="stockChange">-</strong></article>
+        <article class="stock-spark-card">
+          <span>正股分时</span>
+          <canvas id="stockSparkline" aria-label="正股当日分时缩略图"></canvas>
+        </article>
         <article><span id="totalAmountLabel">累计成交额</span><strong id="totalAmount">-</strong></article>
         <article id="volumeRatioCard"><span>量比</span><strong id="volumeRatio">-</strong></article>
         <article id="purpleSupportCard"><span>紫线回踩</span><strong id="purpleSupportCount">-</strong></article>

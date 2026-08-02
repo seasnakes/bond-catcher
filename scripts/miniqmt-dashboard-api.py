@@ -12,6 +12,8 @@ import re
 import sqlite3
 import sys
 import time
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -94,6 +96,8 @@ BOND_TAGS_CACHE: tuple[float, dict[str, Any], dict[str, dict[str, Any]]] | None 
 BOND_FUNDAMENTALS_CACHE: tuple[float, dict[str, dict[str, Any]]] | None = None
 BOND_METADATA_CACHE_TTL_SECONDS = 300
 BOND_METADATA_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+REDEEM_NOTICE_CACHE_TTL_SECONDS = 21_600
+REDEEM_NOTICE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 def load_monitor_module() -> Any:
@@ -825,6 +829,182 @@ def stock_daily_closes(
     return result
 
 
+def fetch_external_json(url: str, timeout: float = 10.0) -> dict[str, Any]:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://data.eastmoney.com/",
+            "User-Agent": "Mozilla/5.0",
+        },
+    )
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(request, timeout=timeout) as response:
+        payload = json.load(response)
+    return payload if isinstance(payload, dict) else {}
+
+
+def chinese_date_to_compact(value: str) -> str:
+    match = re.search(r"(20\d{2})年(\d{1,2})月(\d{1,2})日", str(value or ""))
+    if not match:
+        return ""
+    return f"{int(match.group(1)):04d}{int(match.group(2)):02d}{int(match.group(3)):02d}"
+
+
+def latest_redeem_announcement(stock_code: str) -> dict[str, Any]:
+    bare_stock_code = stock_code.split(".")[0]
+    cached = REDEEM_NOTICE_CACHE.get(bare_stock_code)
+    if cached and time.monotonic() - cached[0] < REDEEM_NOTICE_CACHE_TTL_SECONDS:
+        return cached[1]
+    result: dict[str, Any] = {}
+    try:
+        list_url = "https://np-anotice-stock.eastmoney.com/api/security/ann?" + urllib.parse.urlencode(
+            {
+                "sr": "-1",
+                "page_size": "100",
+                "page_index": "1",
+                "ann_type": "A",
+                "client_source": "web",
+                "stock_list": bare_stock_code,
+            }
+        )
+        notices = list((fetch_external_json(list_url).get("data") or {}).get("list") or [])
+        notice = next(
+            (
+                item
+                for item in notices
+                if "赎回" in str(item.get("title") or "")
+                and any(
+                    term in str(item.get("title") or "")
+                    for term in ("不提前赎回", "不赎回", "提前赎回", "预计触发赎回", "赎回实施", "赎回结果", "赎回暨")
+                )
+            ),
+            None,
+        )
+        if not notice:
+            REDEEM_NOTICE_CACHE[bare_stock_code] = (time.monotonic(), result)
+            return result
+        article_code = str(notice.get("art_code") or "")
+        content_url = "https://np-cnotice-stock.eastmoney.com/api/content/ann?" + urllib.parse.urlencode(
+            {"art_code": article_code, "client_source": "web", "page_index": "1"}
+        )
+        content_payload = fetch_external_json(content_url)
+        content_data = content_payload.get("data") or {}
+        content = re.sub(r"\s+", "", str(content_data.get("notice_content") or ""))
+        title = str(notice.get("title") or content_data.get("notice_title") or "")
+        if "不提前赎回" in title or "不赎回" in title:
+            notice_type = "no_redeem"
+            status = "已公告暂不强赎"
+        elif "赎回结果" in title:
+            notice_type = "redeem_finished"
+            status = "强赎已完成"
+        elif "赎回实施" in title or "赎回暨" in title:
+            notice_type = "redeeming"
+            status = "强赎实施中"
+        elif "提前赎回" in title:
+            notice_type = "redeem"
+            status = "已决定强赎"
+        elif "预计触发赎回" in title:
+            notice_type = "trigger_warning"
+            status = "预计触发强赎"
+        else:
+            notice_type = "notice"
+            status = "强赎相关公告"
+
+        commitment_match = re.search(
+            r"未来[^，。；]{0,18}?内[（(]?(?:即)?"
+            r"(20\d{2}年\d{1,2}月\d{1,2}日)至"
+            r"(20\d{2}年\d{1,2}月\d{1,2}日)",
+            content,
+        )
+        commitment_start = chinese_date_to_compact(commitment_match.group(1)) if commitment_match else ""
+        commitment_end = chinese_date_to_compact(commitment_match.group(2)) if commitment_match else ""
+        reset_match = re.search(
+            r"以(20\d{2}年\d{1,2}月\d{1,2}日)后的首个交易日重新计算",
+            content,
+        )
+        reset_after = chinese_date_to_compact(reset_match.group(1)) if reset_match else commitment_end
+        calendar_date = datetime.now().strftime("%Y%m%d")
+        commitment_active = bool(
+            notice_type == "no_redeem"
+            and commitment_end
+            and calendar_date <= commitment_end
+        )
+        attachments = list(content_data.get("attach_list") or [])
+        attachment_url = str((attachments[0] if attachments else {}).get("attach_url") or "")
+        result = {
+            "type": notice_type,
+            "status": "承诺期内不强赎" if commitment_active else status,
+            "notice_date": compact_date(notice.get("notice_date")),
+            "title": title,
+            "article_code": article_code,
+            "url": attachment_url or f"https://data.eastmoney.com/notices/detail/{bare_stock_code}/{article_code}.html",
+            "commitment_start": commitment_start,
+            "commitment_end": commitment_end,
+            "commitment_active": commitment_active,
+            "reset_after": reset_after,
+            "source": "上市公司公告（东方财富公告镜像）",
+        }
+    except Exception as error:
+        result = {"error": f"{type(error).__name__}: {error}"}
+    REDEEM_NOTICE_CACHE[bare_stock_code] = (time.monotonic(), result)
+    return result
+
+
+def stock_intraday_prices(
+    bridge: Any,
+    stock_code: str,
+    trading_date: str,
+) -> list[dict[str, Any]]:
+    if not stock_code or len(trading_date) != 8:
+        return []
+
+    def fetch_rows() -> list[dict[str, Any]]:
+        payload = bridge.get(
+            "/api/market/market_data_ex",
+            {
+                "stocks": stock_code,
+                "period": "1m",
+                "start_time": f"{trading_date}093000",
+                "end_time": f"{trading_date}150000",
+                "count": "-1",
+                "dividend_type": "none",
+                "fill_data": "false",
+            },
+            timeout=30.0,
+        )
+        return list((payload.get("data") or {}).get(stock_code) or [])
+
+    rows = fetch_rows()
+    if len(rows) < 2:
+        try:
+            bridge.post(
+                "/api/download/history_data2",
+                {
+                    "stocks": [stock_code],
+                    "period": "1m",
+                    "start_time": trading_date,
+                    "end_time": trading_date,
+                },
+                timeout=90.0,
+            )
+            rows = fetch_rows()
+        except Exception:
+            pass
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        compact_time = re.sub(r"\D", "", str(row.get("index") or ""))
+        close = finite_or_none(row.get("close"))
+        if len(compact_time) >= 12 and close is not None and close > 0:
+            result.append(
+                {
+                    "time": f"{compact_time[8:10]}:{compact_time[10:12]}",
+                    "price": close,
+                }
+            )
+    return result
+
+
 def bond_metadata_payload(code_input: str) -> dict[str, Any]:
     code = normalize_code(code_input)
     stored_code = monitor_code(code)
@@ -857,6 +1037,24 @@ def bond_metadata_payload(code_input: str) -> dict[str, Any]:
         or finite_or_none(detail.get("PreClose"))
     )
     stock_price = finite_or_none(stock_tick.get("lastPrice"))
+    stock_previous_close = finite_or_none(stock_tick.get("lastClose"))
+    stock_change = (
+        (stock_price / stock_previous_close - 1) * 100
+        if stock_price is not None
+        and stock_price > 0
+        and stock_previous_close is not None
+        and stock_previous_close > 0
+        else None
+    )
+    stock_trading_date = compact_date(stock_tick.get("timetag"))
+    try:
+        stock_intraday = stock_intraday_prices(
+            bridge,
+            stock_code,
+            stock_trading_date,
+        )
+    except Exception:
+        stock_intraday = []
     float_volume = (
         finite_or_none(detail.get("FloatVolume"))
         or finite_or_none(detail.get("FloatVolumn"))
@@ -900,6 +1098,8 @@ def bond_metadata_payload(code_input: str) -> dict[str, Any]:
     window_days = 30
     now = datetime.now()
     calendar_date = now.strftime("%Y%m%d")
+    announcement = latest_redeem_announcement(stock_code) if stock_code else {}
+    reset_after = compact_date(announcement.get("reset_after"))
     price_hit_dates: list[str] = []
     observed_days = 0
     history_error = ""
@@ -919,6 +1119,7 @@ def bond_metadata_payload(code_input: str) -> dict[str, Any]:
                 row
                 for row in daily_rows
                 if not conversion_start_date or row["date"] >= conversion_start_date
+                if not reset_after or row["date"] > reset_after
             ][-window_days:]
             observed_days = len(eligible_rows)
             price_hit_dates = [
@@ -935,7 +1136,21 @@ def bond_metadata_payload(code_input: str) -> dict[str, Any]:
         circulating_face_value is not None and circulating_face_value < 30_000_000
     )
     price_condition_met = price_hit_count >= target_days
-    if before_conversion:
+    announcement_type = str(announcement.get("type") or "")
+    if announcement.get("commitment_active"):
+        commitment_end = compact_date(announcement.get("commitment_end"))
+        status = "承诺期内不强赎"
+        countdown = (
+            f"保护期至 {commitment_end[:4]}-{commitment_end[4:6]}-{commitment_end[6:8]}"
+            if len(commitment_end) == 8
+            else "以公司公告期限为准"
+        )
+        risk = "protected"
+    elif announcement_type in {"redeem", "redeeming", "redeem_finished"}:
+        status = str(announcement.get("status") or "已发布强赎公告")
+        countdown = "查看最新公司公告"
+        risk = "triggered"
+    elif before_conversion:
         start_moment = datetime.strptime(conversion_start_date, "%Y%m%d")
         status = "未进入转股期"
         countdown = f"距开始转股 {max(0, (start_moment.date() - now.date()).days)} 天"
@@ -971,6 +1186,10 @@ def bond_metadata_payload(code_input: str) -> dict[str, Any]:
             "stock_name": source_row.get("正股简称") or tag_row.get("stockName"),
             "bond_price": bond_price,
             "stock_price": stock_price,
+            "stock_previous_close": stock_previous_close,
+            "stock_change": stock_change,
+            "stock_trading_date": stock_trading_date,
+            "stock_intraday": stock_intraday,
             "conversion_price": conversion_price,
             "conversion_value": conversion_value,
             "premium_rate": premium_rate,
@@ -996,6 +1215,8 @@ def bond_metadata_payload(code_input: str) -> dict[str, Any]:
                 "balance_condition_met": balance_condition_met,
                 "conversion_start_date": conversion_start_date,
                 "latest_hit_date": price_hit_dates[-1] if price_hit_dates else None,
+                "count_start_after": reset_after or None,
+                "announcement": announcement,
                 "quality": "按近30个交易日正股收盘价与当前强赎触发价估算；公司公告优先",
                 "history_error": history_error or None,
             },

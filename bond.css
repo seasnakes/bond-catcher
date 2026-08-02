@@ -93,6 +93,27 @@ select {
   color: var(--red);
 }
 
+.redeem-risk-card[data-risk="protected"] {
+  border-color: #9fc18a;
+  background: #f1f8eb;
+}
+
+.redeem-risk-card[data-risk="protected"] strong {
+  color: #3f7b29;
+}
+
+.redeem-announcement-link {
+  width: fit-content;
+  color: #527841;
+  font-size: 10px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.redeem-announcement-link:hover {
+  text-decoration: underline;
+}
+
 .indicator-header {
   position: sticky;
   top: 0;
@@ -420,6 +441,15 @@ h1 small {
   font-size: 18px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.metrics .stock-spark-card {
+  align-items: center;
+}
+
+.stock-spark-card canvas {
+  width: min(150px, 72%);
+  height: 34px;
 }
 
 .chart-card {
