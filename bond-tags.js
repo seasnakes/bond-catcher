@@ -8,6 +8,7 @@ const state = {
   quotes: new Map(),
   editingRow: null,
   editDraft: new Set(),
+  quickAddRow: null,
 };
 
 const nodes = {
@@ -16,6 +17,7 @@ const nodes = {
   matchedCount: document.querySelector("#matchedCount"),
   tagCount: document.querySelector("#tagCount"),
   search: document.querySelector("#searchInput"),
+  searchSuggestions: document.querySelector("#searchSuggestions"),
   filters: document.querySelector("#tagFilters"),
   resultTitle: document.querySelector("#resultTitle"),
   resultMeta: document.querySelector("#resultMeta"),
@@ -29,6 +31,15 @@ const nodes = {
   closeEditor: document.querySelector("#closeEditorButton"),
   cancelEdit: document.querySelector("#cancelEditButton"),
   saveEdit: document.querySelector("#saveEditButton"),
+  quickAddCard: document.querySelector("#quickAddCard"),
+  quickAddToggle: document.querySelector("#quickAddToggle"),
+  quickAddTitle: document.querySelector("#quickAddTitle"),
+  quickAddForm: document.querySelector("#quickAddForm"),
+  quickAddInput: document.querySelector("#quickAddInput"),
+  quickAddSuggestions: document.querySelector("#quickAddSuggestions"),
+  quickAddStatus: document.querySelector("#quickAddStatus"),
+  quickAddCancel: document.querySelector("#quickAddCancel"),
+  quickAddSave: document.querySelector("#quickAddSave"),
 };
 
 function formatNumber(value, digits = 2) {
@@ -78,6 +89,56 @@ function filteredRows() {
   });
 }
 
+function rowSearchText(row) {
+  return [row.code, row.name, row.stockCode, row.stockName, row.industry1, row.industry2, row.industry3]
+    .map((value) => String(value || "").toLowerCase())
+    .join("|");
+}
+
+function suggestedRows(query, options = {}) {
+  const normalized = String(query || "").trim().toLowerCase();
+  if (!normalized && !options.allowEmpty) return [];
+  return state.rows
+    .filter((row) => !options.includeTag || (row.tags || []).includes(options.includeTag))
+    .filter((row) => !options.excludeTag || !(row.tags || []).includes(options.excludeTag))
+    .filter((row) => !normalized || rowSearchText(row).includes(normalized))
+    .sort((left, right) => {
+      const leftStarts = String(left.name || "").toLowerCase().startsWith(normalized) ? 1 : 0;
+      const rightStarts = String(right.name || "").toLowerCase().startsWith(normalized) ? 1 : 0;
+      const leftAmount = Number(state.quotes.get(left.code)?.amount) || 0;
+      const rightAmount = Number(state.quotes.get(right.code)?.amount) || 0;
+      return rightStarts - leftStarts || rightAmount - leftAmount;
+    })
+    .slice(0, 8);
+}
+
+function renderSuggestions(container, query, onSelect, options = {}) {
+  const rows = suggestedRows(query, options);
+  container.replaceChildren();
+  container.hidden = rows.length === 0;
+  for (const row of rows) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("role", "option");
+    const bond = document.createElement("span");
+    const name = document.createElement("strong");
+    name.textContent = row.name;
+    const code = document.createElement("small");
+    code.textContent = row.code;
+    bond.append(name, code);
+    const stock = document.createElement("span");
+    stock.className = "suggestion-stock";
+    stock.textContent = `${row.stockName || "-"} ${row.stockCode || ""}`;
+    button.append(bond, stock);
+    button.addEventListener("click", () => {
+      container.hidden = true;
+      onSelect(row);
+    });
+    container.append(button);
+  }
+  return rows;
+}
+
 function setSelectedTag(tag) {
   state.selectedTag = state.tagOrder.includes(tag) ? tag : "";
   const url = new URL(window.location.href);
@@ -86,6 +147,7 @@ function setSelectedTag(tag) {
   window.history.replaceState(window.history.state, "", url);
   renderFilters();
   renderTable();
+  renderQuickAdd();
 }
 
 function renderFilters() {
@@ -218,6 +280,68 @@ function recalculateCounts() {
   );
 }
 
+function resetQuickAdd() {
+  state.quickAddRow = null;
+  nodes.quickAddInput.value = "";
+  nodes.quickAddSuggestions.hidden = true;
+  nodes.quickAddSave.disabled = true;
+  nodes.quickAddStatus.textContent = "请选择一只尚未属于该标签的转债";
+}
+
+function renderQuickAdd() {
+  nodes.quickAddCard.hidden = !state.selectedTag;
+  if (!state.selectedTag) {
+    nodes.quickAddForm.hidden = true;
+    resetQuickAdd();
+    return;
+  }
+  nodes.quickAddTitle.textContent = `添加转债到“${state.selectedTag}”`;
+}
+
+function selectQuickAddRow(row) {
+  state.quickAddRow = row;
+  nodes.quickAddInput.value = `${row.name} ${row.code}`;
+  nodes.quickAddSave.disabled = false;
+  nodes.quickAddStatus.textContent = `将 ${row.name} 添加到“${state.selectedTag}”`;
+}
+
+async function saveQuickAdd() {
+  const row = state.quickAddRow;
+  const tag = state.selectedTag;
+  if (!row || !tag) return;
+  nodes.quickAddSave.disabled = true;
+  nodes.quickAddCancel.disabled = true;
+  nodes.quickAddStatus.textContent = "正在添加";
+  try {
+    const tags = new Set(row.tags || []);
+    tags.add(tag);
+    const payload = await fetchJson("/api/miniqmt/tags", {
+      method: "POST",
+      body: {
+        code: row.code,
+        tags: state.tagOrder.filter((value) => tags.has(value)),
+      },
+    });
+    row.tags = payload.tags || [];
+    recalculateCounts();
+    renderFilters();
+    renderTable();
+    nodes.quickAddStatus.textContent = `已将 ${row.name} 添加到“${tag}”`;
+    state.quickAddRow = null;
+    nodes.quickAddInput.value = "";
+    nodes.quickAddSuggestions.hidden = true;
+    window.setTimeout(() => {
+      nodes.quickAddForm.hidden = true;
+      nodes.quickAddSave.disabled = true;
+    }, 500);
+  } catch (error) {
+    nodes.quickAddStatus.textContent = error.message || "添加失败";
+    nodes.quickAddSave.disabled = false;
+  } finally {
+    nodes.quickAddCancel.disabled = false;
+  }
+}
+
 async function saveEditor() {
   if (!state.editingRow) return;
   nodes.saveEdit.disabled = true;
@@ -269,6 +393,7 @@ async function initialize() {
     if (!state.tagOrder.includes(state.selectedTag)) state.selectedTag = "";
     renderFilters();
     renderTable();
+    renderQuickAdd();
     await loadQuotes();
   } catch (error) {
     nodes.status.textContent = `标签读取失败：${error.message}`;
@@ -277,10 +402,74 @@ async function initialize() {
   }
 }
 
-nodes.search.addEventListener("input", renderTable);
+nodes.search.addEventListener("input", () => {
+  renderTable();
+  renderSuggestions(nodes.searchSuggestions, nodes.search.value, (row) => {
+    nodes.search.value = row.name;
+    renderTable();
+  }, { includeTag: state.selectedTag });
+});
+nodes.search.addEventListener("focus", () => {
+  renderSuggestions(nodes.searchSuggestions, nodes.search.value, (row) => {
+    nodes.search.value = row.name;
+    renderTable();
+  }, { includeTag: state.selectedTag });
+});
+nodes.search.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") nodes.searchSuggestions.hidden = true;
+  if (event.key === "Enter") {
+    const first = suggestedRows(nodes.search.value, { includeTag: state.selectedTag })[0];
+    if (!first) return;
+    event.preventDefault();
+    nodes.search.value = first.name;
+    nodes.searchSuggestions.hidden = true;
+    renderTable();
+  }
+});
 nodes.refresh.addEventListener("click", loadQuotes);
 nodes.closeEditor.addEventListener("click", closeEditor);
 nodes.cancelEdit.addEventListener("click", closeEditor);
 nodes.saveEdit.addEventListener("click", saveEditor);
+nodes.quickAddToggle.addEventListener("click", () => {
+  nodes.quickAddForm.hidden = !nodes.quickAddForm.hidden;
+  if (!nodes.quickAddForm.hidden) {
+    resetQuickAdd();
+    nodes.quickAddInput.focus();
+    renderSuggestions(
+      nodes.quickAddSuggestions,
+      "",
+      selectQuickAddRow,
+      { excludeTag: state.selectedTag, allowEmpty: true },
+    );
+  }
+});
+nodes.quickAddInput.addEventListener("input", () => {
+  state.quickAddRow = null;
+  nodes.quickAddSave.disabled = true;
+  nodes.quickAddStatus.textContent = "请选择联想结果中的转债";
+  renderSuggestions(
+    nodes.quickAddSuggestions,
+    nodes.quickAddInput.value,
+    selectQuickAddRow,
+    { excludeTag: state.selectedTag, allowEmpty: true },
+  );
+});
+nodes.quickAddInput.addEventListener("focus", () => {
+  renderSuggestions(
+    nodes.quickAddSuggestions,
+    nodes.quickAddInput.value,
+    selectQuickAddRow,
+    { excludeTag: state.selectedTag, allowEmpty: true },
+  );
+});
+nodes.quickAddCancel.addEventListener("click", () => {
+  nodes.quickAddForm.hidden = true;
+  resetQuickAdd();
+});
+nodes.quickAddSave.addEventListener("click", saveQuickAdd);
+document.addEventListener("pointerdown", (event) => {
+  if (!event.target.closest(".tag-search")) nodes.searchSuggestions.hidden = true;
+  if (!event.target.closest(".quick-add-form")) nodes.quickAddSuggestions.hidden = true;
+});
 
 void initialize();

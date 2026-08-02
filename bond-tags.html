@@ -31,6 +31,7 @@
         <label class="tag-search">
           <span>搜索</span>
           <input id="searchInput" type="search" placeholder="转债、代码、正股或行业" autocomplete="off" />
+          <div id="searchSuggestions" class="suggestion-list" role="listbox" hidden></div>
         </label>
         <div id="tagFilters" class="tag-filter-list" aria-label="标签筛选"></div>
       </section>
@@ -76,6 +77,25 @@
             <tbody id="tagTableBody"></tbody>
           </table>
           <div id="emptyState" class="empty-state" hidden>没有匹配的转债</div>
+        </div>
+      </section>
+
+      <section id="quickAddCard" class="quick-add-card" hidden>
+        <button id="quickAddToggle" class="quick-add-toggle" type="button">
+          <span aria-hidden="true">＋</span>
+          <strong id="quickAddTitle">添加转债到当前标签</strong>
+        </button>
+        <div id="quickAddForm" class="quick-add-form" hidden>
+          <label>
+            <span>搜索要添加的转债</span>
+            <input id="quickAddInput" type="search" placeholder="输入转债名称、代码或正股" autocomplete="off" />
+            <div id="quickAddSuggestions" class="suggestion-list" role="listbox" hidden></div>
+          </label>
+          <div class="quick-add-actions">
+            <span id="quickAddStatus">请选择一只尚未属于该标签的转债</span>
+            <button id="quickAddCancel" type="button">取消</button>
+            <button id="quickAddSave" class="is-primary" type="button" disabled>添加到标签</button>
+          </div>
         </div>
       </section>
     </main>
