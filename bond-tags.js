@@ -76,12 +76,11 @@ async function fetchJson(url, options = {}) {
 }
 
 function filteredRows() {
-  const query = nodes.search.value.trim().toLowerCase();
+  const query = nodes.search.value.trim();
   return state.rows.filter((row) => {
     if (state.selectedTag && !(row.tags || []).includes(state.selectedTag)) return false;
     if (!query) return true;
-    return [row.code, row.name, row.stockCode, row.stockName, row.industry1, row.industry2, row.industry3, ...(row.tags || [])]
-      .some((value) => String(value || "").toLowerCase().includes(query));
+    return searchMatchScore(row, query) < Number.POSITIVE_INFINITY;
   }).sort((left, right) => {
     const leftAmount = Number(state.quotes.get(left.code)?.amount) || 0;
     const rightAmount = Number(state.quotes.get(right.code)?.amount) || 0;
@@ -89,27 +88,72 @@ function filteredRows() {
   });
 }
 
-function rowSearchText(row) {
+function normalizeSearchValue(value) {
+  const replacements = new Map([
+    ["升", "声"], ["生", "声"],
+    ["讯", "迅"], ["训", "迅"], ["汛", "迅"],
+    ["在", "债"], ["载", "债"], ["寨", "债"],
+  ]);
+  return [...String(value || "").toLowerCase().replace(/[^0-9a-z\u3400-\u9fff]/g, "")]
+    .map((character) => replacements.get(character) || character)
+    .join("");
+}
+
+function editDistance(left, right) {
+  const source = [...left];
+  const target = [...right];
+  let previous = target.map((_, index) => index + 1);
+  previous.unshift(0);
+  for (let sourceIndex = 0; sourceIndex < source.length; sourceIndex += 1) {
+    const current = [sourceIndex + 1];
+    for (let targetIndex = 0; targetIndex < target.length; targetIndex += 1) {
+      current.push(Math.min(
+        current[targetIndex] + 1,
+        previous[targetIndex + 1] + 1,
+        previous[targetIndex] + (source[sourceIndex] === target[targetIndex] ? 0 : 1),
+      ));
+    }
+    previous = current;
+  }
+  return previous[target.length];
+}
+
+function rowSearchValues(row) {
   return [row.code, row.name, row.stockCode, row.stockName, row.industry1, row.industry2, row.industry3]
-    .map((value) => String(value || "").toLowerCase())
-    .join("|");
+    .map(normalizeSearchValue)
+    .filter(Boolean);
+}
+
+function searchMatchScore(row, query) {
+  const normalized = normalizeSearchValue(query);
+  if (!normalized) return 0;
+  const values = rowSearchValues(row);
+  if (values.some((value) => value === normalized)) return 0;
+  if (values.some((value) => value.startsWith(normalized))) return 1;
+  if (values.some((value) => value.includes(normalized))) return 2;
+  if (normalized.length < 3) return Number.POSITIVE_INFINITY;
+  const names = [row.name, row.stockName].map(normalizeSearchValue).filter(Boolean);
+  const distance = Math.min(...names.map((value) => editDistance(normalized, value)));
+  const allowedDistance = Math.max(1, Math.floor(normalized.length * 0.3));
+  return distance <= allowedDistance ? 10 + distance : Number.POSITIVE_INFINITY;
 }
 
 function suggestedRows(query, options = {}) {
-  const normalized = String(query || "").trim().toLowerCase();
+  const normalized = normalizeSearchValue(query);
   if (!normalized && !options.allowEmpty) return [];
   return state.rows
-    .filter((row) => !options.includeTag || (row.tags || []).includes(options.includeTag))
     .filter((row) => !options.excludeTag || !(row.tags || []).includes(options.excludeTag))
-    .filter((row) => !normalized || rowSearchText(row).includes(normalized))
+    .map((row) => ({ row, score: normalized ? searchMatchScore(row, normalized) : 0 }))
+    .filter((item) => Number.isFinite(item.score))
     .sort((left, right) => {
-      const leftStarts = String(left.name || "").toLowerCase().startsWith(normalized) ? 1 : 0;
-      const rightStarts = String(right.name || "").toLowerCase().startsWith(normalized) ? 1 : 0;
-      const leftAmount = Number(state.quotes.get(left.code)?.amount) || 0;
-      const rightAmount = Number(state.quotes.get(right.code)?.amount) || 0;
-      return rightStarts - leftStarts || rightAmount - leftAmount;
+      const leftPreferred = options.preferredTag && (left.row.tags || []).includes(options.preferredTag) ? 1 : 0;
+      const rightPreferred = options.preferredTag && (right.row.tags || []).includes(options.preferredTag) ? 1 : 0;
+      const leftAmount = Number(state.quotes.get(left.row.code)?.amount) || 0;
+      const rightAmount = Number(state.quotes.get(right.row.code)?.amount) || 0;
+      return left.score - right.score || rightPreferred - leftPreferred || rightAmount - leftAmount;
     })
-    .slice(0, 8);
+    .slice(0, 8)
+    .map((item) => item.row);
 }
 
 function renderSuggestions(container, query, onSelect, options = {}) {
@@ -137,6 +181,21 @@ function renderSuggestions(container, query, onSelect, options = {}) {
     container.append(button);
   }
   return rows;
+}
+
+function selectTopSearchRow(row) {
+  if (state.selectedTag && !(row.tags || []).includes(state.selectedTag)) {
+    nodes.search.value = "";
+    nodes.searchSuggestions.hidden = true;
+    renderTable();
+    nodes.quickAddForm.hidden = false;
+    selectQuickAddRow(row);
+    nodes.quickAddCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    return;
+  }
+  nodes.search.value = row.name;
+  nodes.searchSuggestions.hidden = true;
+  renderTable();
 }
 
 function setSelectedTag(tag) {
@@ -404,26 +463,28 @@ async function initialize() {
 
 nodes.search.addEventListener("input", () => {
   renderTable();
-  renderSuggestions(nodes.searchSuggestions, nodes.search.value, (row) => {
-    nodes.search.value = row.name;
-    renderTable();
-  }, { includeTag: state.selectedTag });
+  renderSuggestions(
+    nodes.searchSuggestions,
+    nodes.search.value,
+    selectTopSearchRow,
+    { preferredTag: state.selectedTag },
+  );
 });
 nodes.search.addEventListener("focus", () => {
-  renderSuggestions(nodes.searchSuggestions, nodes.search.value, (row) => {
-    nodes.search.value = row.name;
-    renderTable();
-  }, { includeTag: state.selectedTag });
+  renderSuggestions(
+    nodes.searchSuggestions,
+    nodes.search.value,
+    selectTopSearchRow,
+    { preferredTag: state.selectedTag },
+  );
 });
 nodes.search.addEventListener("keydown", (event) => {
   if (event.key === "Escape") nodes.searchSuggestions.hidden = true;
   if (event.key === "Enter") {
-    const first = suggestedRows(nodes.search.value, { includeTag: state.selectedTag })[0];
+    const first = suggestedRows(nodes.search.value, { preferredTag: state.selectedTag })[0];
     if (!first) return;
     event.preventDefault();
-    nodes.search.value = first.name;
-    nodes.searchSuggestions.hidden = true;
-    renderTable();
+    selectTopSearchRow(first);
   }
 });
 nodes.refresh.addEventListener("click", loadQuotes);
