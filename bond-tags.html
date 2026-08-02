@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>可转债标签管理</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./bond-tags.css" />
+  </head>
+  <body>
+    <main class="tag-page-shell">
+      <header class="tag-page-header">
+        <div class="tag-page-title">
+          <nav>
+            <a href="./">← 返回看板</a>
+            <a href="./bond-heatmap.html">转债星图</a>
+            <a href="./active-bond-index.html">活跃转债指数</a>
+          </nav>
+          <span class="eyebrow">CONVERTIBLE BOND TAGS</span>
+          <h1>可转债标签管理</h1>
+          <p id="dataStatus">正在读取标签和 MiniQMT 行情…</p>
+        </div>
+        <div class="tag-page-kpis" aria-label="标签概览">
+          <article><span>全部转债</span><strong id="allCount">-</strong></article>
+          <article><span>当前结果</span><strong id="matchedCount">-</strong></article>
+          <article><span>标签种类</span><strong id="tagCount">-</strong></article>
+        </div>
+      </header>
+
+      <section class="tag-filter-card">
+        <label class="tag-search">
+          <span>搜索</span>
+          <input id="searchInput" type="search" placeholder="转债、代码、正股或行业" autocomplete="off" />
+        </label>
+        <div id="tagFilters" class="tag-filter-list" aria-label="标签筛选"></div>
+      </section>
+
+      <section id="tagEditPanel" class="tag-edit-panel" aria-label="编辑转债标签" hidden>
+        <header>
+          <div>
+            <span>正在编辑</span>
+            <strong id="editingBondName">-</strong>
+          </div>
+          <button id="closeEditorButton" type="button" aria-label="关闭标签编辑">×</button>
+        </header>
+        <div id="editTagOptions" class="edit-tag-options"></div>
+        <footer>
+          <span id="editStatus">点击标签可选中或取消</span>
+          <button id="cancelEditButton" type="button">取消</button>
+          <button id="saveEditButton" class="is-primary" type="button">保存标签</button>
+        </footer>
+      </section>
+
+      <section class="tag-table-card">
+        <header>
+          <div>
+            <strong id="resultTitle">全部转债</strong>
+            <span id="resultMeta">-</span>
+          </div>
+          <button id="refreshButton" type="button">刷新行情</button>
+        </header>
+        <div class="tag-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>转债</th>
+                <th>正股</th>
+                <th>行业</th>
+                <th class="number-column">现价</th>
+                <th class="number-column">涨跌幅</th>
+                <th class="number-column">成交额</th>
+                <th>标签</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="tagTableBody"></tbody>
+          </table>
+          <div id="emptyState" class="empty-state" hidden>没有匹配的转债</div>
+        </div>
+      </section>
+    </main>
+    <script src="./bond-tags.js" defer></script>
+  </body>
+</html>

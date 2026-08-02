@@ -651,8 +651,10 @@ function escapeHtml(value) {
 function renderBondTags(tags = []) {
   nodes.tags.replaceChildren();
   for (const tag of tags) {
-    const chip = document.createElement("span");
+    const chip = document.createElement("a");
     chip.textContent = tag;
+    chip.href = `./bond-tags.html?${new URLSearchParams({ tag })}`;
+    chip.title = `查看“${tag}”标签下的全部转债`;
     nodes.tags.append(chip);
   }
   nodes.tags.hidden = tags.length === 0;

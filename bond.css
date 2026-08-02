@@ -186,7 +186,8 @@ h1 {
   background: #c9ecaa;
 }
 
-.bond-tags span {
+.bond-tags span,
+.bond-tags a {
   padding: 2px 7px;
   border: 1px solid #cbd8bf;
   border-radius: 999px;
@@ -195,6 +196,12 @@ h1 {
   font-size: 10px;
   font-weight: 750;
   line-height: 1.35;
+  text-decoration: none;
+}
+
+.bond-tags a:hover {
+  border-color: #719655;
+  background: #e5f3d8;
 }
 
 h1 small {
