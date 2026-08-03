@@ -451,6 +451,10 @@ h1 small {
   color: var(--purple);
 }
 
+.metrics strong.is-strong {
+  color: #b81f2c;
+}
+
 .metrics span {
   color: var(--muted);
   font-size: 12px;

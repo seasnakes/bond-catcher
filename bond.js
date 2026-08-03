@@ -110,6 +110,8 @@ const nodes = {
   purplePrice: document.querySelector("#purplePrice"),
   purpleSupportCard: document.querySelector("#purpleSupportCard"),
   purpleSupportCount: document.querySelector("#purpleSupportCount"),
+  purpleBreakCard: document.querySelector("#purpleBreakCard"),
+  purpleBreakCount: document.querySelector("#purpleBreakCount"),
   averageSupportCard: document.querySelector("#averageSupportCard"),
   averageSupportCount: document.querySelector("#averageSupportCount"),
   eventCountLabel: document.querySelector("#eventCountLabel"),
@@ -598,6 +600,7 @@ function renderDailyPayload(payload) {
   nodes.volumeRatioCard.hidden = true;
   nodes.purplePriceCard.hidden = true;
   nodes.purpleSupportCard.hidden = true;
+  nodes.purpleBreakCard.hidden = true;
   nodes.averageSupportCard.hidden = true;
   nodes.eventCount.textContent =
     `${rangeReturn > 0 ? "+" : ""}${formatNumber(rangeReturn, 2)}%`;
@@ -634,6 +637,7 @@ function renderPayload(payload) {
   nodes.volumeRatioCard.hidden = false;
   nodes.purplePriceCard.hidden = false;
   nodes.purpleSupportCard.hidden = false;
+  nodes.purpleBreakCard.hidden = false;
   nodes.averageSupportCard.hidden = false;
   const hasVolumeRatio =
     payload.volume_ratio !== null &&
@@ -656,8 +660,12 @@ function renderPayload(payload) {
     .find((row) => Number.isFinite(Number(row.purple)));
   nodes.purplePrice.className = latestPurpleRow?.purple_rising ? "is-purple" : "is-down";
   const purpleSupportCount = Number(payload.support_counts?.purple) || 0;
+  const purpleBreakCount = Number(payload.support_counts?.purple_break) || 0;
   const averageSupportCount = Number(payload.support_counts?.intraday_average) || 0;
   nodes.purpleSupportCount.textContent = `${purpleSupportCount}次`;
+  nodes.purpleBreakCount.textContent = `${purpleBreakCount}次`;
+  nodes.purpleBreakCount.className = purpleBreakCount === 0 ? "is-strong" : "is-down";
+  nodes.purpleBreakCard.title = payload.purple_break_definition?.quality || "有效跌破紫线次数";
   nodes.averageSupportCount.textContent = `${averageSupportCount}次`;
   nodes.purpleSupportCount.className = purpleSupportCount >= 3 ? "is-hot" : "";
   nodes.averageSupportCount.className = averageSupportCount >= 3 ? "is-hot" : "";

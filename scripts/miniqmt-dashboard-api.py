@@ -98,6 +98,10 @@ BOND_METADATA_CACHE_TTL_SECONDS = 300
 BOND_METADATA_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 REDEEM_NOTICE_CACHE_TTL_SECONDS = 21_600
 REDEEM_NOTICE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+BOND_REFERENCE_CACHE_TTL_SECONDS = 21_600
+BOND_REFERENCE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+PURPLE_BREAK_TOLERANCE = 0.001
+PURPLE_BREAK_CONFIRM_BARS = 2
 
 
 def load_monitor_module() -> Any:
@@ -844,6 +848,58 @@ def fetch_external_json(url: str, timeout: float = 10.0) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def latest_bond_reference(code: str) -> dict[str, Any]:
+    """Fetch a current bond-to-stock mapping when the local snapshot predates listing."""
+    bare_code = str(code or "").split(".")[0]
+    cached = BOND_REFERENCE_CACHE.get(bare_code)
+    if cached and time.monotonic() - cached[0] < BOND_REFERENCE_CACHE_TTL_SECONDS:
+        return cached[1]
+    result: dict[str, Any] = {}
+    try:
+        url = "https://datacenter-web.eastmoney.com/api/data/v1/get?" + urllib.parse.urlencode(
+            {
+                "reportName": "RPT_BOND_CB_LIST",
+                "columns": "ALL",
+                "filter": f'(SECURITY_CODE="{bare_code}")',
+            }
+        )
+        rows = list((fetch_external_json(url).get("result") or {}).get("data") or [])
+        if rows:
+            row = rows[0]
+            conversion_price = (
+                finite_or_none(row.get("TRANSFER_PRICE"))
+                or finite_or_none(row.get("INITIAL_TRANSFER_PRICE"))
+                or finite_or_none(row.get("TRANSFER_VALUE"))
+            )
+            redeem_trigger_price = finite_or_none(row.get("REDEEM_TRIG_PRICE"))
+            if redeem_trigger_price is None and conversion_price is not None:
+                redeem_trigger_price = conversion_price * 1.3
+            maturity_redemption_price = None
+            redeem_clause = str(row.get("REDEEM_CLAUSE") or "")
+            maturity_match = re.search(r"票面面值的(\d+(?:\.\d+)?)%", redeem_clause)
+            if maturity_match:
+                maturity_redemption_price = float(maturity_match.group(1))
+            result = {
+                "转债代码": row.get("SECUCODE") or code,
+                "转债简称": row.get("SECURITY_NAME_ABBR"),
+                "正股代码": row.get("CONVERT_STOCK_CODE"),
+                "正股简称": row.get("SECURITY_SHORT_NAME"),
+                "转股价": conversion_price,
+                "强赎触发价": redeem_trigger_price,
+                "到期赎回价": maturity_redemption_price,
+                "开始转股日": row.get("TRANSFER_START_DATE"),
+                "上市日期": row.get("LISTING_DATE"),
+                "到期日期": row.get("EXPIRE_DATE"),
+                "发行规模_亿元": finite_or_none(row.get("ACTUAL_ISSUE_SCALE")),
+                "信用评级": row.get("RATING"),
+                "_source": "东方财富可转债资料动态回退",
+            }
+    except Exception:
+        result = {}
+    BOND_REFERENCE_CACHE[bare_code] = (time.monotonic(), result)
+    return result
+
+
 def chinese_date_to_compact(value: str) -> str:
     match = re.search(r"(20\d{2})年(\d{1,2})月(\d{1,2})日", str(value or ""))
     if not match:
@@ -1013,6 +1069,19 @@ def bond_metadata_payload(code_input: str) -> dict[str, Any]:
         return {**cached[1], "cached": True}
 
     source_row = load_bond_fundamentals().get(stored_code) or {}
+    reference_source = "本地条款快照"
+    if not source_row.get("正股代码"):
+        fallback_row = latest_bond_reference(stored_code)
+        if fallback_row:
+            source_row = {
+                **fallback_row,
+                **{
+                    key: value
+                    for key, value in source_row.items()
+                    if value not in (None, "")
+                },
+            }
+            reference_source = str(fallback_row.get("_source") or reference_source)
     tag_row = bond_tag_row(stored_code)
     stock_code = stock_market_code(
         source_row.get("正股代码") or tag_row.get("stockCode")
@@ -1208,7 +1277,7 @@ def bond_metadata_payload(code_input: str) -> dict[str, Any]:
             "mode": "read_only",
             "cached": False,
             "generated_at": now.isoformat(timespec="seconds"),
-            "source": "MiniQMT full_tick + instrument detail + 本地条款快照",
+            "source": f"MiniQMT full_tick + instrument detail + {reference_source}",
             "code": code,
             "monitor_code": stored_code,
             "name": source_row.get("转债简称") or tag_row.get("name"),
@@ -1282,6 +1351,47 @@ def elapsed_market_minutes_from_clock(value: Any) -> int:
     if 780 <= clock_minutes <= 900:
         return 121 + clock_minutes - 780
     return 0
+
+
+def compute_purple_break_stats(
+    minutes: list[Any],
+    series: dict[str, list[float]] | None = None,
+) -> dict[str, Any]:
+    """Count distinct confirmed purple-line breakdown episodes."""
+    if len(minutes) < PURPLE_BREAK_CONFIRM_BARS:
+        return {
+            "count": 0,
+            "last_ms": 0,
+            "tolerance_pct": PURPLE_BREAK_TOLERANCE * 100,
+            "confirm_bars": PURPLE_BREAK_CONFIRM_BARS,
+        }
+    values = series or MONITOR.compute_indicator_series(minutes)
+    count = 0
+    below_streak = 0
+    active_break = False
+    last_ms = 0
+    for index, bar in enumerate(minutes):
+        purple = finite_or_none(values["purple"][index])
+        close = finite_or_none(bar.close)
+        if purple is None or purple <= 0 or close is None:
+            below_streak = 0
+            continue
+        if close <= purple * (1 - PURPLE_BREAK_TOLERANCE):
+            below_streak += 1
+            if below_streak >= PURPLE_BREAK_CONFIRM_BARS and not active_break:
+                count += 1
+                last_ms = int(bar.minute_ms)
+                active_break = True
+        else:
+            below_streak = 0
+            if close >= purple:
+                active_break = False
+    return {
+        "count": count,
+        "last_ms": last_ms,
+        "tolerance_pct": PURPLE_BREAK_TOLERANCE * 100,
+        "confirm_bars": PURPLE_BREAK_CONFIRM_BARS,
+    }
 
 
 def update_active_index_tick_minutes(
@@ -2346,7 +2456,19 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
     )
     if support_minutes and support_minutes[-1].minute_ms == current_minute_ms:
         support_minutes = support_minutes[:-1]
-    support_counts = MONITOR.compute_pullback_support_counts(support_minutes)
+    support_series = (
+        MONITOR.compute_indicator_series(support_minutes)
+        if support_minutes
+        else None
+    )
+    support_counts = MONITOR.compute_pullback_support_counts(
+        support_minutes,
+        support_series,
+    )
+    purple_break_stats = compute_purple_break_stats(
+        support_minutes,
+        support_series,
+    )
 
     events: list[dict[str, Any]] = []
     for event in event_rows:
@@ -2427,10 +2549,19 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
             "volume_ratio": volume_ratio,
             "support_counts": {
                 "purple": support_counts["purple_support_count"],
+                "purple_break": purple_break_stats["count"],
                 "intraday_average": support_counts[
                     "intraday_average_support_count"
                 ],
                 "total": support_counts["support_confirmation_count"],
+            },
+            "purple_break_definition": {
+                "close_below_tolerance_pct": purple_break_stats[
+                    "tolerance_pct"
+                ],
+                "confirm_bars": purple_break_stats["confirm_bars"],
+                "last_break_minute_ms": purple_break_stats["last_ms"] or None,
+                "quality": "连续2根已完成1分钟K线收盘低于紫线0.1%，计为1次有效跌破；重新收回紫线后才可再次计数",
             },
             "change_from_first": (
                 (latest["close"] / first["open"] - 1) * 100
