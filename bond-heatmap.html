@@ -37,6 +37,7 @@
               <option value="industry2" selected>申万二级行业</option>
               <option value="industry3">申万三级行业</option>
               <option value="theme">主线题材</option>
+              <option value="tag">标签（主标签优先）</option>
             </select>
           </label>
           <label>
@@ -55,9 +56,9 @@
             </select>
           </label>
           <label>
-            <span>板块筛选</span>
+            <span>分组筛选</span>
             <select id="sectorSelect">
-              <option value="">全部板块</option>
+              <option value="">全部分组</option>
             </select>
           </label>
           <label>
@@ -76,9 +77,9 @@
         </aside>
 
         <section id="heatmapStage" class="heatmap-stage" aria-label="可转债热力图">
-          <svg id="heatmapSvg" role="img" aria-label="按板块分组的可转债分层矩形图"></svg>
+          <svg id="heatmapSvg" role="img" aria-label="按所选维度分组的可转债分层矩形图"></svg>
           <div id="heatmapTooltip" class="heatmap-tooltip" hidden></div>
-          <section id="sectorPreview" class="sector-preview" aria-label="板块转债列表" hidden>
+          <section id="sectorPreview" class="sector-preview" aria-label="分组转债列表" hidden>
             <header>
               <div>
                 <strong id="sectorPreviewTitle">-</strong>

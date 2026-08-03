@@ -2,6 +2,7 @@ const DATA_URL = "./data/convertible-bond-heatmap.json";
 const TAG_DATA_URL = "./data/convertible-bond-tags.json";
 const SVG_NS = "http://www.w3.org/2000/svg";
 const QUOTE_BATCH_SIZE = 100;
+const ATTRIBUTE_TAGS = new Set(["次新债", "小盘", "ST"]);
 
 const state = {
   rows: [],
@@ -216,12 +217,24 @@ function filteredRows() {
   const tag = nodes.tag.value;
   const groupKey = nodes.group.value;
   return state.rows.filter((row) => {
-    if (sector && row[groupKey] !== sector) return false;
+    if (sector && groupValue(row, groupKey) !== sector) return false;
     if (tag && !(row.tags || []).includes(tag)) return false;
     if (!query) return true;
     return [row.name, row.code, row.stock, row.theme, ...row.topics, ...(row.tags || [])]
       .some((value) => String(value || "").toLowerCase().includes(query));
   });
+}
+
+function tagGroup(row) {
+  const tags = Array.isArray(row.tags) ? row.tags.filter(Boolean) : [];
+  const primaryTag = String(row.primaryTag || "").trim();
+  if (primaryTag && tags.includes(primaryTag)) return primaryTag;
+  return tags.find((tag) => !ATTRIBUTE_TAGS.has(tag)) || tags[0] || "未标签";
+}
+
+function groupValue(row, groupKey = nodes.group.value) {
+  if (groupKey === "tag") return tagGroup(row);
+  return row[groupKey] || "未分类";
 }
 
 function updateTagOptions(payload) {
@@ -242,12 +255,12 @@ function updateTagOptions(payload) {
 function updateSectorOptions() {
   const groupKey = nodes.group.value;
   const previous = nodes.sector.value;
-  const values = [...new Set(state.rows.map((row) => row[groupKey]).filter(Boolean))]
+  const values = [...new Set(state.rows.map((row) => groupValue(row, groupKey)).filter(Boolean))]
     .sort((left, right) => left.localeCompare(right, "zh-CN"));
   nodes.sector.replaceChildren();
   const all = document.createElement("option");
   all.value = "";
-  all.textContent = "全部板块";
+  all.textContent = "全部分组";
   nodes.sector.append(all);
   for (const value of values) {
     const option = document.createElement("option");
@@ -527,7 +540,7 @@ function render() {
   const groups = new Map();
 
   for (const row of rows) {
-    const group = row[groupKey] || "未分类";
+    const group = groupValue(row, groupKey);
     if (!groups.has(group)) groups.set(group, []);
     groups.get(group).push(row);
   }
@@ -711,11 +724,21 @@ async function load() {
       fetchJson(TAG_DATA_URL, 8000),
     ]);
     const tagByCode = new Map(
-      (tagPayload.rows || []).map((row) => [row.code, row.tags || []]),
+      (tagPayload.rows || []).map((row) => [row.code, {
+        tags: row.tags || [],
+        primaryTag: row.primaryTag || "",
+      }]),
     );
     state.snapshot = payload;
     state.rows = Array.isArray(payload.rows)
-      ? payload.rows.map((row) => ({ ...row, tags: tagByCode.get(row.code) || [] }))
+      ? payload.rows.map((row) => {
+          const tagInfo = tagByCode.get(row.code) || {};
+          return {
+            ...row,
+            tags: tagInfo.tags || [],
+            primaryTag: tagInfo.primaryTag || "",
+          };
+        })
       : [];
     if (state.rows.length === 0) throw new Error("转债快照为空");
     nodes.note.textContent =
