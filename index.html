@@ -6,6 +6,10 @@
     <title>A股/转债实时板块表</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="./styles.css" />
+    <script
+      type="module"
+      src="https://widgets.tradingview-widget.com/w/en/tv-mini-chart.js"
+    ></script>
   </head>
   <body>
     <main class="app-shell">
@@ -63,6 +67,37 @@
           <button id="bulkEditButton" class="text-button" type="button" title="批量编辑监控列表">列表</button>
         </div>
       </header>
+
+      <details class="tv-market-panel" open>
+        <summary>
+          <strong>外围分时</strong>
+          <span>TradingView · 延迟行情</span>
+        </summary>
+        <div class="tv-market-grid">
+          <article class="tv-market-card">
+            <header>
+              <strong>纳指100（NQ代理）</strong>
+              <span>Capital.com CFD</span>
+            </header>
+            <tv-mini-chart
+              symbol="CAPITALCOM:NAS100"
+              theme="light"
+              aria-label="纳斯达克100日内走势代理图"
+            ></tv-mini-chart>
+          </article>
+          <article class="tv-market-card">
+            <header>
+              <strong>韩国200（KOSPI方向）</strong>
+              <span>Bloomberg Korea 200</span>
+            </header>
+            <tv-mini-chart
+              symbol="BBG:BSK200"
+              theme="light"
+              aria-label="韩国市场日内走势代理图"
+            ></tv-mini-chart>
+          </article>
+        </div>
+      </details>
 
       <section
         class="signal-monitor"

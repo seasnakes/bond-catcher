@@ -239,6 +239,74 @@ select {
   font-size: 12px;
 }
 
+.tv-market-panel {
+  margin-bottom: 8px;
+  border: 1px solid #d5dec8;
+  background: #f9fbf6;
+  box-shadow: var(--shadow);
+}
+
+.tv-market-panel > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 4px 8px;
+  color: #33412f;
+  cursor: pointer;
+  font-size: 12px;
+  list-style-position: inside;
+  user-select: none;
+}
+
+.tv-market-panel > summary strong {
+  color: #1f2c1c;
+  font-size: 13px;
+}
+
+.tv-market-panel > summary span {
+  color: var(--muted);
+}
+
+.tv-market-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 6px;
+  padding: 0 6px 6px;
+}
+
+.tv-market-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #c8d2bc;
+  background: #fff;
+}
+
+.tv-market-card > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 25px;
+  padding: 4px 7px 2px;
+  color: #1b2518;
+  font-size: 12px;
+}
+
+.tv-market-card > header span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-market-card tv-mini-chart {
+  display: block;
+  width: 100%;
+  height: 176px;
+}
+
 .controls {
   grid-area: controls;
   display: flex;
@@ -1855,6 +1923,10 @@ textarea:disabled {
 
   .index-pill {
     min-width: 0;
+  }
+
+  .tv-market-grid {
+    grid-template-columns: 1fr;
   }
 
   .controls {
