@@ -1021,6 +1021,8 @@ def bond_metadata_payload(code_input: str) -> dict[str, Any]:
     redeem_trigger_price = finite_or_none(source_row.get("强赎触发价"))
     issue_scale = finite_or_none(source_row.get("发行规模_亿元"))
     conversion_start_date = compact_date(source_row.get("开始转股日"))
+    maturity_date = compact_date(source_row.get("到期日期"))
+    maturity_redemption_price = finite_or_none(source_row.get("到期赎回价"))
 
     bridge = MONITOR.BridgeClient(
         f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}",
@@ -1172,6 +1174,34 @@ def bond_metadata_payload(code_input: str) -> dict[str, Any]:
         countdown = f"尚差 {remaining_hit_days} 个满足日"
         risk = "high" if remaining_hit_days <= 3 else "watch" if price_hit_count else "low"
 
+    maturity_days_remaining: int | None = None
+    maturity_status = "暂无到期日"
+    maturity_countdown = "本地条款快照未提供到期日期"
+    maturity_risk = "unknown"
+    if len(maturity_date) == 8:
+        maturity_moment = datetime.strptime(maturity_date, "%Y%m%d").date()
+        maturity_days_remaining = (maturity_moment - now.date()).days
+        if maturity_days_remaining < 0:
+            maturity_status = "已到期"
+            maturity_risk = "expired"
+        elif maturity_days_remaining == 0:
+            maturity_status = "今日到期"
+            maturity_risk = "urgent"
+        else:
+            maturity_status = f"{maturity_days_remaining} 天"
+            maturity_risk = (
+                "urgent"
+                if maturity_days_remaining <= 90
+                else "near"
+                if maturity_days_remaining <= 365
+                else "normal"
+            )
+        maturity_countdown = f"到期日 {dashed_date(maturity_date)}"
+        if maturity_redemption_price is not None:
+            maturity_countdown += f" · 赎回价 {maturity_redemption_price:.2f} 元"
+        if announcement_type in {"redeem", "redeeming"}:
+            maturity_countdown = f"若未提前赎回 · {maturity_countdown}"
+
     payload = clean_json(
         {
             "ok": True,
@@ -1219,6 +1249,20 @@ def bond_metadata_payload(code_input: str) -> dict[str, Any]:
                 "announcement": announcement,
                 "quality": "按近30个交易日正股收盘价与当前强赎触发价估算；公司公告优先",
                 "history_error": history_error or None,
+            },
+            "maturity": {
+                "risk": maturity_risk,
+                "status": maturity_status,
+                "countdown": maturity_countdown,
+                "maturity_date": maturity_date or None,
+                "days_remaining": maturity_days_remaining,
+                "redemption_price": maturity_redemption_price,
+                "current_path": (
+                    "strong_redeem"
+                    if announcement_type in {"redeem", "redeeming"}
+                    else "maturity_redemption"
+                ),
+                "quality": "按合同到期日期计算自然日；若公司提前强赎，以最新公司公告为准",
             },
         }
     )

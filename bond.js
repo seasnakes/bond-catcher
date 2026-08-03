@@ -95,12 +95,19 @@ const nodes = {
   redeemRisk: document.querySelector("#redeemRisk"),
   redeemDetail: document.querySelector("#redeemDetail"),
   redeemAnnouncementLink: document.querySelector("#redeemAnnouncementLink"),
+  maturityCard: document.querySelector("#maturityCard"),
+  maturityCountdown: document.querySelector("#maturityCountdown"),
+  maturityDetail: document.querySelector("#maturityDetail"),
+  stockPriceCard: document.querySelector("#stockPriceCard"),
+  stockPrice: document.querySelector("#stockPrice"),
   stockChange: document.querySelector("#stockChange"),
   stockSparkline: document.querySelector("#stockSparkline"),
   totalAmountLabel: document.querySelector("#totalAmountLabel"),
   totalAmount: document.querySelector("#totalAmount"),
   volumeRatioCard: document.querySelector("#volumeRatioCard"),
   volumeRatio: document.querySelector("#volumeRatio"),
+  purplePriceCard: document.querySelector("#purplePriceCard"),
+  purplePrice: document.querySelector("#purplePrice"),
   purpleSupportCard: document.querySelector("#purpleSupportCard"),
   purpleSupportCount: document.querySelector("#purpleSupportCount"),
   averageSupportCard: document.querySelector("#averageSupportCard"),
@@ -202,13 +209,25 @@ function renderBondMetadata(payload) {
       `${announcement.status || "强赎公告"}${noticeDate !== "-" ? ` · ${noticeDate}` : ""}`;
     nodes.redeemAnnouncementLink.title = announcement.title || "查看公司公告";
   }
+  const maturity = payload.maturity || {};
+  nodes.maturityCountdown.textContent = maturity.status || "-";
+  nodes.maturityCard.dataset.risk = maturity.risk || "unknown";
+  nodes.maturityDetail.textContent = maturity.countdown || "暂无到期条款";
+  nodes.maturityCard.title = maturity.quality || "按合同到期日计算自然日";
+  nodes.stockPrice.textContent = formatNumber(payload.stock_price, 2);
+  nodes.stockPrice.className = toneClass(payload.stock_change);
+  nodes.stockPrice.title = `${payload.stock_name || "正股"} ${payload.stock_code || ""}`;
   nodes.stockChange.textContent = formatPercent(payload.stock_change);
   nodes.stockChange.className = toneClass(payload.stock_change);
   nodes.stockChange.title = `${payload.stock_name || "正股"} ${payload.stock_code || ""}`;
-  drawStockSparkline(payload.stock_intraday || [], payload.stock_previous_close);
+  drawStockSparkline(
+    payload.stock_intraday || [],
+    payload.stock_previous_close,
+    payload.stock_price,
+  );
 }
 
-function drawStockSparkline(rows, previousClose) {
+function drawStockSparkline(rows, previousClose, currentPrice) {
   const canvas = nodes.stockSparkline;
   const width = canvas.clientWidth;
   const height = canvas.clientHeight;
@@ -230,6 +249,7 @@ function drawStockSparkline(rows, previousClose) {
   }
   const values = points.map((row) => row.price);
   if (Number.isFinite(Number(previousClose))) values.push(Number(previousClose));
+  if (Number.isFinite(Number(currentPrice))) values.push(Number(currentPrice));
   let min = Math.min(...values);
   let max = Math.max(...values);
   const span = max - min || Math.max(Math.abs(max) * 0.01, 0.01);
@@ -246,7 +266,9 @@ function drawStockSparkline(rows, previousClose) {
     context.stroke();
     context.setLineDash([]);
   }
-  const latest = points.at(-1).price;
+  const latest = Number.isFinite(Number(currentPrice))
+    ? Number(currentPrice)
+    : points.at(-1).price;
   context.strokeStyle = latest >= Number(previousClose) ? "#df2434" : "#159447";
   context.lineWidth = 1.5;
   context.beginPath();
@@ -257,6 +279,23 @@ function drawStockSparkline(rows, previousClose) {
     else context.lineTo(x, y);
   });
   context.stroke();
+  const latestLabel = formatNumber(latest, 2);
+  context.font = 'bold 10px Arial, "Microsoft YaHei", sans-serif';
+  const labelWidth = context.measureText(latestLabel).width + 7;
+  const labelHeight = 14;
+  const labelX = Math.max(3, width - labelWidth - 3);
+  const labelY = Math.max(
+    2,
+    Math.min(height - labelHeight - 2, yFor(latest) - labelHeight / 2),
+  );
+  context.fillStyle = "rgba(255,255,255,.92)";
+  context.fillRect(labelX, labelY, labelWidth, labelHeight);
+  context.strokeStyle = latest >= Number(previousClose) ? "#df2434" : "#159447";
+  context.strokeRect(labelX + 0.5, labelY + 0.5, labelWidth - 1, labelHeight - 1);
+  context.fillStyle = latest >= Number(previousClose) ? "#b81f2c" : "#127d3d";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(latestLabel, labelX + labelWidth / 2, labelY + labelHeight / 2 + 0.5);
 }
 
 async function loadBondMetadata() {
@@ -269,6 +308,7 @@ async function loadBondMetadata() {
     nodes.circulatingDetail.textContent = "流通规模暂不可用";
     nodes.marketValueDetail.textContent = "流通市值暂不可用";
     nodes.redeemDetail.textContent = error.message || "强赎计数暂不可用";
+    nodes.maturityDetail.textContent = "到期条款暂不可用";
   }
 }
 
@@ -556,6 +596,7 @@ function renderDailyPayload(payload) {
     rows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0),
   );
   nodes.volumeRatioCard.hidden = true;
+  nodes.purplePriceCard.hidden = true;
   nodes.purpleSupportCard.hidden = true;
   nodes.averageSupportCard.hidden = true;
   nodes.eventCount.textContent =
@@ -591,6 +632,7 @@ function renderPayload(payload) {
       : payload.total_amount,
   );
   nodes.volumeRatioCard.hidden = false;
+  nodes.purplePriceCard.hidden = false;
   nodes.purpleSupportCard.hidden = false;
   nodes.averageSupportCard.hidden = false;
   const hasVolumeRatio =
@@ -602,6 +644,17 @@ function renderPayload(payload) {
     : "-";
   nodes.volumeRatio.className =
     hasVolumeRatio && Number(payload.volume_ratio) >= 2 ? "is-hot" : "";
+  const latestPurple = [...displayedRows]
+    .reverse()
+    .map((row) => Number(row.purple))
+    .find(Number.isFinite);
+  nodes.purplePrice.textContent = Number.isFinite(latestPurple)
+    ? formatNumber(latestPurple, 3)
+    : "-";
+  const latestPurpleRow = [...displayedRows]
+    .reverse()
+    .find((row) => Number.isFinite(Number(row.purple)));
+  nodes.purplePrice.className = latestPurpleRow?.purple_rising ? "is-purple" : "is-down";
   const purpleSupportCount = Number(payload.support_counts?.purple) || 0;
   const averageSupportCount = Number(payload.support_counts?.intraday_average) || 0;
   nodes.purpleSupportCount.textContent = `${purpleSupportCount}次`;
@@ -980,7 +1033,45 @@ function drawChart() {
   const domains = drawPanels(context, geometry, rows);
   drawEvents(context, geometry.panels[0], rows, domains.price);
   drawAxes(context, geometry, rows, domains);
+  drawLatestPurpleMarker(context, geometry.panels[0], rows, domains.price);
   if (state.selectedIndex >= 0) drawCrosshair(context, geometry, rows, state.selectedIndex);
+}
+
+function drawLatestPurpleMarker(context, panel, rows, priceDomain) {
+  const latest = [...rows]
+    .reverse()
+    .find((row) => Number.isFinite(Number(row.purple)));
+  if (!latest) return;
+  const value = Number(latest.purple);
+  const color = latest.purple_rising ? "#d638c2" : "#139a55";
+  const rawY = yFor(value, panel, priceDomain);
+  const label = `紫 ${formatNumber(value, 3)}`;
+  context.save();
+  context.font = 'bold 10px Arial, "Microsoft YaHei", sans-serif';
+  const labelWidth = context.measureText(label).width + 10;
+  const labelHeight = 17;
+  const labelX = panel.x + panel.width - labelWidth - 4;
+  const labelY = Math.max(
+    panel.y + 18,
+    Math.min(panel.y + panel.height - labelHeight - 3, rawY - labelHeight / 2),
+  );
+  context.strokeStyle = color;
+  context.lineWidth = 0.8;
+  context.setLineDash([3, 3]);
+  context.beginPath();
+  context.moveTo(Math.max(panel.x, labelX - 48), rawY);
+  context.lineTo(panel.x + panel.width - 2, rawY);
+  context.stroke();
+  context.setLineDash([]);
+  context.fillStyle = "rgba(255,255,255,.94)";
+  context.fillRect(labelX, labelY, labelWidth, labelHeight);
+  context.strokeStyle = color;
+  context.strokeRect(labelX + 0.5, labelY + 0.5, labelWidth - 1, labelHeight - 1);
+  context.fillStyle = color;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(label, labelX + labelWidth / 2, labelY + labelHeight / 2 + 0.5);
+  context.restore();
 }
 
 function dailyChartGeometry(canvas) {

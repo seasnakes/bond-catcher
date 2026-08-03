@@ -53,7 +53,7 @@ select {
 
 .bond-fundamentals {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
   margin: 8px 0;
 }
@@ -100,6 +100,21 @@ select {
 
 .redeem-risk-card[data-risk="protected"] strong {
   color: #3f7b29;
+}
+
+.maturity-card[data-risk="near"] {
+  border-color: #e0bd74;
+  background: #fff9e8;
+}
+
+.maturity-card[data-risk="near"] strong,
+.maturity-card[data-risk="urgent"] strong {
+  color: #ad6600;
+}
+
+.maturity-card[data-risk="urgent"] {
+  border-color: #e1a2a2;
+  background: #fff4f4;
 }
 
 .redeem-announcement-link {
@@ -430,6 +445,10 @@ h1 small {
 
 .metrics strong.is-hot {
   color: #bb6b08;
+}
+
+.metrics strong.is-purple {
+  color: var(--purple);
 }
 
 .metrics span {
