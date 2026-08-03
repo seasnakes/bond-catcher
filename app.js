@@ -3114,6 +3114,8 @@ function themeGroupRows(rows, tag) {
     );
   }
   bonds.sort((left, right) => {
+    const primaryDifference = Number(right.primaryTag === tag) - Number(left.primaryTag === tag);
+    if (primaryDifference) return primaryDifference;
     if (state.sort === "change") return Number(right.change || 0) - Number(left.change || 0);
     if (state.sort === "name") return String(left.name).localeCompare(String(right.name), "zh-CN");
     return Number(right.amount || 0) - Number(left.amount || 0);
@@ -3148,7 +3150,7 @@ function renderThemeTagFilters(rows) {
   }
 }
 
-function renderThemeBondRow(row) {
+function renderThemeBondRow(row, tag) {
   const tone = quoteClass(Number(row.change));
   const link = document.createElement("a");
   link.className = "theme-bond-row";
@@ -3157,7 +3159,9 @@ function renderThemeBondRow(row) {
 
   const name = document.createElement("span");
   name.className = "theme-bond-name";
-  name.textContent = row.name || row.code;
+  const isPrimary = row.primaryTag === tag;
+  name.textContent = `${isPrimary ? "★ " : ""}${row.name || row.code}`;
+  name.classList.toggle("is-primary", Boolean(isPrimary));
 
   const spark = state.showSparklines ? renderSparkline(row) : null;
   if (spark) spark.classList.add("theme-bond-sparkline");
@@ -3172,7 +3176,7 @@ function renderThemeBondRow(row) {
 
   const amount = document.createElement("span");
   amount.className = "theme-bond-amount";
-  amount.textContent = formatCompactAmount(row.amount);
+  amount.textContent = `额${formatCompactAmount(row.amount)}`;
 
   link.append(name);
   if (spark) link.append(spark);
@@ -3205,7 +3209,7 @@ function renderThemeGroup(tag, bonds) {
 
   const list = document.createElement("div");
   list.className = `theme-group-list${state.showSparklines ? " has-sparks" : ""}`;
-  visible.forEach((row) => list.append(renderThemeBondRow(row)));
+  visible.forEach((row) => list.append(renderThemeBondRow(row, tag)));
   card.append(head, list);
 
   if (bonds.length > 10) {

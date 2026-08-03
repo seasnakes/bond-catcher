@@ -939,12 +939,14 @@ textarea:disabled {
 
 .theme-bond-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(258px, 1fr));
+  grid-template-columns: 1fr;
   align-items: start;
   gap: 8px;
 }
 
 .theme-group-card {
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid var(--border);
   background: #fff;
@@ -952,13 +954,14 @@ textarea:disabled {
 }
 
 .theme-group-title {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  min-height: 30px;
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 58px;
   gap: 7px;
   padding: 4px 7px;
-  border-bottom: 1px solid #dce5c9;
+  border-right: 1px solid #dce5c9;
   background: var(--head-flat);
   font-size: 12px;
 }
@@ -976,17 +979,21 @@ textarea:disabled {
   font-size: 11px;
 }
 
+.theme-group-title strong { font-size: 14px; }
+
 .theme-group-change {
   min-width: 54px;
   padding: 2px 4px;
-  text-align: right;
+  text-align: left;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
 .theme-group-list {
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
   padding: 3px 5px;
+  gap: 3px 5px;
 }
 
 .theme-bond-row {
@@ -995,14 +1002,15 @@ textarea:disabled {
   align-items: center;
   min-height: 25px;
   gap: 4px;
-  border-bottom: 1px solid #edf1e8;
+  border: 1px solid #edf1e8;
+  padding: 0 4px;
   color: inherit;
   font-size: 11px;
   text-decoration: none;
 }
 
 .theme-group-list.has-sparks .theme-bond-row {
-  grid-template-columns: minmax(72px, 1fr) 58px 45px 55px 50px;
+  grid-template-columns: minmax(60px, 1fr) 50px 42px 52px 52px;
 }
 
 .theme-bond-row:hover {
@@ -1016,6 +1024,8 @@ textarea:disabled {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.theme-bond-name.is-primary { color: #7a5800; }
 
 .theme-bond-price,
 .theme-bond-change,
@@ -1035,10 +1045,13 @@ textarea:disabled {
 }
 
 .theme-bond-sparkline {
-  width: 58px;
+  width: 50px;
 }
 
+.theme-bond-sparkline svg { width: 50px; }
+
 .theme-group-more {
+  grid-column: 2;
   width: 100%;
   min-height: 25px;
   border: 0;
@@ -1047,6 +1060,12 @@ textarea:disabled {
   color: #526048;
   cursor: pointer;
   font-size: 11px;
+}
+
+@media (max-width: 680px) {
+  .theme-group-card { grid-template-columns: 1fr; }
+  .theme-group-title { align-items: center; flex-direction: row; justify-content: space-between; border-right: 0; border-bottom: 1px solid #dce5c9; }
+  .theme-group-more { grid-column: 1; }
 }
 
 .board-grid.has-sparks {

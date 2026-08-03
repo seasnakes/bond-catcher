@@ -9,7 +9,10 @@ const state = {
   searchAliases: new Map(),
   editingRow: null,
   editDraft: new Set(),
+  editPrimaryTag: "",
   quickAddRow: null,
+  selectedCodes: new Set(),
+  bulkSaving: false,
 };
 
 const nodes = {
@@ -28,6 +31,7 @@ const nodes = {
   editor: document.querySelector("#tagEditPanel"),
   editingName: document.querySelector("#editingBondName"),
   editOptions: document.querySelector("#editTagOptions"),
+  primaryTagSelect: document.querySelector("#primaryTagSelect"),
   editStatus: document.querySelector("#editStatus"),
   closeEditor: document.querySelector("#closeEditorButton"),
   cancelEdit: document.querySelector("#cancelEditButton"),
@@ -41,6 +45,11 @@ const nodes = {
   quickAddStatus: document.querySelector("#quickAddStatus"),
   quickAddCancel: document.querySelector("#quickAddCancel"),
   quickAddSave: document.querySelector("#quickAddSave"),
+  bulkActions: document.querySelector("#bulkTagActions"),
+  selectionHeader: document.querySelector("#selectionHeader"),
+  selectVisible: document.querySelector("#selectVisibleButton"),
+  bulkSelectionCount: document.querySelector("#bulkSelectionCount"),
+  bulkRemoveTag: document.querySelector("#bulkRemoveTagButton"),
 };
 
 function formatNumber(value, digits = 2) {
@@ -83,9 +92,11 @@ function filteredRows() {
     if (!query) return true;
     return searchMatchScore(row, query) < Number.POSITIVE_INFINITY;
   }).sort((left, right) => {
+    const leftPrimary = state.selectedTag && left.primaryTag === state.selectedTag ? 1 : 0;
+    const rightPrimary = state.selectedTag && right.primaryTag === state.selectedTag ? 1 : 0;
     const leftAmount = Number(state.quotes.get(left.code)?.amount) || 0;
     const rightAmount = Number(state.quotes.get(right.code)?.amount) || 0;
-    return rightAmount - leftAmount || String(left.code).localeCompare(String(right.code));
+    return rightPrimary - leftPrimary || rightAmount - leftAmount || String(left.code).localeCompare(String(right.code));
   });
 }
 
@@ -211,6 +222,7 @@ function selectTopSearchRow(row) {
 
 function setSelectedTag(tag) {
   state.selectedTag = state.tagOrder.includes(tag) ? tag : "";
+  state.selectedCodes.clear();
   const url = new URL(window.location.href);
   if (state.selectedTag) url.searchParams.set("tag", state.selectedTag);
   else url.searchParams.delete("tag");
@@ -218,6 +230,27 @@ function setSelectedTag(tag) {
   renderFilters();
   renderTable();
   renderQuickAdd();
+}
+
+function renderBulkActions(rows = filteredRows()) {
+  const enabled = Boolean(state.selectedTag);
+  nodes.bulkActions.hidden = !enabled;
+  nodes.selectionHeader.hidden = !enabled;
+  if (!enabled) {
+    state.selectedCodes.clear();
+  } else {
+    const available = new Set(rows.map((row) => row.code));
+    for (const code of state.selectedCodes) {
+      if (!available.has(code)) state.selectedCodes.delete(code);
+    }
+  }
+  nodes.bulkSelectionCount.textContent = `已选 ${state.selectedCodes.size} 只`;
+  nodes.bulkRemoveTag.disabled = state.selectedCodes.size === 0 || state.bulkSaving;
+  const allVisibleSelected = rows.length > 0 && rows.every((row) => state.selectedCodes.has(row.code));
+  nodes.selectVisible.textContent = allVisibleSelected ? "取消全选" : "全选当前结果";
+  nodes.bulkRemoveTag.textContent = state.bulkSaving
+    ? "正在移除…"
+    : `从“${state.selectedTag || "当前"}”移除`;
 }
 
 function renderFilters() {
@@ -249,12 +282,31 @@ function renderTable() {
   nodes.matchedCount.textContent = String(rows.length);
   nodes.tagCount.textContent = String(state.tagOrder.length);
   nodes.resultTitle.textContent = state.selectedTag ? `${state.selectedTag} 标签` : "全部转债";
-  nodes.resultMeta.textContent = `共 ${rows.length} 只 · 默认按成交额排序`;
+  nodes.resultMeta.textContent = state.selectedTag
+    ? `共 ${rows.length} 只 · 主标签优先，其次按成交额排序`
+    : `共 ${rows.length} 只 · 默认按成交额排序`;
   nodes.empty.hidden = rows.length > 0;
+  renderBulkActions(rows);
 
   for (const row of rows) {
     const quote = state.quotes.get(row.code) || {};
     const tableRow = document.createElement("tr");
+    tableRow.classList.toggle("is-selected", state.selectedCodes.has(row.code));
+
+    if (state.selectedTag) {
+      const selection = makeCell("selection-column");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = state.selectedCodes.has(row.code);
+      checkbox.setAttribute("aria-label", `选择 ${row.name}`);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) state.selectedCodes.add(row.code);
+        else state.selectedCodes.delete(row.code);
+        renderTable();
+      });
+      selection.append(checkbox);
+      tableRow.append(selection);
+    }
 
     const bond = makeCell("bond-cell");
     const detailLink = document.createElement("a");
@@ -291,7 +343,9 @@ function renderTable() {
     for (const tag of row.tags || []) {
       const tagButton = document.createElement("button");
       tagButton.type = "button";
-      tagButton.textContent = tag;
+      const isPrimary = row.primaryTag === tag;
+      tagButton.textContent = `${isPrimary ? "★ " : ""}${tag}`;
+      tagButton.classList.toggle("is-primary-tag", isPrimary);
       tagButton.title = `只看“${tag}”标签`;
       tagButton.addEventListener("click", () => setSelectedTag(tag));
       tagWrap.append(tagButton);
@@ -322,19 +376,41 @@ function renderEditOptions() {
     button.addEventListener("click", () => {
       if (state.editDraft.has(tag)) state.editDraft.delete(tag);
       else state.editDraft.add(tag);
+      if (!state.editDraft.has(state.editPrimaryTag)) state.editPrimaryTag = "";
       button.setAttribute("aria-pressed", String(state.editDraft.has(tag)));
       nodes.editStatus.textContent = "有未保存的修改";
+      renderPrimaryTagOptions();
     });
     nodes.editOptions.append(button);
   }
 }
 
+function renderPrimaryTagOptions() {
+  nodes.primaryTagSelect.replaceChildren();
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = "未设置主标签";
+  nodes.primaryTagSelect.append(empty);
+  for (const tag of state.tagOrder.filter((value) => state.editDraft.has(value))) {
+    const option = document.createElement("option");
+    option.value = tag;
+    option.textContent = tag;
+    option.selected = state.editPrimaryTag === tag;
+    nodes.primaryTagSelect.append(option);
+  }
+  nodes.primaryTagSelect.value = state.editDraft.has(state.editPrimaryTag)
+    ? state.editPrimaryTag
+    : "";
+}
+
 function openEditor(row) {
   state.editingRow = row;
   state.editDraft = new Set(row.tags || []);
+  state.editPrimaryTag = state.editDraft.has(row.primaryTag) ? row.primaryTag : "";
   nodes.editingName.textContent = `${row.name} ${row.code}`;
   nodes.editStatus.textContent = "点击标签可选中或取消";
   renderEditOptions();
+  renderPrimaryTagOptions();
   nodes.editor.hidden = false;
   nodes.editor.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
@@ -393,6 +469,7 @@ async function saveQuickAdd() {
       },
     });
     row.tags = payload.tags || [];
+    row.primaryTag = payload.primaryTag || "";
     recalculateCounts();
     renderFilters();
     renderTable();
@@ -423,9 +500,11 @@ async function saveEditor() {
       body: {
         code: state.editingRow.code,
         tags: state.tagOrder.filter((tag) => state.editDraft.has(tag)),
+        primaryTag: state.editPrimaryTag,
       },
     });
     state.editingRow.tags = payload.tags || [];
+    state.editingRow.primaryTag = payload.primaryTag || "";
     recalculateCounts();
     renderFilters();
     renderTable();
@@ -435,6 +514,40 @@ async function saveEditor() {
   } finally {
     nodes.saveEdit.disabled = false;
     nodes.cancelEdit.disabled = false;
+  }
+}
+
+async function removeSelectedTag() {
+  const codes = [...state.selectedCodes];
+  const tag = state.selectedTag;
+  if (!codes.length || !tag || state.bulkSaving) return;
+  if (!window.confirm(`确定从 ${codes.length} 只转债中移除“${tag}”标签吗？`)) return;
+  state.bulkSaving = true;
+  renderBulkActions();
+  try {
+    const payload = await fetchJson("/api/miniqmt/tags", {
+      method: "POST",
+      timeout: 30000,
+      body: { codes, removeTag: tag },
+    });
+    const updated = new Map((payload.rows || []).map((row) => [row.code, row]));
+    for (const row of state.rows) {
+      const next = updated.get(row.code);
+      if (!next) continue;
+      row.tags = next.tags || [];
+      row.primaryTag = next.primaryTag || "";
+    }
+    state.selectedCodes.clear();
+    recalculateCounts();
+    renderFilters();
+    renderTable();
+    renderQuickAdd();
+    nodes.status.textContent = `已从 ${payload.updated || codes.length} 只转债移除“${tag}”`;
+  } catch (error) {
+    nodes.status.textContent = `批量移除失败：${error.message}`;
+  } finally {
+    state.bulkSaving = false;
+    renderBulkActions();
   }
 }
 
@@ -507,6 +620,18 @@ nodes.refresh.addEventListener("click", loadQuotes);
 nodes.closeEditor.addEventListener("click", closeEditor);
 nodes.cancelEdit.addEventListener("click", closeEditor);
 nodes.saveEdit.addEventListener("click", saveEditor);
+nodes.primaryTagSelect.addEventListener("change", (event) => {
+  state.editPrimaryTag = state.editDraft.has(event.target.value) ? event.target.value : "";
+  nodes.editStatus.textContent = "有未保存的修改";
+});
+nodes.selectVisible.addEventListener("click", () => {
+  const rows = filteredRows();
+  const allSelected = rows.length > 0 && rows.every((row) => state.selectedCodes.has(row.code));
+  if (allSelected) rows.forEach((row) => state.selectedCodes.delete(row.code));
+  else rows.forEach((row) => state.selectedCodes.add(row.code));
+  renderTable();
+});
+nodes.bulkRemoveTag.addEventListener("click", removeSelectedTag);
 nodes.quickAddToggle.addEventListener("click", () => {
   nodes.quickAddForm.hidden = !nodes.quickAddForm.hidden;
   if (!nodes.quickAddForm.hidden) {

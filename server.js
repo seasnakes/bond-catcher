@@ -410,15 +410,6 @@ async function handleMiniQmtApi(pathname, response, timeout = 12_000) {
 
 async function handleBondTagsUpdate(request, response) {
   const body = await readJsonBody(request, 32 * 1024);
-  const requestedCode = String(body?.code || "").toUpperCase();
-  const requestedTags = Array.isArray(body?.tags)
-    ? [...new Set(body.tags.map((value) => String(value).trim()).filter(Boolean))]
-    : null;
-  if (!requestedCode || !requestedTags) {
-    sendJson(response, 400, { error: "缺少转债代码或标签列表" });
-    return;
-  }
-
   const [tagPayload, overridePayload] = await Promise.all([
     readJsonFile(BOND_TAGS_PATH),
     readJsonFile(BOND_TAG_OVERRIDES_PATH).catch(() => ({
@@ -427,13 +418,62 @@ async function handleBondTagsUpdate(request, response) {
     })),
   ]);
   const tagOrder = Array.isArray(tagPayload.tagOrder) ? tagPayload.tagOrder.map(String) : [];
+  const rows = Array.isArray(tagPayload.rows) ? tagPayload.rows : [];
+  const requestedCodes = Array.isArray(body?.codes)
+    ? [...new Set(body.codes.map((value) => String(value).toUpperCase()).filter(Boolean))]
+    : [];
+  const removeTag = String(body?.removeTag || "").trim();
+
+  if (requestedCodes.length > 0 || removeTag) {
+    if (requestedCodes.length === 0 || !tagOrder.includes(removeTag)) {
+      sendJson(response, 400, { error: "缺少批量转债代码或标签无效" });
+      return;
+    }
+    const selected = new Set(requestedCodes.map((code) => code.replace(/\D/g, "").slice(0, 6)));
+    const updatedRows = [];
+    for (const row of rows) {
+      const digits = String(row.code || "").replace(/\D/g, "").slice(0, 6);
+      if (!selected.has(digits) || !(row.tags || []).includes(removeTag)) continue;
+      const desiredTags = new Set((row.tags || []).filter((tag) => tag !== removeTag));
+      const primaryWasRemoved = row.primaryTag === removeTag;
+      const result = updateBondTagOverride({
+        row,
+        desiredTags,
+        tagOrder,
+        overridePayload,
+        primarySpecified: primaryWasRemoved,
+        requestedPrimaryTag: primaryWasRemoved ? "" : row.primaryTag,
+      });
+      updatedRows.push({ code: row.code, tags: row.tags, primaryTag: row.primaryTag, override: result });
+    }
+    if (updatedRows.length === 0) {
+      sendJson(response, 404, { error: "所选转债中没有可移除的当前标签" });
+      return;
+    }
+    recalculateBondTagCounts(tagPayload, tagOrder);
+    await Promise.all([
+      writeJsonAtomic(BOND_TAG_OVERRIDES_PATH, overridePayload),
+      writeJsonAtomic(BOND_TAGS_PATH, tagPayload),
+    ]);
+    sendJson(response, 200, { ok: true, removeTag, updated: updatedRows.length, rows: updatedRows });
+    return;
+  }
+
+  const requestedCode = String(body?.code || "").toUpperCase();
+  const requestedTags = Array.isArray(body?.tags)
+    ? [...new Set(body.tags.map((value) => String(value).trim()).filter(Boolean))]
+    : null;
+  if (!requestedCode || !requestedTags) {
+    sendJson(response, 400, { error: "缺少转债代码或标签列表" });
+    return;
+  }
   const invalidTags = requestedTags.filter((tag) => !tagOrder.includes(tag));
   if (invalidTags.length) {
     sendJson(response, 400, { error: `未知标签：${invalidTags.join("、")}` });
     return;
   }
   const codeDigits = requestedCode.replace(/\D/g, "").slice(0, 6);
-  const row = (tagPayload.rows || []).find(
+  const row = rows.find(
     (item) => String(item.code || "").toUpperCase() === requestedCode
       || String(item.code || "").replace(/\D/g, "").slice(0, 6) === codeDigits,
   );
@@ -442,9 +482,46 @@ async function handleBondTagsUpdate(request, response) {
     return;
   }
 
+  const desiredTags = new Set(requestedTags);
+  const primarySpecified = Object.prototype.hasOwnProperty.call(body || {}, "primaryTag");
+  const requestedPrimaryTag = String(body?.primaryTag || "").trim();
+  if (primarySpecified && requestedPrimaryTag && !desiredTags.has(requestedPrimaryTag)) {
+    sendJson(response, 400, { error: "主标签必须属于已选标签" });
+    return;
+  }
+  const nextOverride = updateBondTagOverride({
+    row,
+    desiredTags,
+    tagOrder,
+    overridePayload,
+    primarySpecified,
+    requestedPrimaryTag,
+  });
+  recalculateBondTagCounts(tagPayload, tagOrder);
+
+  await Promise.all([
+    writeJsonAtomic(BOND_TAG_OVERRIDES_PATH, overridePayload),
+    writeJsonAtomic(BOND_TAGS_PATH, tagPayload),
+  ]);
+  sendJson(response, 200, {
+    ok: true,
+    code: row.code,
+    tags: row.tags,
+    primaryTag: row.primaryTag || "",
+    override: nextOverride,
+  });
+}
+
+function updateBondTagOverride({
+  row,
+  desiredTags,
+  tagOrder,
+  overridePayload,
+  primarySpecified,
+  requestedPrimaryTag,
+}) {
   const canonicalCode = String(row.code);
   const currentTags = new Set((row.tags || []).map(String));
-  const desiredTags = new Set(requestedTags);
   const existing = overridePayload.overrides?.[canonicalCode] || {};
   const add = new Set((existing.add || []).filter((tag) => tagOrder.includes(tag)));
   const remove = new Set((existing.remove || []).filter((tag) => tagOrder.includes(tag)));
@@ -453,40 +530,41 @@ async function handleBondTagsUpdate(request, response) {
     if (desiredTags.has(tag)) {
       if (remove.has(tag)) remove.delete(tag);
       else add.add(tag);
+    } else if (add.has(tag)) {
+      add.delete(tag);
     } else {
-      if (add.has(tag)) add.delete(tag);
-      else remove.add(tag);
+      remove.add(tag);
     }
   }
 
-  overridePayload.overrides ||= {};
+  let primaryTag = desiredTags.has(row.primaryTag) ? String(row.primaryTag) : "";
+  if (primarySpecified) primaryTag = desiredTags.has(requestedPrimaryTag) ? requestedPrimaryTag : "";
   const nextOverride = {
     add: tagOrder.filter((tag) => add.has(tag)),
     remove: tagOrder.filter((tag) => remove.has(tag)),
   };
-  if (nextOverride.add.length || nextOverride.remove.length) {
+  if (primarySpecified || Object.prototype.hasOwnProperty.call(existing, "primaryTag")) {
+    nextOverride.primaryTag = primaryTag || null;
+  }
+
+  overridePayload.overrides ||= {};
+  if (nextOverride.add.length || nextOverride.remove.length || Object.prototype.hasOwnProperty.call(nextOverride, "primaryTag")) {
     overridePayload.overrides[canonicalCode] = nextOverride;
   } else {
     delete overridePayload.overrides[canonicalCode];
   }
   row.tags = tagOrder.filter((tag) => desiredTags.has(tag));
+  row.primaryTag = primaryTag;
+  return nextOverride;
+}
+
+function recalculateBondTagCounts(tagPayload, tagOrder) {
   tagPayload.tagCounts = Object.fromEntries(
     tagOrder.map((tag) => [
       tag,
       (tagPayload.rows || []).filter((item) => (item.tags || []).includes(tag)).length,
     ]),
   );
-
-  await Promise.all([
-    writeJsonAtomic(BOND_TAG_OVERRIDES_PATH, overridePayload),
-    writeJsonAtomic(BOND_TAGS_PATH, tagPayload),
-  ]);
-  sendJson(response, 200, {
-    ok: true,
-    code: canonicalCode,
-    tags: row.tags,
-    override: nextOverride,
-  });
 }
 
 async function readJsonFile(filePath) {

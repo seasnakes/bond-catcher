@@ -45,6 +45,13 @@
           <button id="closeEditorButton" type="button" aria-label="关闭标签编辑">×</button>
         </header>
         <div id="editTagOptions" class="edit-tag-options"></div>
+        <label class="primary-tag-field">
+          <span>主标签</span>
+          <select id="primaryTagSelect">
+            <option value="">未设置主标签</option>
+          </select>
+          <small>主标签会在对应题材看板中优先显示</small>
+        </label>
         <footer>
           <span id="editStatus">点击标签可选中或取消</span>
           <button id="cancelEditButton" type="button">取消</button>
@@ -58,12 +65,20 @@
             <strong id="resultTitle">全部转债</strong>
             <span id="resultMeta">-</span>
           </div>
-          <button id="refreshButton" type="button">刷新行情</button>
+          <div class="table-head-actions">
+            <div id="bulkTagActions" class="bulk-tag-actions" hidden>
+              <button id="selectVisibleButton" type="button">全选当前结果</button>
+              <span id="bulkSelectionCount">已选 0 只</span>
+              <button id="bulkRemoveTagButton" class="is-danger" type="button" disabled>从当前标签移除</button>
+            </div>
+            <button id="refreshButton" type="button">刷新行情</button>
+          </div>
         </header>
         <div class="tag-table-wrap">
           <table>
             <thead>
               <tr>
+                <th id="selectionHeader" class="selection-column" hidden>选择</th>
                 <th>转债</th>
                 <th>正股</th>
                 <th>行业</th>

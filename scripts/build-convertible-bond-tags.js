@@ -256,6 +256,7 @@ async function main() {
       if (TAG_ORDER.includes(tag)) tags.add(tag);
     }
     for (const tag of override.remove || []) tags.delete(tag);
+    const primaryTag = tags.has(override.primaryTag) ? override.primaryTag : "";
     return {
       code: bondCode,
       name: String(row["转债简称"] || ""),
@@ -267,6 +268,7 @@ async function main() {
       industry3: String(row["申万三级行业"] || ""),
       floatMarketCap,
       tags: TAG_ORDER.filter((tag) => tags.has(tag)),
+      primaryTag,
     };
   });
   const tagCounts = Object.fromEntries(
