@@ -98,7 +98,9 @@ const nodes = {
   maturityCard: document.querySelector("#maturityCard"),
   maturityCountdown: document.querySelector("#maturityCountdown"),
   maturityDetail: document.querySelector("#maturityDetail"),
-  stockPriceCard: document.querySelector("#stockPriceCard"),
+  stockMarketCard: document.querySelector("#stockMarketCard"),
+  stockName: document.querySelector("#stockName"),
+  stockCode: document.querySelector("#stockCode"),
   stockPrice: document.querySelector("#stockPrice"),
   stockChange: document.querySelector("#stockChange"),
   stockSparkline: document.querySelector("#stockSparkline"),
@@ -216,16 +218,26 @@ function renderBondMetadata(payload) {
   nodes.maturityCard.dataset.risk = maturity.risk || "unknown";
   nodes.maturityDetail.textContent = maturity.countdown || "暂无到期条款";
   nodes.maturityCard.title = maturity.quality || "按合同到期日计算自然日";
+  const stockLabel = payload.stock_name || "正股";
+  const stockCode = payload.stock_code || "";
+  nodes.stockName.textContent = stockLabel;
+  nodes.stockCode.textContent = stockCode;
+  nodes.stockMarketCard.title = `${stockLabel}${stockCode ? ` ${stockCode}` : ""}`;
   nodes.stockPrice.textContent = formatNumber(payload.stock_price, 2);
   nodes.stockPrice.className = toneClass(payload.stock_change);
-  nodes.stockPrice.title = `${payload.stock_name || "正股"} ${payload.stock_code || ""}`;
+  nodes.stockPrice.title = nodes.stockMarketCard.title;
   nodes.stockChange.textContent = formatPercent(payload.stock_change);
   nodes.stockChange.className = toneClass(payload.stock_change);
-  nodes.stockChange.title = `${payload.stock_name || "正股"} ${payload.stock_code || ""}`;
+  nodes.stockChange.title = nodes.stockMarketCard.title;
+  drawCurrentStockSparkline();
+}
+
+function drawCurrentStockSparkline() {
+  if (!state.metadata) return;
   drawStockSparkline(
-    payload.stock_intraday || [],
-    payload.stock_previous_close,
-    payload.stock_price,
+    state.metadata.stock_intraday || [],
+    state.metadata.stock_previous_close,
+    state.metadata.stock_price,
   );
 }
 
@@ -607,6 +619,7 @@ function renderDailyPayload(payload) {
   nodes.eventCount.className = toneClass(rangeReturn);
   nodes.dataAlert.hidden = true;
   drawChart();
+  window.requestAnimationFrame(drawCurrentStockSparkline);
 }
 
 function renderPayload(payload) {
@@ -682,6 +695,7 @@ function renderPayload(payload) {
       trading_date: item.trading_date,
     }))),
   );
+  window.requestAnimationFrame(drawCurrentStockSparkline);
   const autoRefreshPaused = !state.manualDate && !marketRefreshWindow().active;
   nodes.dataFootnote.textContent = autoRefreshPaused
     ? `${payload.source || "MiniQMT"} · 当前为非交易时段，自动刷新已暂停；可使用“立即刷新”手动检查。`
@@ -1885,12 +1899,7 @@ window.addEventListener("resize", () => {
   window.clearTimeout(state.resizeTimer);
   state.resizeTimer = window.setTimeout(() => {
     drawChart();
-    if (state.metadata) {
-      drawStockSparkline(
-        state.metadata.stock_intraday || [],
-        state.metadata.stock_previous_close,
-      );
-    }
+    drawCurrentStockSparkline();
   }, 100);
 });
 

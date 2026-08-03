@@ -425,7 +425,7 @@ h1 small {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 8px;
   margin: 8px 0;
 }
@@ -436,7 +436,7 @@ h1 small {
   justify-content: space-between;
   gap: 8px;
   min-width: 0;
-  padding: 9px 11px;
+  padding: 9px 7px;
 }
 
 .metrics article[hidden] {
@@ -458,6 +458,7 @@ h1 small {
 .metrics span {
   color: var(--muted);
   font-size: 12px;
+  white-space: nowrap;
 }
 
 .metrics strong {
@@ -466,13 +467,67 @@ h1 small {
   white-space: nowrap;
 }
 
-.metrics .stock-spark-card {
+.metrics .stock-market-card {
+  display: grid;
+  grid-column: span 2;
+  grid-template-columns: minmax(138px, 0.95fr) minmax(124px, 1.05fr);
   align-items: center;
+  gap: 9px;
+  min-height: 57px;
+  padding: 6px 9px;
 }
 
-.stock-spark-card canvas {
-  width: min(150px, 72%);
-  height: 34px;
+.stock-market-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.stock-market-identity,
+.stock-market-quote {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.metrics .stock-market-identity > span {
+  flex: 0 0 auto;
+  font-size: 10px;
+}
+
+.metrics .stock-market-identity > strong {
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: #273424;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metrics .stock-market-identity > small {
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: #8a9388;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metrics .stock-market-quote > strong {
+  font-size: 18px;
+}
+
+.metrics .stock-market-quote > span {
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.stock-market-card canvas {
+  display: block;
+  width: 100%;
+  height: 40px;
 }
 
 .chart-card {
@@ -679,6 +734,10 @@ h1 small {
 
   .metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metrics .stock-market-card {
+    grid-column: 1 / -1;
   }
 
   .bond-fundamentals {
