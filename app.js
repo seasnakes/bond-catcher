@@ -2651,6 +2651,7 @@ function renderSignalFeed(newIds = new Set()) {
     const bondName = document.createElement("span");
     bondName.className = "signal-bond-name";
     bondName.textContent = event.name || event.code;
+    bondName.title = event.name || event.code;
     const code = document.createElement("small");
     code.className = "signal-code";
     code.textContent = event.code;

@@ -611,7 +611,11 @@ textarea:disabled {
 
 .signal-row {
   display: grid;
-  grid-template-columns: 62px minmax(154px, 190px) 445px 106px minmax(0, 1fr);
+  grid-template-columns:
+    62px
+    minmax(270px, 1.1fr)
+    minmax(480px, 2fr)
+    106px;
   gap: 10px;
   align-items: center;
   min-height: 34px;
@@ -671,8 +675,10 @@ textarea:disabled {
 
 .signal-tags {
   display: flex;
+  flex: 1 1 auto;
   min-width: 0;
   gap: 3px;
+  overflow: hidden;
 }
 
 .signal-tags small {
@@ -686,7 +692,15 @@ textarea:disabled {
 }
 
 .signal-bond-name {
+  flex: 0 0 auto;
+  overflow: visible;
   font-weight: 700;
+  text-overflow: clip;
+}
+
+.signal-code,
+.signal-tier {
+  flex: 0 0 auto;
 }
 
 .signal-code {
@@ -696,7 +710,7 @@ textarea:disabled {
 .signal-detail {
   display: grid;
   min-width: 0;
-  grid-template-columns: 158px 76px 74px 100px;
+  grid-template-columns: minmax(190px, 1.6fr) 92px 84px minmax(110px, 0.9fr);
   gap: 9px;
   align-items: center;
 }
@@ -861,11 +875,11 @@ textarea:disabled {
 
 @media (max-width: 1100px) {
   .signal-row {
-    grid-template-columns: 62px minmax(145px, 175px) 340px 106px minmax(0, 1fr);
+    grid-template-columns: 62px minmax(240px, 1.05fr) minmax(350px, 1.6fr) 106px;
   }
 
   .signal-detail {
-    grid-template-columns: 148px 74px 100px;
+    grid-template-columns: minmax(160px, 1fr) 82px 110px;
   }
 
   .signal-sparkline {
@@ -1874,6 +1888,10 @@ textarea:disabled {
 
   .signal-metric,
   .signal-tier {
+    display: none;
+  }
+
+  .signal-tags {
     display: none;
   }
 
