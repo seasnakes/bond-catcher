@@ -13,6 +13,14 @@ const LOCAL_BACKUP_STORAGE_KEY = "finance-board-local-backup-v1";
 const SPARKLINE_STORAGE_KEY = "finance-board-show-sparklines-v1";
 const BOARD_VIEW_STATE_STORAGE_KEY = "finance-board-view-state-v1";
 const ACTIVE_BOARD_STORAGE_KEY = "finance-board-active-view-v1";
+const MARKET_SPLIT_STORAGE_KEY = "finance-board-market-split-v1";
+const MARKET_SPLIT_DEFAULT = 0.49;
+const MARKET_SPLIT_MIN_SIGNAL_PX = 560;
+const MARKET_SPLIT_MIN_MARKET_PX = 440;
+const MARKET_HEIGHT_STORAGE_KEY = "finance-board-market-height-v1";
+const MARKET_HEIGHT_DEFAULT = 176;
+const MARKET_HEIGHT_MIN = 120;
+const MARKET_HEIGHT_MAX = 520;
 const SPARKLINE_BATCH_SIZE = 24;
 const SPARKLINE_REFRESH_MS = 2 * 60 * 1000;
 const AUCTION_SERIES_BATCH_SIZE = 120;
@@ -838,9 +846,18 @@ const state = {
   themeUpdatedAt: null,
   activeThemeTag: "all",
   themeExpandedTags: new Set(),
+  bondPreviewCode: "",
+  bondPreviewUrl: "",
 };
 let serverPersistTimer = 0;
 let temporaryStatusTimer = 0;
+let marketResizeTimer = 0;
+let marketResizePointerId = null;
+let marketSplitRatio = MARKET_SPLIT_DEFAULT;
+let marketHeightPointerId = null;
+let marketHeightDragStartY = 0;
+let marketHeightDragStartValue = MARKET_HEIGHT_DEFAULT;
+let marketPanelBodyHeight = MARKET_HEIGHT_DEFAULT;
 
 const grid = document.querySelector("#boardGrid");
 const boardTitle = document.querySelector("#boardTitle");
@@ -852,6 +869,17 @@ const themeBoardSummary = document.querySelector("#themeBoardSummary");
 const themeTagFilters = document.querySelector("#themeTagFilters");
 const statusNode = document.querySelector("#marketStatus");
 const globalIndicesNode = document.querySelector("#globalIndices");
+const kospiMarketChart = document.querySelector("#kospiMarketChart");
+const marketMonitorRow = document.querySelector(".market-monitor-row");
+const marketMonitorResizer = document.querySelector("#marketMonitorResizer");
+const marketMonitorHeightResizer = document.querySelector("#marketMonitorHeightResizer");
+const tvMarketPanel = document.querySelector(".tv-market-panel");
+const marketPanelTitle = document.querySelector("#marketPanelTitle");
+const marketPanelSubtitle = document.querySelector("#marketPanelSubtitle");
+const externalMarketGrid = document.querySelector("#externalMarketGrid");
+const bondMarketPreview = document.querySelector("#bondMarketPreview");
+const bondMarketPreviewFrame = document.querySelector("#bondMarketPreviewFrame");
+const bondPreviewReset = document.querySelector("#bondPreviewReset");
 const searchInput = document.querySelector("#searchInput");
 const sortSelect = document.querySelector("#sortSelect");
 const rangeSelect = document.querySelector("#rangeSelect");
@@ -892,15 +920,122 @@ const cardTemplate = document.querySelector("#cardTemplate");
 const bondOverlay = document.querySelector("#bondOverlay");
 const bondOverlayFrame = document.querySelector("#bondOverlayFrame");
 
+function marketSplitBounds() {
+  const width = marketMonitorRow.clientWidth;
+  const dividerWidth = marketMonitorResizer.offsetWidth || 10;
+  if (!(width > dividerWidth)) return { min: 0.35, max: 0.7 };
+  const min = Math.min(0.5, MARKET_SPLIT_MIN_SIGNAL_PX / width);
+  const max = Math.max(min, (width - dividerWidth - MARKET_SPLIT_MIN_MARKET_PX) / width);
+  return { min, max: Math.min(0.7, max) };
+}
+
+function setMarketSplitRatio(value, persist = false) {
+  const bounds = marketSplitBounds();
+  const ratio = clamp(Number(value) || MARKET_SPLIT_DEFAULT, bounds.min, bounds.max);
+  marketSplitRatio = ratio;
+  marketMonitorRow.style.setProperty("--signal-panel-width", `${(ratio * 100).toFixed(2)}%`);
+  marketMonitorResizer.setAttribute("aria-valuemin", String(Math.round(bounds.min * 100)));
+  marketMonitorResizer.setAttribute("aria-valuemax", String(Math.round(bounds.max * 100)));
+  marketMonitorResizer.setAttribute("aria-valuenow", String(Math.round(ratio * 100)));
+  if (persist) {
+    localStorage.setItem(MARKET_SPLIT_STORAGE_KEY, ratio.toFixed(4));
+  }
+  return ratio;
+}
+
+function restoreMarketSplit() {
+  const saved = Number(localStorage.getItem(MARKET_SPLIT_STORAGE_KEY));
+  setMarketSplitRatio(Number.isFinite(saved) && saved > 0 ? saved : MARKET_SPLIT_DEFAULT);
+}
+
+function finishMarketResize(event) {
+  if (marketResizePointerId === null || event.pointerId !== marketResizePointerId) return;
+  marketResizePointerId = null;
+  marketMonitorResizer.classList.remove("is-dragging");
+  document.body.classList.remove("is-resizing-market-panels");
+  setMarketSplitRatio(marketSplitRatio, true);
+}
+
+function setMarketPanelHeight(value, persist = false) {
+  const height = Math.round(clamp(Number(value) || MARKET_HEIGHT_DEFAULT, MARKET_HEIGHT_MIN, MARKET_HEIGHT_MAX));
+  marketPanelBodyHeight = height;
+  marketMonitorRow.style.setProperty("--market-panel-body-height", `${height}px`);
+  marketMonitorHeightResizer.setAttribute("aria-valuenow", String(height));
+  if (persist) {
+    localStorage.setItem(MARKET_HEIGHT_STORAGE_KEY, String(height));
+  }
+  return height;
+}
+
+function restoreMarketPanelHeight() {
+  const saved = Number(localStorage.getItem(MARKET_HEIGHT_STORAGE_KEY));
+  setMarketPanelHeight(Number.isFinite(saved) && saved > 0 ? saved : MARKET_HEIGHT_DEFAULT);
+}
+
+function finishMarketHeightResize(event) {
+  if (marketHeightPointerId === null || event.pointerId !== marketHeightPointerId) return;
+  marketHeightPointerId = null;
+  marketMonitorHeightResizer.classList.remove("is-dragging");
+  document.body.classList.remove("is-resizing-market-height");
+  setMarketPanelHeight(marketPanelBodyHeight, true);
+}
+
 function embeddedBondUrl(url) {
   const target = new URL(url, window.location.href);
+  target.searchParams.delete("panel");
   target.searchParams.set("embedded", "1");
   return target.href;
+}
+
+function panelBondUrl(url) {
+  const target = new URL(url, window.location.href);
+  target.searchParams.delete("view");
+  target.searchParams.delete("date");
+  target.searchParams.delete("days");
+  target.searchParams.set("embedded", "1");
+  target.searchParams.set("panel", "1");
+  return target.href;
+}
+
+function showBondMarketPreview(url) {
+  const target = new URL(url, window.location.href);
+  target.searchParams.delete("embedded");
+  target.searchParams.delete("panel");
+  const code = String(target.searchParams.get("code") || "").replace(/\D/g, "");
+  if (!code) return;
+  const name = target.searchParams.get("name") || "可转债";
+  const previewUrl = panelBondUrl(target.href);
+  state.bondPreviewCode = code;
+  state.bondPreviewUrl = target.href;
+  tvMarketPanel.open = true;
+  marketPanelTitle.textContent = name;
+  marketPanelSubtitle.textContent = `${code} · 分时与指标`;
+  externalMarketGrid.hidden = true;
+  bondMarketPreview.hidden = false;
+  bondPreviewReset.hidden = false;
+  marketMonitorRow.classList.add("is-bond-preview");
+  bondMarketPreviewFrame.title = `${name} ${code} 分时与指标预览`;
+  if (bondMarketPreviewFrame.src !== previewUrl) {
+    bondMarketPreviewFrame.src = previewUrl;
+  }
+}
+
+function showExternalMarkets() {
+  state.bondPreviewCode = "";
+  state.bondPreviewUrl = "";
+  marketPanelTitle.textContent = "外围分时";
+  marketPanelSubtitle.textContent = "TradingView / Yahoo · 延迟行情";
+  externalMarketGrid.hidden = false;
+  bondMarketPreview.hidden = true;
+  bondPreviewReset.hidden = true;
+  marketMonitorRow.classList.remove("is-bond-preview");
+  bondMarketPreviewFrame.removeAttribute("src");
 }
 
 function showBondOverlay(url, updateHistory = true) {
   const target = new URL(url, window.location.href);
   target.searchParams.delete("embedded");
+  target.searchParams.delete("panel");
   const targetPath = `${target.pathname}${target.search}`;
   const embeddedTarget = embeddedBondUrl(target.href);
   saveBoardViewState();
@@ -2990,6 +3125,92 @@ function renderIndices() {
     pill.append(name, change, renderIndexSparkline(item), price);
     globalIndicesNode.append(pill);
   }
+
+  renderKospiMarketChart();
+}
+
+function renderKospiMarketChart() {
+  if (!kospiMarketChart) return;
+  kospiMarketChart.replaceChildren();
+
+  const item = state.indices.find((row) => row.key === "kospi");
+  const points = Array.isArray(item?.points)
+    ? item.points.map(Number).filter((value) => Number.isFinite(value) && value > 0)
+    : [];
+  const price = Number(item?.price);
+  const percent = Number(item?.percent);
+  if (!item || !Number.isFinite(price) || !Number.isFinite(percent) || points.length < 2) {
+    kospiMarketChart.className = "native-market-chart";
+    const loading = document.createElement("span");
+    loading.className = "native-market-loading";
+    loading.textContent = "今日KOSPI分时暂未到达";
+    kospiMarketChart.append(loading);
+    return;
+  }
+
+  const tone = quoteClass(percent);
+  kospiMarketChart.className = `native-market-chart is-${tone}`;
+
+  const quote = document.createElement("div");
+  quote.className = "native-market-quote";
+  const priceNode = document.createElement("strong");
+  priceNode.className = "native-market-price";
+  priceNode.textContent = formatIndexPrice(price);
+  const changeNode = document.createElement("span");
+  changeNode.className = "native-market-change";
+  changeNode.textContent = formatSignedPercent(percent);
+  quote.append(priceNode, changeNode);
+
+  const chartPoints = [...points, price];
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "native-market-plot");
+  svg.setAttribute("viewBox", "0 0 100 55");
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("aria-hidden", "true");
+
+  const previousClose = price / (1 + percent / 100);
+  const low = Math.min(...chartPoints, previousClose);
+  const high = Math.max(...chartPoints, previousClose);
+  const span = high - low || 1;
+  const yFor = (value) => 52 - ((value - low) / span) * 49;
+
+  const baseline = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  baseline.setAttribute("class", "native-market-baseline");
+  baseline.setAttribute("x1", "0");
+  baseline.setAttribute("x2", "100");
+  baseline.setAttribute("y1", String(yFor(previousClose)));
+  baseline.setAttribute("y2", String(yFor(previousClose)));
+
+  const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  line.setAttribute("class", "native-market-line");
+  line.setAttribute(
+    "d",
+    points
+      .map((value, index) => {
+        const x = points.length > 1 ? (index / (points.length - 1)) * 98 : 0;
+        return `${index === 0 ? "M" : "L"}${x.toFixed(2)},${yFor(value).toFixed(2)}`;
+      })
+      .join(" "),
+  );
+
+  const latest = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  latest.setAttribute("class", "native-market-latest");
+  latest.setAttribute("x1", "98");
+  latest.setAttribute("y1", String(yFor(points.at(-1))));
+  latest.setAttribute("x2", "100");
+  latest.setAttribute("y2", String(yFor(price)));
+  svg.append(baseline, line, latest);
+
+  const meta = document.createElement("div");
+  meta.className = "native-market-meta";
+  const session = document.createElement("span");
+  const chartDate = item.sparkDate || item.date || "今日";
+  session.textContent = `${chartDate} · 图至 ${item.sparkTime || "--:--"} KST`;
+  const quoteTime = document.createElement("span");
+  quoteTime.textContent = item.time ? `报价 ${item.time} 北京时间` : "延迟行情";
+  meta.append(session, quoteTime);
+
+  kospiMarketChart.append(quote, svg, meta);
 }
 
 function renderIndexSparkline(item) {
@@ -3300,6 +3521,7 @@ function setActiveView(view) {
   grid.hidden = isThemes;
   themeBondBoard.hidden = !isThemes;
   signalMonitor.hidden = isThemes;
+  marketMonitorRow.classList.toggle("is-themes-view", isThemes);
   editListButton.hidden = isThemes;
   addSectorButton.hidden = isThemes;
   addStackButton.hidden = isThemes;
@@ -4194,6 +4416,8 @@ async function refreshIndices(options = {}) {
 }
 
 async function boot() {
+  restoreMarketSplit();
+  restoreMarketPanelHeight();
   await loadServerBoardState();
   const restoredView = restoreBoardViewState();
   const stocks = getAllStocks(state.sectors);
@@ -4260,10 +4484,92 @@ window.addEventListener("message", (event) => {
     event.data?.type === "finance:close-bond-overlay"
   ) {
     closeBondOverlay();
+    return;
   }
+  if (
+    event.origin === window.location.origin &&
+    event.source === bondMarketPreviewFrame.contentWindow &&
+    event.data?.type === "finance:open-bond-overlay"
+  ) {
+    showBondOverlay(event.data.url || state.bondPreviewUrl);
+  }
+});
+bondPreviewReset.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  showExternalMarkets();
+});
+marketMonitorResizer.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0 || window.matchMedia("(max-width: 1180px)").matches) return;
+  event.preventDefault();
+  marketResizePointerId = event.pointerId;
+  marketMonitorResizer.classList.add("is-dragging");
+  document.body.classList.add("is-resizing-market-panels");
+});
+window.addEventListener("pointermove", (event) => {
+  if (marketResizePointerId === null || event.pointerId !== marketResizePointerId) return;
+  const rect = marketMonitorRow.getBoundingClientRect();
+  if (!(rect.width > 0)) return;
+  setMarketSplitRatio((event.clientX - rect.left) / rect.width);
+});
+window.addEventListener("pointerup", finishMarketResize);
+window.addEventListener("pointercancel", finishMarketResize);
+marketMonitorResizer.addEventListener("keydown", (event) => {
+  if (!["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
+  event.preventDefault();
+  if (event.key === "Home") {
+    setMarketSplitRatio(MARKET_SPLIT_DEFAULT, true);
+    return;
+  }
+  const delta = event.key === "ArrowLeft" ? -0.025 : 0.025;
+  setMarketSplitRatio(marketSplitRatio + delta, true);
+});
+marketMonitorResizer.addEventListener("dblclick", () => {
+  setMarketSplitRatio(MARKET_SPLIT_DEFAULT, true);
+});
+marketMonitorHeightResizer.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  marketHeightPointerId = event.pointerId;
+  marketHeightDragStartY = event.clientY;
+  marketHeightDragStartValue = marketPanelBodyHeight;
+  marketMonitorHeightResizer.classList.add("is-dragging");
+  document.body.classList.add("is-resizing-market-height");
+});
+window.addEventListener("pointermove", (event) => {
+  if (marketHeightPointerId === null || event.pointerId !== marketHeightPointerId) return;
+  setMarketPanelHeight(marketHeightDragStartValue + event.clientY - marketHeightDragStartY);
+});
+window.addEventListener("pointerup", finishMarketHeightResize);
+window.addEventListener("pointercancel", finishMarketHeightResize);
+marketMonitorHeightResizer.addEventListener("keydown", (event) => {
+  if (!["ArrowUp", "ArrowDown", "Home"].includes(event.key)) return;
+  event.preventDefault();
+  if (event.key === "Home") {
+    setMarketPanelHeight(MARKET_HEIGHT_DEFAULT, true);
+    return;
+  }
+  const delta = event.key === "ArrowUp" ? -16 : 16;
+  setMarketPanelHeight(marketPanelBodyHeight + delta, true);
+});
+marketMonitorHeightResizer.addEventListener("dblclick", () => {
+  setMarketPanelHeight(MARKET_HEIGHT_DEFAULT, true);
 });
 document.addEventListener(
   "click",
+  (event) => {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const link = event.target.closest?.('a[href*="bond.html"]');
+    if (!link) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.detail > 1) return;
+    showBondMarketPreview(link.href);
+  },
+  true,
+);
+document.addEventListener(
+  "dblclick",
   (event) => {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     const link = event.target.closest?.('a[href*="bond.html"]');
@@ -4308,6 +4614,13 @@ refreshButton.addEventListener("click", () => {
   scheduleMainRefresh();
   scheduleBondRefresh();
   scheduleSignalRefresh();
+});
+
+window.addEventListener("resize", () => {
+  window.clearTimeout(marketResizeTimer);
+  marketResizeTimer = window.setTimeout(() => {
+    if (window.innerWidth > 1180) setMarketSplitRatio(marketSplitRatio);
+  }, 100);
 });
 
 signalScope.addEventListener("change", async (event) => {

@@ -72,6 +72,9 @@ FOCUS_EVENT_TYPES = {
 DAILY_CACHE_TTL_SECONDS = 300
 DAILY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 INTRADAY_CACHE_TTL_SECONDS = 300
+INTRADAY_CURRENT_CACHE_TTL_SECONDS = 10
+INTRADAY_BACKFILL_RETRIES = 3
+INTRADAY_BACKFILL_WAIT_SECONDS = 0.4
 INTRADAY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 HISTORICAL_VOLUME_CACHE: dict[
     str,
@@ -102,6 +105,39 @@ BOND_REFERENCE_CACHE_TTL_SECONDS = 21_600
 BOND_REFERENCE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 PURPLE_BREAK_TOLERANCE = 0.001
 PURPLE_BREAK_CONFIRM_BARS = 2
+BRIDGE_CONFIG_CACHE: dict[str, str] = {}
+
+
+def bridge_config_value(name: str, default: str = "") -> str:
+    direct = os.environ.get(name, "").strip()
+    if direct:
+        return direct
+    if name in BRIDGE_CONFIG_CACHE:
+        return BRIDGE_CONFIG_CACHE[name] or default
+    configured_path = os.environ.get("QMT_BRIDGE_ENV_FILE", "").strip()
+    candidates = [
+        Path(configured_path).expanduser() if configured_path else None,
+        FINANCE_ROOT / ".env",
+        Path.home() / ".codex" / ".env",
+    ]
+    values: dict[str, str] = {}
+    for candidate in candidates:
+        if candidate is None or not candidate.is_file():
+            continue
+        try:
+            for raw_line in candidate.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                if not key.startswith("QMT_BRIDGE_") or key in values:
+                    continue
+                values[key] = value.strip().strip('"').strip("'")
+        except OSError:
+            continue
+    BRIDGE_CONFIG_CACHE.update(values)
+    return BRIDGE_CONFIG_CACHE.get(name, default)
 
 
 def load_monitor_module() -> Any:
@@ -404,6 +440,294 @@ def quotes_payload(codes_input: str) -> dict[str, Any]:
             "returned": len(quotes),
             "failed": [code for code in codes if code not in ticks],
             "quotes": quotes,
+        }
+    )
+
+
+def unwrap_bridge_data(payload: Any) -> Any:
+    if isinstance(payload, dict) and "data" in payload:
+        return payload.get("data")
+    return payload
+
+
+def bridge_trading_get(path: str, params: dict[str, Any]) -> Any:
+    query = urllib.parse.urlencode(
+        {key: value for key, value in params.items() if value not in (None, "")}
+    )
+    url = f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}{path}"
+    if query:
+        url += "?" + query
+    headers = {"Accept": "application/json"}
+    api_key = bridge_config_value("QMT_BRIDGE_API_KEY")
+    if api_key:
+        headers["X-API-Key"] = api_key
+    request = urllib.request.Request(url, headers=headers)
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(request, timeout=12.0) as response:
+        return unwrap_bridge_data(json.load(response))
+
+
+def configured_trading_accounts() -> list[dict[str, str]]:
+    accounts: list[dict[str, str]] = []
+    stock_account = bridge_config_value("QMT_BRIDGE_STOCK_ACCOUNT_ID")
+    credit_account = bridge_config_value("QMT_BRIDGE_CREDIT_ACCOUNT_ID")
+    if stock_account:
+        accounts.append({"label": "普通户", "id": stock_account, "type": ""})
+    if credit_account:
+        accounts.append({"label": "信用户", "id": credit_account, "type": "CREDIT"})
+    return accounts
+
+
+def row_value(row: dict[str, Any], *keys: str, default: Any = None) -> Any:
+    for key in keys:
+        if key in row and row.get(key) is not None:
+            return row.get(key)
+    return default
+
+
+def number_value(value: Any) -> float:
+    try:
+        number = float(value or 0)
+        return number if math.isfinite(number) else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def integer_value(value: Any) -> int:
+    return int(number_value(value))
+
+
+def trading_side(row: dict[str, Any]) -> str:
+    offset = integer_value(row_value(row, "offset_flag", "m_nOffsetFlag"))
+    order_type = integer_value(row_value(row, "order_type", "m_nOrderType"))
+    if offset == 48 or order_type == 23:
+        return "买入"
+    if offset == 49 or order_type == 24:
+        return "卖出"
+    return "其他"
+
+
+def trading_clock(value: Any) -> str:
+    timestamp = number_value(value)
+    if timestamp <= 0:
+        return ""
+    if timestamp > 10_000_000_000:
+        timestamp /= 1000
+    try:
+        return datetime.fromtimestamp(timestamp).strftime("%H:%M:%S")
+    except (OverflowError, OSError, ValueError):
+        return ""
+
+
+def order_status_text(row: dict[str, Any]) -> str:
+    message = str(row_value(row, "status_msg", "m_strStatusMsg", default="") or "").strip()
+    if message:
+        return message
+    status = integer_value(row_value(row, "order_status", "m_nOrderStatus"))
+    return {
+        48: "未报",
+        49: "待报",
+        50: "已报",
+        51: "待撤",
+        52: "部成待撤",
+        53: "部成",
+        54: "已撤",
+        55: "部撤",
+        56: "已成",
+        57: "废单",
+    }.get(status, f"状态{status}" if status else "未知")
+
+
+def sanitize_position(row: dict[str, Any], account_label: str) -> dict[str, Any]:
+    profit_rate = number_value(row_value(row, "profit_rate", "m_dProfitRate"))
+    return {
+        "account": account_label,
+        "code": str(row_value(row, "stock_code", "m_strStockCode", default="") or ""),
+        "name": str(row_value(row, "instrument_name", "m_strInstrumentName", default="") or ""),
+        "volume": integer_value(row_value(row, "volume", "m_nVolume")),
+        "available": integer_value(row_value(row, "can_use_volume", "m_nCanUseVolume")),
+        "frozen": integer_value(row_value(row, "frozen_volume", "m_nFrozenVolume")),
+        "average_price": number_value(row_value(row, "avg_price", "m_dAvgPrice")),
+        "last_price": number_value(row_value(row, "last_price", "m_dLastPrice")),
+        "market_value": number_value(row_value(row, "market_value", "m_dMarketValue")),
+        "floating_profit": number_value(row_value(row, "float_profit", "m_dFloatProfit")),
+        "position_profit": number_value(row_value(row, "position_profit", "m_dPositionProfit")),
+        "profit_rate": profit_rate * 100,
+    }
+
+
+def sanitize_order(row: dict[str, Any], account_label: str) -> dict[str, Any]:
+    return {
+        "account": account_label,
+        "time": trading_clock(row_value(row, "order_time", "m_nOrderTime")),
+        "code": str(row_value(row, "stock_code", "m_strStockCode", default="") or ""),
+        "name": str(row_value(row, "instrument_name", "m_strInstrumentName", default="") or ""),
+        "side": trading_side(row),
+        "price": number_value(row_value(row, "price", "m_dPrice")),
+        "volume": integer_value(row_value(row, "order_volume", "m_nOrderVolume")),
+        "traded_price": number_value(row_value(row, "traded_price", "m_dTradedPrice")),
+        "traded_volume": integer_value(row_value(row, "traded_volume", "m_nTradedVolume")),
+        "status": order_status_text(row),
+        "status_code": integer_value(row_value(row, "order_status", "m_nOrderStatus")),
+        "strategy": str(row_value(row, "strategy_name", "m_strStrategyName", default="") or ""),
+        "remark": str(row_value(row, "order_remark", "m_strOrderRemark", default="") or ""),
+    }
+
+
+def sanitize_trade(row: dict[str, Any], account_label: str) -> dict[str, Any]:
+    price = number_value(row_value(row, "traded_price", "m_dTradedPrice"))
+    volume = integer_value(row_value(row, "traded_volume", "m_nTradedVolume"))
+    amount = number_value(row_value(row, "traded_amount", "m_dTradedAmount"))
+    return {
+        "account": account_label,
+        "time": trading_clock(row_value(row, "traded_time", "m_nTradedTime")),
+        "code": str(row_value(row, "stock_code", "m_strStockCode", default="") or ""),
+        "name": str(row_value(row, "instrument_name", "m_strInstrumentName", default="") or ""),
+        "side": trading_side(row),
+        "price": price,
+        "volume": volume,
+        "amount": amount if amount else price * volume,
+        "commission": number_value(row_value(row, "commission", "m_dCommission")),
+        "strategy": str(row_value(row, "strategy_name", "m_strStrategyName", default="") or ""),
+        "remark": str(row_value(row, "order_remark", "m_strOrderRemark", default="") or ""),
+    }
+
+
+def trading_payload() -> dict[str, Any]:
+    accounts = configured_trading_accounts()
+    if not accounts:
+        raise ValueError("尚未配置 QMT 实盘账户")
+
+    assets: list[dict[str, Any]] = []
+    positions: list[dict[str, Any]] = []
+    orders: list[dict[str, Any]] = []
+    trades: list[dict[str, Any]] = []
+    account_states: list[dict[str, Any]] = []
+
+    for account in accounts:
+        common_params = {"account_id": account["id"]}
+        typed_params = dict(common_params)
+        if account["type"]:
+            typed_params["account_type"] = account["type"]
+        status = bridge_trading_get("/api/trading/account_status", common_params)
+        asset = bridge_trading_get("/api/trading/asset", typed_params)
+        raw_positions = bridge_trading_get("/api/trading/positions", typed_params)
+        raw_orders = bridge_trading_get("/api/trading/orders", typed_params)
+        raw_trades = bridge_trading_get("/api/trading/trades", typed_params)
+
+        asset = asset if isinstance(asset, dict) else {}
+        assets.append(
+            {
+                "account": account["label"],
+                "cash": number_value(row_value(asset, "cash", "m_dCash")),
+                "frozen_cash": number_value(row_value(asset, "frozen_cash", "m_dFrozenCash")),
+                "market_value": number_value(row_value(asset, "market_value", "m_dMarketValue")),
+                "total_asset": number_value(row_value(asset, "total_asset", "m_dTotalAsset")),
+            }
+        )
+        account_states.append(
+            {
+                "label": account["label"],
+                "connected": bool(status.get("connected")) if isinstance(status, dict) else False,
+            }
+        )
+        positions.extend(
+            sanitize_position(row, account["label"])
+            for row in (raw_positions if isinstance(raw_positions, list) else [])
+            if isinstance(row, dict)
+        )
+        orders.extend(
+            sanitize_order(row, account["label"])
+            for row in (raw_orders if isinstance(raw_orders, list) else [])
+            if isinstance(row, dict)
+        )
+        trades.extend(
+            sanitize_trade(row, account["label"])
+            for row in (raw_trades if isinstance(raw_trades, list) else [])
+            if isinstance(row, dict)
+        )
+
+    grouped: dict[str, dict[str, Any]] = {}
+    for trade in trades:
+        code = str(trade.get("code") or "")
+        item = grouped.setdefault(
+            code,
+            {
+                "code": code,
+                "name": trade.get("name") or code,
+                "buy_fills": 0,
+                "buy_volume": 0,
+                "buy_amount": 0.0,
+                "buy_price_volume": 0.0,
+                "sell_fills": 0,
+                "sell_volume": 0,
+                "sell_amount": 0.0,
+                "sell_price_volume": 0.0,
+            },
+        )
+        prefix = "buy" if trade.get("side") == "买入" else "sell" if trade.get("side") == "卖出" else ""
+        if not prefix:
+            continue
+        item[f"{prefix}_fills"] += 1
+        item[f"{prefix}_volume"] += int(trade.get("volume") or 0)
+        item[f"{prefix}_amount"] += float(trade.get("amount") or 0)
+        item[f"{prefix}_price_volume"] += float(trade.get("price") or 0) * int(trade.get("volume") or 0)
+
+    symbol_summary: list[dict[str, Any]] = []
+    for item in grouped.values():
+        buy_volume = int(item.pop("buy_volume"))
+        sell_volume = int(item.pop("sell_volume"))
+        buy_price_volume = float(item.pop("buy_price_volume"))
+        sell_price_volume = float(item.pop("sell_price_volume"))
+        item["buy_volume"] = buy_volume
+        item["sell_volume"] = sell_volume
+        item["buy_average"] = buy_price_volume / buy_volume if buy_volume else 0
+        item["sell_average"] = sell_price_volume / sell_volume if sell_volume else 0
+        item["total_amount"] = float(item["buy_amount"]) + float(item["sell_amount"])
+        item["net_volume"] = buy_volume - sell_volume
+        symbol_summary.append(item)
+    symbol_summary.sort(key=lambda item: float(item.get("total_amount") or 0), reverse=True)
+
+    current_positions = [row for row in positions if int(row.get("volume") or 0) > 0]
+    total_buy = sum(float(row.get("amount") or 0) for row in trades if row.get("side") == "买入")
+    total_sell = sum(float(row.get("amount") or 0) for row in trades if row.get("side") == "卖出")
+    trade_times = sorted(str(row.get("time") or "") for row in trades if row.get("time"))
+    summary = {
+        "account_count": len(accounts),
+        "connected": all(row["connected"] for row in account_states),
+        "total_asset": sum(float(row["total_asset"]) for row in assets),
+        "cash": sum(float(row["cash"]) for row in assets),
+        "market_value": sum(float(row["market_value"]) for row in assets),
+        "current_position_count": len(current_positions),
+        "order_count": len(orders),
+        "filled_order_count": sum(1 for row in orders if int(row.get("traded_volume") or 0) > 0),
+        "cancelled_order_count": sum(1 for row in orders if int(row.get("status_code") or 0) == 54),
+        "trade_count": len(trades),
+        "trade_symbol_count": len(symbol_summary),
+        "buy_amount": total_buy,
+        "sell_amount": total_sell,
+        "net_buy_amount": total_buy - total_sell,
+        "first_trade_time": trade_times[0] if trade_times else "",
+        "last_trade_time": trade_times[-1] if trade_times else "",
+    }
+    orders.sort(key=lambda row: str(row.get("time") or ""), reverse=True)
+    trades.sort(key=lambda row: str(row.get("time") or ""), reverse=True)
+    current_positions.sort(key=lambda row: float(row.get("market_value") or 0), reverse=True)
+
+    return clean_json(
+        {
+            "ok": True,
+            "mode": "read_only",
+            "source": "QMT Bridge 真实账户",
+            "trading_date": datetime.now().strftime("%Y-%m-%d"),
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "accounts": account_states,
+            "assets": assets,
+            "summary": summary,
+            "symbol_summary": symbol_summary,
+            "trades": trades,
+            "orders": orders,
+            "positions": current_positions,
         }
     )
 
@@ -2052,7 +2376,17 @@ def historical_minute_rows(
         raise ValueError("历史分时日期必须为YYYYMMDD")
     cache_key = f"{stored_code}:{trading_date}"
     cached = INTRADAY_CACHE.get(cache_key)
-    if cached and time.monotonic() - cached[0] < INTRADAY_CACHE_TTL_SECONDS:
+    is_current_day = trading_date == datetime.now().strftime("%Y%m%d")
+    cache_ttl = (
+        INTRADAY_CURRENT_CACHE_TTL_SECONDS
+        if is_current_day
+        else INTRADAY_CACHE_TTL_SECONDS
+    )
+    if (
+        cached
+        and time.monotonic() - cached[0] < cache_ttl
+        and not minute_rows_need_backfill(list(cached[1]["rows"]), trading_date)
+    ):
         cached_payload = cached[1]
         return (
             list(cached_payload["rows"]),
@@ -2070,57 +2404,72 @@ def historical_minute_rows(
         bridge.download_minute_bars([stored_code], trading_date, timeout=90.0)
     except Exception as error:
         download_error = f"{type(error).__name__}: {error}"
-    payload = bridge.get(
-        "/api/market/market_data_ex",
-        {
-            "stocks": stored_code,
-            "period": "1m",
-            "start_time": f"{trading_date}093000",
-            "end_time": f"{trading_date}150000",
-            "count": "-1",
-            "dividend_type": "none",
-            "fill_data": "false",
-        },
-        timeout=60.0,
-    )
-    raw_rows = list((payload.get("data") or {}).get(stored_code) or [])
     rows: list[dict[str, Any]] = []
     previous_close = None
-    for raw in raw_rows:
-        compact_time = str(raw.get("index") or "")
-        if not compact_time.startswith(trading_date):
-            continue
-        open_price = finite_or_none(raw.get("open"))
-        high = finite_or_none(raw.get("high"))
-        low = finite_or_none(raw.get("low"))
-        close = finite_or_none(raw.get("close"))
-        if not all(
-            value is not None and value > 0
-            for value in (open_price, high, low, close)
-        ):
-            continue
-        if previous_close is None:
-            previous_close = finite_or_none(raw.get("preClose"))
-        try:
-            minute_time = datetime.strptime(
-                compact_time[:14],
-                "%Y%m%d%H%M%S",
-            ).strftime("%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            continue
-        rows.append(
+    for attempt in range(INTRADAY_BACKFILL_RETRIES):
+        payload = bridge.get(
+            "/api/market/market_data_ex",
             {
-                "minute_ms": int(raw.get("time") or 0),
-                "minute_time": minute_time,
-                "open": open_price,
-                "high": high,
-                "low": low,
-                "close": close,
-                "volume": finite_or_none(raw.get("volume")) or 0,
-                "amount": finite_or_none(raw.get("amount")) or 0,
-            }
+                "stocks": stored_code,
+                "period": "1m",
+                "start_time": f"{trading_date}093000",
+                "end_time": f"{trading_date}150000",
+                "count": "-1",
+                "dividend_type": "none",
+                "fill_data": "false",
+            },
+            timeout=60.0,
         )
-    rows.sort(key=lambda row: (row["minute_ms"], row["minute_time"]))
+        raw_rows = list((payload.get("data") or {}).get(stored_code) or [])
+        rows = []
+        previous_close = None
+        for raw in raw_rows:
+            compact_time = str(raw.get("index") or "")
+            if not compact_time.startswith(trading_date):
+                continue
+            open_price = finite_or_none(raw.get("open"))
+            high = finite_or_none(raw.get("high"))
+            low = finite_or_none(raw.get("low"))
+            close = finite_or_none(raw.get("close"))
+            if not all(
+                value is not None and value > 0
+                for value in (open_price, high, low, close)
+            ):
+                continue
+            if previous_close is None:
+                previous_close = finite_or_none(raw.get("preClose"))
+            try:
+                minute_time = datetime.strptime(
+                    compact_time[:14],
+                    "%Y%m%d%H%M%S",
+                ).strftime("%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                continue
+            rows.append(
+                {
+                    "minute_ms": int(raw.get("time") or 0),
+                    "minute_time": minute_time,
+                    "open": open_price,
+                    "high": high,
+                    "low": low,
+                    "close": close,
+                    "volume": finite_or_none(raw.get("volume")) or 0,
+                    "amount": finite_or_none(raw.get("amount")) or 0,
+                }
+            )
+        rows.sort(key=lambda row: (row["minute_ms"], row["minute_time"]))
+        if not minute_rows_need_backfill(rows, trading_date):
+            break
+        if attempt + 1 < INTRADAY_BACKFILL_RETRIES:
+            time.sleep(INTRADAY_BACKFILL_WAIT_SECONDS * (attempt + 1))
+            try:
+                bridge.download_minute_bars(
+                    [stored_code],
+                    trading_date,
+                    timeout=90.0,
+                )
+            except Exception as error:
+                download_error = f"{type(error).__name__}: {error}"
     if not rows:
         detail = f"；下载错误：{download_error}" if download_error else ""
         raise LookupError(f"{stored_code} 在 {trading_date} 没有分钟数据{detail}")
@@ -2130,7 +2479,10 @@ def historical_minute_rows(
         "previous_close": previous_close,
         "previous_close_date": None,
     }
-    INTRADAY_CACHE[cache_key] = (time.monotonic(), cached_payload)
+    if minute_rows_need_backfill(rows, trading_date):
+        INTRADAY_CACHE.pop(cache_key, None)
+    else:
+        INTRADAY_CACHE[cache_key] = (time.monotonic(), cached_payload)
     return rows, previous_close, None, "MiniQMT 1m"
 
 
@@ -2233,6 +2585,18 @@ def minute_rows_need_backfill(rows: list[Any], trading_date: str) -> bool:
     if not clocks:
         return True
     if min(clocks) > "09:31":
+        return True
+    elapsed_minutes = sorted(
+        {
+            elapsed_market_minutes_from_clock(clock)
+            for clock in clocks
+            if elapsed_market_minutes_from_clock(clock) > 0
+        }
+    )
+    if any(
+        current - previous > 1
+        for previous, current in zip(elapsed_minutes, elapsed_minutes[1:])
+    ):
         return True
     expected = expected_minute_count(trading_date)
     return expected > 0 and len(set(clocks)) < max(1, expected - 2)
@@ -2862,6 +3226,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     (query.get("codes") or [""])[0],
                 )
                 self.send_payload(200, payload)
+                return
+            if parsed.path == "/trading":
+                self.send_payload(200, trading_payload())
                 return
             if parsed.path == "/active-index":
                 self.send_payload(200, active_index_payload())

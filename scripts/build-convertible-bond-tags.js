@@ -34,6 +34,8 @@ const TAG_ORDER = [
   "环保",
   "消费电子",
   "铜缆",
+  "光伏",
+  "核电",
   "电力设备",
   "银行",
   "脑机接口",
@@ -218,6 +220,19 @@ function classify(row, market, asOf) {
   }
   if (includesAny(`${industry2}|${industry3}|${topics}`, ["消费电子"])) tags.add("消费电子");
   if (includesAny(topics, ["铜缆高速连接", "高速铜缆", "铜连接"])) tags.add("铜缆");
+  if (
+    industry2 === "光伏设备"
+    || industry3 === "光伏发电"
+    || includesAny(core, ["光伏", "太阳能"])
+  ) {
+    tags.add("光伏");
+  }
+  if (
+    industry3 === "核力发电"
+    || includesAny(core, ["核电", "核装备", "核能"])
+  ) {
+    tags.add("核电");
+  }
   if (industry1 === "电力设备") tags.add("电力设备");
   if (industry1 === "银行") tags.add("银行");
   if (includesAny(topics, ["脑机接口", "脑科学"])) tags.add("脑机接口");
@@ -239,7 +254,12 @@ async function main() {
   } catch (error) {
     console.warn(`MiniQMT市值读取失败，改用题材中的微盘/小盘标记：${error.message}`);
   }
-  const overrides = JSON.parse(await fs.readFile(OVERRIDES_PATH, "utf8")).overrides || {};
+  const overridePayload = JSON.parse(await fs.readFile(OVERRIDES_PATH, "utf8"));
+  const overrides = overridePayload.overrides || {};
+  const customTags = Array.isArray(overridePayload.customTags)
+    ? overridePayload.customTags.map((tag) => String(tag).trim()).filter(Boolean)
+    : [];
+  const tagOrder = [...new Set([...TAG_ORDER, ...customTags])];
   const outputRows = rows.map((row) => {
     const stockMarketCode = marketCode(row["正股代码"]);
     const detail = marketData.details[stockMarketCode] || {};
@@ -253,7 +273,7 @@ async function main() {
     const tags = new Set(classify(row, market, asOf));
     const override = overrides[bondCode] || {};
     for (const tag of override.add || []) {
-      if (TAG_ORDER.includes(tag)) tags.add(tag);
+      if (tagOrder.includes(tag)) tags.add(tag);
     }
     for (const tag of override.remove || []) tags.delete(tag);
     const primaryTag = tags.has(override.primaryTag) ? override.primaryTag : "";
@@ -267,12 +287,12 @@ async function main() {
       industry2: String(row["申万二级行业"] || ""),
       industry3: String(row["申万三级行业"] || ""),
       floatMarketCap,
-      tags: TAG_ORDER.filter((tag) => tags.has(tag)),
+      tags: tagOrder.filter((tag) => tags.has(tag)),
       primaryTag,
     };
   });
   const tagCounts = Object.fromEntries(
-    TAG_ORDER.map((tag) => [
+    tagOrder.map((tag) => [
       tag,
       outputRows.filter((row) => row.tags.includes(tag)).length,
     ]),
@@ -287,9 +307,11 @@ async function main() {
     definitions: {
       次新债: `上市未满${RECENT_LISTING_DAYS}天`,
       小盘: `正股流通市值低于${SMALL_CAP_THRESHOLD / 1e8}亿元；行情缺失时采用微盘股/小盘价值题材`,
+      光伏: "光伏设备、组件、辅材、逆变器、电站运营等直接业务",
+      核电: "核电运营、参股核电资产或核级设备与部件业务",
       themeTags: "按申万行业、F10题材和核心业务关键词，可多标签",
     },
-    tagOrder: TAG_ORDER,
+    tagOrder,
     tagCounts,
     count: outputRows.length,
     rows: outputRows,

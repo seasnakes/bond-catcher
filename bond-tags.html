@@ -33,6 +33,14 @@
           <input id="searchInput" type="search" placeholder="转债、代码、正股或行业" autocomplete="off" />
           <div id="searchSuggestions" class="suggestion-list" role="listbox" hidden></div>
         </label>
+        <form id="createTagForm" class="create-tag-form">
+          <label for="createTagInput">新增标签</label>
+          <div>
+            <input id="createTagInput" type="text" maxlength="12" placeholder="输入标签名称" autocomplete="off" />
+            <button id="createTagButton" type="submit">新增</button>
+          </div>
+          <small id="createTagStatus">新增后可立即给转债打标，也会保留到下次数据重建</small>
+        </form>
         <div id="tagFilters" class="tag-filter-list" aria-label="标签筛选"></div>
       </section>
 

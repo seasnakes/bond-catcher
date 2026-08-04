@@ -70,7 +70,8 @@ const state = {
 };
 
 const pageParams = new URLSearchParams(window.location.search);
-const isEmbedded = pageParams.get("embedded") === "1";
+const isPanel = pageParams.get("panel") === "1";
+const isEmbedded = pageParams.get("embedded") === "1" || isPanel;
 
 const nodes = {
   backLink: document.querySelector(".back-link"),
@@ -142,6 +143,9 @@ const nodes = {
 
 if (isEmbedded) {
   document.documentElement.classList.add("is-embedded");
+}
+if (isPanel) {
+  document.documentElement.classList.add("is-panel");
 }
 
 const panelDefinitions = [
@@ -994,6 +998,17 @@ function intradayMinute(time) {
   return null;
 }
 
+function intradayRowsAreContiguous(previousRow, currentRow) {
+  if (!previousRow || !currentRow) return false;
+  if (previousRow.trading_date !== currentRow.trading_date) return false;
+  const previousMinute = intradayMinute(previousRow.time);
+  const currentMinute = intradayMinute(currentRow.time);
+  return Number.isFinite(previousMinute)
+    && Number.isFinite(currentMinute)
+    && currentMinute >= previousMinute
+    && currentMinute - previousMinute <= 1;
+}
+
 function intradayPayloads() {
   return state.intradayPayloads.length ? state.intradayPayloads : state.payload ? [state.payload] : [];
 }
@@ -1428,13 +1443,17 @@ function drawHighLowBand(context, rows, panel, range) {
   if (rows.length < 2) return;
   context.save();
   context.fillStyle = "rgba(31,95,191,.08)";
-  const groups = new Map();
+  const groups = [];
+  let currentGroup = [];
   for (const row of rows) {
-    const key = row.trading_date || "single";
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(row);
+    if (currentGroup.length && !intradayRowsAreContiguous(currentGroup.at(-1), row)) {
+      groups.push(currentGroup);
+      currentGroup = [];
+    }
+    currentGroup.push(row);
   }
-  for (const dayRows of groups.values()) {
+  if (currentGroup.length) groups.push(currentGroup);
+  for (const dayRows of groups) {
     if (dayRows.length < 2) continue;
     context.beginPath();
     dayRows.forEach((row, index) => {
@@ -1533,8 +1552,8 @@ function drawLine(context, rows, panel, range, key, color, width, dash = []) {
     }
     const x = seriesXFor(row, index, panel, rows);
     const y = yFor(value, panel, range);
-    const newDay = index > 0 && row.trading_date !== rows[index - 1].trading_date;
-    if (!started || newDay) {
+    const disconnected = index > 0 && !intradayRowsAreContiguous(rows[index - 1], row);
+    if (!started || disconnected) {
       context.moveTo(x, y);
       started = true;
     } else {
@@ -1549,7 +1568,7 @@ function drawConditionalLine(context, rows, panel, range, key, colorForRow, widt
   context.save();
   context.lineWidth = width;
   for (let index = 1; index < rows.length; index += 1) {
-    if (rows[index].trading_date !== rows[index - 1].trading_date) continue;
+    if (!intradayRowsAreContiguous(rows[index - 1], rows[index])) continue;
     const previous = Number(rows[index - 1][key]);
     const value = Number(rows[index][key]);
     if (!Number.isFinite(previous) || !Number.isFinite(value)) continue;
@@ -1895,6 +1914,22 @@ nodes.backLink.addEventListener("click", (event) => {
     window.parent.postMessage({ type: "finance:close-bond-overlay" }, window.location.origin);
   }
 });
+if (isPanel && window.parent !== window) {
+  document.addEventListener("dblclick", (event) => {
+    if (event.target.closest?.("a, button, select")) return;
+    event.preventDefault();
+    const target = new URL(window.location.href);
+    target.searchParams.delete("embedded");
+    target.searchParams.delete("panel");
+    window.parent.postMessage(
+      {
+        type: "finance:open-bond-overlay",
+        url: `${target.pathname}${target.search}`,
+      },
+      window.location.origin,
+    );
+  });
+}
 window.addEventListener("resize", () => {
   window.clearTimeout(state.resizeTimer);
   state.resizeTimer = window.setTimeout(() => {

@@ -13,6 +13,7 @@ const state = {
   quickAddRow: null,
   selectedCodes: new Set(),
   bulkSaving: false,
+  tagCreating: false,
 };
 
 const nodes = {
@@ -22,6 +23,10 @@ const nodes = {
   tagCount: document.querySelector("#tagCount"),
   search: document.querySelector("#searchInput"),
   searchSuggestions: document.querySelector("#searchSuggestions"),
+  createTagForm: document.querySelector("#createTagForm"),
+  createTagInput: document.querySelector("#createTagInput"),
+  createTagButton: document.querySelector("#createTagButton"),
+  createTagStatus: document.querySelector("#createTagStatus"),
   filters: document.querySelector("#tagFilters"),
   resultTitle: document.querySelector("#resultTitle"),
   resultMeta: document.querySelector("#resultMeta"),
@@ -426,6 +431,46 @@ function recalculateCounts() {
   );
 }
 
+async function createTag(event) {
+  event.preventDefault();
+  if (state.tagCreating) return;
+  const tag = nodes.createTagInput.value.trim();
+  if (!tag) {
+    nodes.createTagStatus.textContent = "请先输入标签名称";
+    nodes.createTagInput.focus();
+    return;
+  }
+  if (state.tagOrder.includes(tag)) {
+    nodes.createTagStatus.textContent = `标签“${tag}”已存在`;
+    return;
+  }
+  state.tagCreating = true;
+  nodes.createTagButton.disabled = true;
+  nodes.createTagStatus.textContent = "正在新增…";
+  try {
+    const payload = await fetchJson("/api/miniqmt/tags", {
+      method: "POST",
+      body: { createTag: tag },
+    });
+    state.tagOrder = payload.tagOrder || [...state.tagOrder, tag];
+    state.tagCounts = payload.tagCounts || { ...state.tagCounts, [tag]: 0 };
+    nodes.createTagInput.value = "";
+    nodes.createTagStatus.textContent = `已新增“${tag}”，可在编辑标签时直接选用`;
+    renderFilters();
+    renderTable();
+    if (state.editingRow) {
+      renderEditOptions();
+      renderPrimaryTagOptions();
+    }
+    setSelectedTag(tag);
+  } catch (error) {
+    nodes.createTagStatus.textContent = error.message || "新增标签失败";
+  } finally {
+    state.tagCreating = false;
+    nodes.createTagButton.disabled = false;
+  }
+}
+
 function resetQuickAdd() {
   state.quickAddRow = null;
   nodes.quickAddInput.value = "";
@@ -617,6 +662,7 @@ nodes.search.addEventListener("keydown", (event) => {
   }
 });
 nodes.refresh.addEventListener("click", loadQuotes);
+nodes.createTagForm.addEventListener("submit", createTag);
 nodes.closeEditor.addEventListener("click", closeEditor);
 nodes.cancelEdit.addEventListener("click", closeEditor);
 nodes.saveEdit.addEventListener("click", saveEditor);

@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QMT 实盘监控</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./trading.css" />
+  </head>
+  <body>
+    <main class="trading-shell">
+      <header class="trading-header">
+        <div class="trading-title">
+          <div class="trading-title-row">
+            <h1>QMT 实盘监控</h1>
+            <span class="read-only-badge">只读</span>
+          </div>
+          <p id="tradingStatus">正在读取真实账户数据…</p>
+        </div>
+        <div class="trading-actions">
+          <label class="trade-search">
+            <span>筛选</span>
+            <input id="tradeSearch" type="search" placeholder="转债名称 / 代码" autocomplete="off" />
+          </label>
+          <label id="accountFilterBox" class="trade-select" hidden>
+            <span>账户</span>
+            <select id="accountFilter"><option value="">全部</option></select>
+          </label>
+          <button id="tradingRefresh" class="trade-button" type="button">刷新</button>
+          <a class="trade-button" href="./index.html">返回主看板</a>
+        </div>
+      </header>
+
+      <section id="accountStrip" class="account-strip" aria-label="账户连接状态"></section>
+
+      <section class="asset-grid" aria-label="实盘概览">
+        <article class="asset-card">
+          <span>总资产</span>
+          <strong id="totalAsset">--</strong>
+          <small id="assetAccountCount">--</small>
+        </article>
+        <article class="asset-card">
+          <span>可用资金</span>
+          <strong id="availableCash">--</strong>
+          <small id="marketValue">持仓市值 --</small>
+        </article>
+        <article class="asset-card">
+          <span>今日成交</span>
+          <strong id="tradeCount">--</strong>
+          <small id="tradePeriod">--</small>
+        </article>
+        <article class="asset-card">
+          <span>今日买入</span>
+          <strong id="buyAmount">--</strong>
+          <small id="buyCaption">--</small>
+        </article>
+        <article class="asset-card">
+          <span>今日卖出</span>
+          <strong id="sellAmount">--</strong>
+          <small id="sellCaption">--</small>
+        </article>
+        <article class="asset-card">
+          <span>净买入金额</span>
+          <strong id="netBuyAmount">--</strong>
+          <small id="orderCaption">--</small>
+        </article>
+      </section>
+
+      <section class="trade-workspace">
+        <nav id="tradeTabs" class="trade-tabs" aria-label="交易数据视图">
+          <button type="button" data-view="summary" class="is-active">标的汇总 <span id="summaryCount">0</span></button>
+          <button type="button" data-view="trades">成交明细 <span id="tradesCount">0</span></button>
+          <button type="button" data-view="orders">今日委托 <span id="ordersCount">0</span></button>
+          <button type="button" data-view="positions">当前持仓 <span id="positionsCount">0</span></button>
+        </nav>
+        <div class="trade-table-shell">
+          <table id="tradeTable" class="trade-table">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+          <div id="tradeEmpty" class="trade-empty" hidden>没有符合条件的记录</div>
+        </div>
+      </section>
+
+      <footer class="trading-footer">
+        <span>页面不提供下单或撤单操作</span>
+        <span id="refreshHint">非交易时段不会自动刷新</span>
+      </footer>
+    </main>
+    <script src="./trading.js" defer></script>
+  </body>
+</html>

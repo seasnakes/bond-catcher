@@ -151,6 +151,11 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (url.pathname === "/api/miniqmt/trading") {
+      await handleMiniQmtApi("/trading", response, 20_000);
+      return;
+    }
+
     if (url.pathname === "/api/active-index/live") {
       await handleMiniQmtApi("/active-index", response, 55_000);
       return;
@@ -419,6 +424,37 @@ async function handleBondTagsUpdate(request, response) {
   ]);
   const tagOrder = Array.isArray(tagPayload.tagOrder) ? tagPayload.tagOrder.map(String) : [];
   const rows = Array.isArray(tagPayload.rows) ? tagPayload.rows : [];
+  const createTag = String(body?.createTag || "").trim();
+  if (createTag) {
+    const characters = [...createTag];
+    const validCharacters = /^[\p{L}\p{N}][\p{L}\p{N}\s+&·._/-]*$/u.test(createTag);
+    if (characters.length > 12 || !validCharacters) {
+      sendJson(response, 400, { error: "标签需为 1–12 个中英文、数字或常用连接符" });
+      return;
+    }
+    if (tagOrder.includes(createTag)) {
+      sendJson(response, 409, { error: `标签“${createTag}”已存在` });
+      return;
+    }
+    tagOrder.push(createTag);
+    tagPayload.tagOrder = tagOrder;
+    overridePayload.customTags = [...new Set([
+      ...(Array.isArray(overridePayload.customTags) ? overridePayload.customTags : []),
+      createTag,
+    ])];
+    recalculateBondTagCounts(tagPayload, tagOrder);
+    await Promise.all([
+      writeJsonAtomic(BOND_TAG_OVERRIDES_PATH, overridePayload),
+      writeJsonAtomic(BOND_TAGS_PATH, tagPayload),
+    ]);
+    sendJson(response, 200, {
+      ok: true,
+      tag: createTag,
+      tagOrder: tagPayload.tagOrder,
+      tagCounts: tagPayload.tagCounts,
+    });
+    return;
+  }
   const requestedCodes = Array.isArray(body?.codes)
     ? [...new Set(body.codes.map((value) => String(value).toUpperCase()).filter(Boolean))]
     : [];
@@ -915,6 +951,8 @@ async function fetchSinaGlobalIndices() {
         price,
         change,
         percent,
+        date: parts[6] || "",
+        time: parts[7] || parts[5] || "",
       };
       indices.push(
         await withGlobalIndexSparkline(quote, {
@@ -1086,6 +1124,7 @@ async function withGlobalIndexSparkline(quote, config) {
     sparkTimes: spark.times,
     sparkChange: spark.change,
     sparkTime: spark.time,
+    sparkDate: spark.date,
     sparkSource: spark.source,
   };
 }
@@ -1155,6 +1194,7 @@ async function fetchYahooChartSparkline(symbol, limit, source) {
   }
 
   const timestamps = Array.isArray(result?.timestamp) ? result.timestamp : [];
+  const exchangeTimeZone = result?.meta?.exchangeTimezoneName || "Asia/Shanghai";
   const sampledRows = downsampleRows(
     closes
       .map((value, index) => ({ value: Number(value), timestamp: timestamps[index] }))
@@ -1169,13 +1209,14 @@ async function fetchYahooChartSparkline(symbol, limit, source) {
 
   const first = points[0];
   const last = points[points.length - 1];
-  const lastTimestamp = timestamps[timestamps.length - 1];
+  const lastTimestamp = sampledRows.at(-1)?.timestamp;
 
   return {
     points,
-    times: sampledRows.map((row) => formatUnixTime(row.timestamp, "Asia/Shanghai")),
+    times: sampledRows.map((row) => formatUnixTime(row.timestamp, exchangeTimeZone)),
     change: first ? ((last - first) / first) * 100 : 0,
-    time: formatUnixTime(lastTimestamp, result?.meta?.exchangeTimezoneName),
+    time: formatUnixTime(lastTimestamp, exchangeTimeZone),
+    date: formatUnixDate(lastTimestamp, exchangeTimeZone),
     source,
   };
 }
@@ -1191,6 +1232,19 @@ function formatUnixTime(seconds, timeZone) {
   }).formatToParts(new Date(value * 1000));
   const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return `${map.hour || ""}:${map.minute || ""}`;
+}
+
+function formatUnixDate(seconds, timeZone) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value <= 0) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timeZone || "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(value * 1000));
+  const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${map.year || ""}-${map.month || ""}-${map.day || ""}`;
 }
 
 async function fetchTencentMinuteAmounts(symbol) {

@@ -57,6 +57,7 @@
           <a class="text-button heatmap-entry" href="./active-bond-index.html">活跃转债指数</a>
           <a class="text-button heatmap-entry" href="./bond-heatmap.html">转债星图</a>
           <a class="text-button heatmap-entry" href="./bond-tags.html">标签管理</a>
+          <a class="text-button heatmap-entry trading-entry" href="./trading.html">实盘</a>
           <button id="editListButton" class="text-button" type="button">编辑</button>
           <button id="addSectorButton" class="text-button add-sector-button" type="button" title="新建板块">
             +板块
@@ -69,12 +70,13 @@
       </header>
 
       <section class="market-monitor-row" aria-label="主力信号与外围分时">
-      <details class="tv-market-panel" open>
+      <details id="tvMarketPanel" class="tv-market-panel" open>
         <summary>
-          <strong>外围分时</strong>
-          <span>TradingView · 延迟行情</span>
+          <strong id="marketPanelTitle">外围分时</strong>
+          <span id="marketPanelSubtitle">TradingView / Yahoo · 延迟行情</span>
+          <button id="bondPreviewReset" class="market-panel-reset" type="button" hidden>返回外围</button>
         </summary>
-        <div class="tv-market-grid">
+        <div id="externalMarketGrid" class="tv-market-grid">
           <article class="tv-market-card">
             <header>
               <strong>纳指100（NQ代理）</strong>
@@ -88,19 +90,38 @@
           </article>
           <article class="tv-market-card">
             <header>
-              <strong>韩国200（KOSPI方向）</strong>
-              <span>Bloomberg Korea 200</span>
+              <strong>韩国KOSPI</strong>
+              <span>新浪报价 · Yahoo分时</span>
             </header>
-            <tv-mini-chart
-              symbol="BBG:BSK200"
-              theme="light"
-              aria-label="韩国市场日内走势代理图"
-            ></tv-mini-chart>
+            <div id="kospiMarketChart" class="native-market-chart" aria-label="韩国KOSPI当日分时">
+              <span class="native-market-loading">正在读取今日KOSPI…</span>
+            </div>
           </article>
+        </div>
+        <div id="bondMarketPreview" class="bond-market-preview" hidden>
+          <iframe
+            id="bondMarketPreviewFrame"
+            title="转债分时与指标预览"
+          ></iframe>
         </div>
       </details>
 
+      <div
+        id="marketMonitorResizer"
+        class="market-monitor-resizer"
+        role="separator"
+        aria-label="调整主力监控与分时区域宽度"
+        aria-controls="signalMonitor tvMarketPanel"
+        aria-orientation="vertical"
+        aria-valuemin="35"
+        aria-valuemax="70"
+        aria-valuenow="49"
+        tabindex="0"
+        title="拖动调整宽度，双击恢复默认"
+      ></div>
+
       <section
+        id="signalMonitor"
         class="signal-monitor"
         aria-label="MiniQMT主力监控精灵"
         title="QMT全市场可转债只读监控"
@@ -152,6 +173,20 @@
           <div class="signal-empty">正在读取MiniQMT盘中信号…</div>
         </div>
       </section>
+
+      <div
+        id="marketMonitorHeightResizer"
+        class="market-monitor-height-resizer"
+        role="separator"
+        aria-label="调整主力监控与分时区域高度"
+        aria-controls="signalMonitor tvMarketPanel"
+        aria-orientation="horizontal"
+        aria-valuemin="120"
+        aria-valuemax="520"
+        aria-valuenow="176"
+        tabindex="0"
+        title="上下拖动调整高度，双击恢复默认"
+      ></div>
       </section>
 
       <section id="boardGrid" class="board-grid" aria-live="polite"></section>
