@@ -10,6 +10,12 @@ const state = {
     positions: { key: "market_value", direction: -1 },
   },
   refreshTimer: 0,
+  capabilities: null,
+  sessionToken: "",
+  sessionExpiresAt: 0,
+  sessionTicker: 0,
+  pendingPreview: null,
+  confirmReadyAt: 0,
 };
 
 const statusNode = document.querySelector("#tradingStatus");
@@ -23,6 +29,30 @@ const tableHead = table.querySelector("thead");
 const tableBody = table.querySelector("tbody");
 const emptyNode = document.querySelector("#tradeEmpty");
 const refreshHint = document.querySelector("#refreshHint");
+const modeBadge = document.querySelector("#tradingModeBadge");
+const unlockButton = document.querySelector("#tradeUnlockButton");
+const tradingAccessText = document.querySelector("#tradingAccessText");
+const orderForm = document.querySelector("#orderForm");
+const orderAccount = document.querySelector("#orderAccount");
+const orderCode = document.querySelector("#orderCode");
+const orderSide = document.querySelector("#orderSide");
+const orderPrice = document.querySelector("#orderPrice");
+const orderVolume = document.querySelector("#orderVolume");
+const orderPreviewButton = document.querySelector("#orderPreviewButton");
+const orderFormMessage = document.querySelector("#orderFormMessage");
+const unlockDialog = document.querySelector("#tradeUnlockDialog");
+const unlockForm = document.querySelector("#tradeUnlockForm");
+const unlockPhraseNode = document.querySelector("#unlockPhrase");
+const unlockPhraseInput = document.querySelector("#unlockPhraseInput");
+const unlockMessage = document.querySelector("#unlockMessage");
+const confirmDialog = document.querySelector("#tradeConfirmDialog");
+const confirmForm = document.querySelector("#tradeConfirmForm");
+const confirmTitle = document.querySelector("#tradeConfirmTitle");
+const previewSummary = document.querySelector("#tradePreviewSummary");
+const confirmationPhrase = document.querySelector("#tradeConfirmationPhrase");
+const confirmationInput = document.querySelector("#tradeConfirmationInput");
+const confirmMessage = document.querySelector("#tradeConfirmMessage");
+const executeTradeButton = document.querySelector("#executeTradeButton");
 
 const columns = {
   summary: [
@@ -62,6 +92,7 @@ const columns = {
     { key: "traded_volume", label: "成交量", type: "number" },
     { key: "status", label: "状态" },
     { key: "strategy", label: "策略", type: "muted" },
+    { key: "cancelable", label: "操作", type: "action" },
   ],
   positions: [
     { key: "name", label: "标的", type: "bond" },
@@ -121,6 +152,21 @@ function renderCell(row, column) {
     link.href = bondUrl(row);
     link.textContent = value || row.code || "--";
     cell.append(link);
+    return cell;
+  }
+  if (column.type === "action") {
+    if (row.cancelable && row.order_id) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "cancel-order-button";
+      button.dataset.orderId = String(row.order_id);
+      button.dataset.account = row.account || "";
+      button.textContent = "撤单";
+      button.disabled = !sessionIsActive();
+      cell.append(button);
+    } else {
+      cell.textContent = "--";
+    }
     return cell;
   }
   if (column.type === "muted") cell.classList.add("cell-muted");
@@ -216,6 +262,133 @@ function renderAccountFilters(accounts) {
   for (const label of labels) accountFilter.append(new Option(label, label));
   accountFilter.value = labels.includes(selected) ? selected : "";
   state.account = accountFilter.value;
+  const orderSelected = orderAccount.value;
+  orderAccount.replaceChildren();
+  for (const label of labels) orderAccount.append(new Option(label, label));
+  if (labels.includes(orderSelected)) orderAccount.value = orderSelected;
+}
+
+function sessionIsActive() {
+  return Boolean(state.sessionToken && state.sessionExpiresAt > Date.now());
+}
+
+function setMessage(node, message, tone = "") {
+  node.textContent = message;
+  node.classList.toggle("is-error", tone === "error");
+  node.classList.toggle("is-success", tone === "success");
+}
+
+function renderTradingAccess() {
+  const capability = state.capabilities || {};
+  const local = Boolean(capability.local_access);
+  const available = local && capability.bridge_enabled && capability.bridge_connected;
+  const unlocked = available && sessionIsActive();
+  for (const field of [orderAccount, orderCode, orderSide, orderPrice, orderVolume, orderPreviewButton]) {
+    field.disabled = !unlocked;
+  }
+  modeBadge.classList.toggle("is-unlocked", unlocked);
+  modeBadge.textContent = unlocked ? "交易已解锁" : "只读";
+  unlockButton.hidden = !local;
+  unlockButton.disabled = !available;
+  unlockButton.classList.toggle("is-unlocked", unlocked);
+  unlockButton.textContent = unlocked ? "关闭交易" : "开启交易";
+  if (!local) tradingAccessText.textContent = "局域网访问只读，交易入口已禁用";
+  else if (!capability.bridge_enabled) tradingAccessText.textContent = "QMT服务未启用交易模块";
+  else if (!capability.bridge_connected) tradingAccessText.textContent = "QMT交易账户未连接";
+  else if (unlocked) {
+    const seconds = Math.max(0, Math.ceil((state.sessionExpiresAt - Date.now()) / 1000));
+    tradingAccessText.textContent = `已解锁，${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")} 后自动关闭`;
+  } else tradingAccessText.textContent = "当前锁定，仅可查看";
+  if (!unlocked && orderFormMessage.classList.contains("is-success")) {
+    setMessage(orderFormMessage, "开启交易后才能生成预览；页面不会自动下单。");
+  }
+  if (state.payload) renderTable();
+}
+
+async function postJson(url, body) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+  return payload;
+}
+
+async function loadTradingCapabilities() {
+  try {
+    const response = await fetch("/api/miniqmt/trading/capabilities", { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    state.capabilities = payload;
+    unlockPhraseNode.textContent = payload.unlock_phrase || "开启实盘交易";
+  } catch (error) {
+    state.capabilities = { local_access: true, bridge_enabled: false, bridge_connected: false };
+    setMessage(orderFormMessage, `交易能力检查失败：${error.message}`, "error");
+  }
+  renderTradingAccess();
+}
+
+function lockTradingSession() {
+  state.sessionToken = "";
+  state.sessionExpiresAt = 0;
+  state.pendingPreview = null;
+  window.clearInterval(state.sessionTicker);
+  renderTradingAccess();
+}
+
+function startSessionTicker() {
+  window.clearInterval(state.sessionTicker);
+  state.sessionTicker = window.setInterval(() => {
+    if (!sessionIsActive()) lockTradingSession();
+    else renderTradingAccess();
+  }, 1000);
+}
+
+function showTradePreview(payload, kind) {
+  state.pendingPreview = { ...payload, kind };
+  state.confirmReadyAt = Date.now() + 2000;
+  confirmTitle.textContent = kind === "cancel" ? "确认撤销实盘委托" : "确认提交实盘委托";
+  const order = payload.order || {};
+  const summaryRows = kind === "cancel"
+    ? [
+        ["标的", `${order.name || ""} ${order.stock_code || ""}`],
+        ["委托编号", order.order_id || "--"],
+        ["方向", order.side || "--"],
+        ["未成交数量", Math.max(0, Number(order.order_volume || 0) - Number(order.traded_volume || 0))],
+      ]
+    : [
+        ["标的", `${order.name || ""} ${order.stock_code || ""}`],
+        ["方向", order.side || "--"],
+        ["数量", order.order_volume || "--"],
+        ["限价", formatNumber(order.price, 3)],
+        ["预计金额", formatMoney(order.amount)],
+        ["现价", formatNumber(payload.checks?.last_price, 3)],
+      ];
+  previewSummary.replaceChildren();
+  for (const [label, value] of summaryRows) {
+    const row = document.createElement("div");
+    const labelNode = document.createElement("span");
+    labelNode.textContent = label;
+    const valueNode = document.createElement("strong");
+    valueNode.textContent = String(value);
+    row.append(labelNode, valueNode);
+    previewSummary.append(row);
+  }
+  confirmationPhrase.textContent = payload.confirmation;
+  confirmationInput.value = "";
+  executeTradeButton.textContent = kind === "cancel" ? "提交撤单" : "提交实盘委托";
+  executeTradeButton.disabled = true;
+  setMessage(confirmMessage, "请核对标的、方向、数量和价格，2秒后可确认。", "");
+  confirmDialog.showModal();
+}
+
+function updateConfirmButton() {
+  const preview = state.pendingPreview;
+  executeTradeButton.disabled = !preview
+    || Date.now() < state.confirmReadyAt
+    || confirmationInput.value !== preview.confirmation;
 }
 
 function renderPayload(payload) {
@@ -301,6 +474,127 @@ async function refreshTradingData(options = {}) {
   }
 }
 
+unlockButton.addEventListener("click", () => {
+  if (sessionIsActive()) {
+    lockTradingSession();
+    setMessage(orderFormMessage, "交易已手动关闭，页面恢复只读。", "success");
+    return;
+  }
+  unlockPhraseInput.value = "";
+  setMessage(unlockMessage, "");
+  unlockDialog.showModal();
+});
+
+unlockForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = document.querySelector("#confirmTradeUnlock");
+  button.disabled = true;
+  try {
+    const payload = await postJson("/api/miniqmt/trading/unlock", { phrase: unlockPhraseInput.value });
+    state.sessionToken = payload.session_token;
+    state.sessionExpiresAt = Number(payload.expires_at || 0);
+    unlockDialog.close();
+    startSessionTicker();
+    renderTradingAccess();
+    setMessage(orderFormMessage, "交易已解锁。填写单笔限价委托并先生成预览。", "success");
+  } catch (error) {
+    setMessage(unlockMessage, error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+});
+
+for (const id of ["closeTradeUnlock", "cancelTradeUnlock"]) {
+  document.querySelector(`#${id}`).addEventListener("click", () => unlockDialog.close());
+}
+
+orderForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!sessionIsActive()) {
+    setMessage(orderFormMessage, "交易会话已过期，请重新开启。", "error");
+    lockTradingSession();
+    return;
+  }
+  orderPreviewButton.disabled = true;
+  setMessage(orderFormMessage, "正在校验账户、资金、持仓和实时价格…");
+  try {
+    const payload = await postJson("/api/miniqmt/trading/order-preview", {
+      session_token: state.sessionToken,
+      account: orderAccount.value,
+      stock_code: orderCode.value,
+      side: orderSide.value,
+      price: Number(orderPrice.value),
+      volume: Number(orderVolume.value),
+    });
+    setMessage(orderFormMessage, "校验通过，请在弹窗中完成二次确认。", "success");
+    showTradePreview(payload, "order");
+  } catch (error) {
+    setMessage(orderFormMessage, error.message, "error");
+  } finally {
+    orderPreviewButton.disabled = !sessionIsActive();
+  }
+});
+
+tableBody.addEventListener("click", async (event) => {
+  const button = event.target.closest(".cancel-order-button");
+  if (!button) return;
+  if (!sessionIsActive()) {
+    setMessage(orderFormMessage, "请先开启交易，再生成撤单预览。", "error");
+    return;
+  }
+  button.disabled = true;
+  try {
+    const payload = await postJson("/api/miniqmt/trading/cancel-preview", {
+      session_token: state.sessionToken,
+      account: button.dataset.account,
+      order_id: Number(button.dataset.orderId),
+    });
+    showTradePreview(payload, "cancel");
+  } catch (error) {
+    setMessage(orderFormMessage, error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+});
+
+confirmationInput.addEventListener("input", updateConfirmButton);
+confirmationInput.addEventListener("focus", () => {
+  window.setTimeout(updateConfirmButton, Math.max(0, state.confirmReadyAt - Date.now()));
+});
+
+confirmForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  updateConfirmButton();
+  if (executeTradeButton.disabled || !state.pendingPreview) return;
+  executeTradeButton.disabled = true;
+  setMessage(confirmMessage, "正在提交，请勿关闭页面或重复操作…");
+  const preview = state.pendingPreview;
+  try {
+    const endpoint = preview.kind === "cancel"
+      ? "/api/miniqmt/trading/cancel-execute"
+      : "/api/miniqmt/trading/order-execute";
+    const payload = await postJson(endpoint, {
+      session_token: state.sessionToken,
+      preview_token: preview.preview_token,
+      confirmation: confirmationInput.value,
+    });
+    state.pendingPreview = null;
+    setMessage(orderFormMessage, payload.message || "请求已提交，请刷新委托核对。", "success");
+    confirmDialog.close();
+    await refreshTradingData();
+  } catch (error) {
+    state.pendingPreview = null;
+    setMessage(confirmMessage, error.message, "error");
+  }
+});
+
+for (const id of ["closeTradeConfirm", "cancelTradeConfirm"]) {
+  document.querySelector(`#${id}`).addEventListener("click", () => {
+    state.pendingPreview = null;
+    confirmDialog.close();
+  });
+}
+
 tabs.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-view]");
   if (!button) return;
@@ -337,4 +631,4 @@ document.addEventListener("visibilitychange", () => {
   else refreshTradingData({ quiet: true });
 });
 
-refreshTradingData();
+Promise.all([loadTradingCapabilities(), refreshTradingData()]);

@@ -156,6 +156,23 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (url.pathname === "/api/miniqmt/trading/capabilities") {
+      await handleTradingCapabilities(request, response);
+      return;
+    }
+
+    const tradingMutationPath = {
+      "/api/miniqmt/trading/unlock": "/trading/unlock",
+      "/api/miniqmt/trading/order-preview": "/trading/order-preview",
+      "/api/miniqmt/trading/order-execute": "/trading/order-execute",
+      "/api/miniqmt/trading/cancel-preview": "/trading/cancel-preview",
+      "/api/miniqmt/trading/cancel-execute": "/trading/cancel-execute",
+    }[url.pathname];
+    if (tradingMutationPath) {
+      await handleTradingMutation(request, response, tradingMutationPath);
+      return;
+    }
+
     if (url.pathname === "/api/active-index/live") {
       await handleMiniQmtApi("/active-index", response, 55_000);
       return;
@@ -410,6 +427,55 @@ async function handleMiniQmtApi(pathname, response, timeout = 12_000) {
       error: message,
       service: "miniqmt-dashboard",
     });
+  }
+}
+
+function isLoopbackRequest(request) {
+  const address = String(request.socket?.remoteAddress || "").toLowerCase();
+  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
+
+function isSameOriginRequest(request) {
+  const origin = String(request.headers.origin || "");
+  const host = String(request.headers.host || "");
+  return Boolean(origin && host && (origin === `http://${host}` || origin === `https://${host}`));
+}
+
+async function handleTradingCapabilities(request, response) {
+  try {
+    const payload = await fetchLocalJson("/trading/capabilities", 12_000);
+    sendJson(response, 200, {
+      ...payload,
+      local_access: isLoopbackRequest(request),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "MiniQMT API unavailable";
+    sendJson(response, 503, { error: message, service: "miniqmt-dashboard" });
+  }
+}
+
+async function handleTradingMutation(request, response, pathname) {
+  if (request.method !== "POST") {
+    response.writeHead(405, { Allow: "POST" });
+    response.end("Method not allowed");
+    return;
+  }
+  if (!isLoopbackRequest(request)) {
+    sendJson(response, 403, { error: "实盘操作仅允许在运行看板的本机执行" });
+    return;
+  }
+  if (!isSameOriginRequest(request)) {
+    sendJson(response, 403, { error: "实盘操作要求同源页面确认" });
+    return;
+  }
+  try {
+    const body = await readJsonBody(request, 64 * 1024);
+    const payload = await fetchLocalJsonPost(pathname, body, 20_000);
+    sendJson(response, 200, payload);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "MiniQMT API unavailable";
+    const status = Number(error?.statusCode) || Number(message.match(/HTTP (\d+)/)?.[1]) || 503;
+    sendJson(response, status, { error: message.replace(/^HTTP \d+:\s*/, ""), service: "miniqmt-dashboard" });
   }
 }
 
@@ -697,6 +763,50 @@ function fetchLocalJson(pathname, timeout = 5000) {
     );
     request.on("timeout", () => request.destroy(new Error("MiniQMT API timeout")));
     request.on("error", reject);
+  });
+}
+
+function fetchLocalJsonPost(pathname, payload, timeout = 5000) {
+  return new Promise((resolve, reject) => {
+    const body = Buffer.from(JSON.stringify(payload));
+    const request = http.request(
+      {
+        hostname: MINIQMT_API_HOST,
+        port: MINIQMT_API_PORT,
+        path: pathname,
+        method: "POST",
+        timeout,
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "Content-Length": body.length,
+        },
+      },
+      (result) => {
+        const chunks = [];
+        result.on("data", (chunk) => chunks.push(chunk));
+        result.on("end", () => {
+          const raw = Buffer.concat(chunks).toString("utf8");
+          let responsePayload;
+          try {
+            responsePayload = raw ? JSON.parse(raw) : {};
+          } catch {
+            reject(new Error("MiniQMT API returned invalid JSON"));
+            return;
+          }
+          if (result.statusCode && result.statusCode >= 400) {
+            const error = new Error(`HTTP ${result.statusCode}: ${responsePayload?.error || "MiniQMT API error"}`);
+            error.statusCode = result.statusCode;
+            reject(error);
+            return;
+          }
+          resolve(responsePayload);
+        });
+      },
+    );
+    request.on("timeout", () => request.destroy(new Error("MiniQMT API timeout")));
+    request.on("error", reject);
+    request.end(body);
   });
 }
 

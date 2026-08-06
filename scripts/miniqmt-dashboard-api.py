@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from trading_execution import TradingError, TradingGuard
+
 
 DEFAULT_MONITOR_ROOT = Path(
     "/Users/seasnake/Documents/Codex/2026-07-27/miniqmt/"
@@ -81,6 +83,9 @@ HISTORICAL_VOLUME_CACHE: dict[
     tuple[float, tuple[float | None, float | None]],
 ] = {}
 FINANCE_ROOT = Path(__file__).resolve().parents[1]
+TRADING_GUARD = TradingGuard(
+    audit_path=FINANCE_ROOT / "runtime" / "trading-audit.jsonl",
+)
 ACTIVE_INDEX_DATA_PATH = FINANCE_ROOT / "data" / "active-convertible-bond-index.json"
 BOND_TAGS_DATA_PATH = FINANCE_ROOT / "data" / "convertible-bond-tags.json"
 BOND_TAG_SOURCE_DATA_PATH = FINANCE_ROOT / "data" / "convertible-bond-tag-source.json"
@@ -467,6 +472,25 @@ def bridge_trading_get(path: str, params: dict[str, Any]) -> Any:
         return unwrap_bridge_data(json.load(response))
 
 
+def bridge_trading_post(path: str, payload: dict[str, Any]) -> Any:
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+    api_key = bridge_config_value("QMT_BRIDGE_API_KEY")
+    if api_key:
+        headers["X-API-Key"] = api_key
+    request = urllib.request.Request(
+        f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}{path}",
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(request, timeout=12.0) as response:
+        return unwrap_bridge_data(json.load(response))
+
+
 def configured_trading_accounts() -> list[dict[str, str]]:
     accounts: list[dict[str, str]] = []
     stock_account = bridge_config_value("QMT_BRIDGE_STOCK_ACCOUNT_ID")
@@ -557,6 +581,7 @@ def sanitize_position(row: dict[str, Any], account_label: str) -> dict[str, Any]
 
 
 def sanitize_order(row: dict[str, Any], account_label: str) -> dict[str, Any]:
+    status_code = integer_value(row_value(row, "order_status", "m_nOrderStatus"))
     return {
         "account": account_label,
         "time": trading_clock(row_value(row, "order_time", "m_nOrderTime")),
@@ -568,7 +593,9 @@ def sanitize_order(row: dict[str, Any], account_label: str) -> dict[str, Any]:
         "traded_price": number_value(row_value(row, "traded_price", "m_dTradedPrice")),
         "traded_volume": integer_value(row_value(row, "traded_volume", "m_nTradedVolume")),
         "status": order_status_text(row),
-        "status_code": integer_value(row_value(row, "order_status", "m_nOrderStatus")),
+        "status_code": status_code,
+        "order_id": integer_value(row_value(row, "order_id", "m_nOrderID")),
+        "cancelable": status_code in {48, 49, 50, 51, 52, 53, 55},
         "strategy": str(row_value(row, "strategy_name", "m_strStrategyName", default="") or ""),
         "remark": str(row_value(row, "order_remark", "m_strOrderRemark", default="") or ""),
     }
@@ -717,7 +744,7 @@ def trading_payload() -> dict[str, Any]:
     return clean_json(
         {
             "ok": True,
-            "mode": "read_only",
+            "mode": "guarded_live",
             "source": "QMT Bridge 真实账户",
             "trading_date": datetime.now().strftime("%Y-%m-%d"),
             "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -729,6 +756,70 @@ def trading_payload() -> dict[str, Any]:
             "orders": orders,
             "positions": current_positions,
         }
+    )
+
+
+def trading_capabilities_payload() -> dict[str, Any]:
+    health = bridge_trading_get("/api/meta/health", {})
+    trading = health.get("trading") if isinstance(health, dict) else {}
+    trading = trading if isinstance(trading, dict) else {}
+    accounts = configured_trading_accounts()
+    statuses: list[dict[str, Any]] = []
+    for account in accounts:
+        try:
+            status = bridge_trading_get(
+                "/api/trading/account_status",
+                {"account_id": account["id"]},
+            )
+            connected = bool(status.get("connected")) if isinstance(status, dict) else False
+        except Exception:
+            connected = False
+        statuses.append({"label": account["label"], "connected": connected})
+    return clean_json(
+        {
+            **TRADING_GUARD.capabilities(),
+            "bridge_enabled": bool(trading.get("enabled")),
+            "bridge_connected": bool(trading.get("connected")),
+            "accounts": statuses,
+        }
+    )
+
+
+def trading_unlock_payload(body: dict[str, Any]) -> dict[str, Any]:
+    return clean_json(TRADING_GUARD.unlock(body.get("phrase")))
+
+
+def trading_order_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
+    return clean_json(
+        TRADING_GUARD.preview_order(body, configured_trading_accounts(), bridge_trading_get)
+    )
+
+
+def trading_order_execute_payload(body: dict[str, Any]) -> dict[str, Any]:
+    return clean_json(
+        TRADING_GUARD.execute_order(
+            body,
+            configured_trading_accounts(),
+            bridge_trading_get,
+            bridge_trading_post,
+        )
+    )
+
+
+def trading_cancel_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
+    return clean_json(
+        TRADING_GUARD.preview_cancel(body, configured_trading_accounts(), bridge_trading_get)
+    )
+
+
+def trading_cancel_execute_payload(body: dict[str, Any]) -> dict[str, Any]:
+    return clean_json(
+        TRADING_GUARD.execute_cancel(
+            body,
+            configured_trading_accounts(),
+            bridge_trading_get,
+            bridge_trading_post,
+        )
     )
 
 
@@ -3230,6 +3321,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if parsed.path == "/trading":
                 self.send_payload(200, trading_payload())
                 return
+            if parsed.path == "/trading/capabilities":
+                self.send_payload(200, trading_capabilities_payload())
+                return
             if parsed.path == "/active-index":
                 self.send_payload(200, active_index_payload())
                 return
@@ -3247,6 +3341,34 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_payload(400, {"error": str(error)})
         except (FileNotFoundError, LookupError) as error:
             self.send_payload(404, {"error": str(error)})
+        except Exception as error:  # pragma: no cover - top-level safety boundary
+            self.send_payload(500, {"error": str(error)})
+
+    def do_POST(self) -> None:
+        parsed = urlparse(self.path)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            if length <= 0 or length > 64 * 1024:
+                raise TradingError("请求内容为空或过大")
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+            if not isinstance(body, dict):
+                raise TradingError("请求内容必须是JSON对象")
+            handlers = {
+                "/trading/unlock": trading_unlock_payload,
+                "/trading/order-preview": trading_order_preview_payload,
+                "/trading/order-execute": trading_order_execute_payload,
+                "/trading/cancel-preview": trading_cancel_preview_payload,
+                "/trading/cancel-execute": trading_cancel_execute_payload,
+            }
+            handler = handlers.get(parsed.path)
+            if handler is None:
+                self.send_payload(404, {"error": "not found"})
+                return
+            self.send_payload(200, handler(body))
+        except TradingError as error:
+            self.send_payload(error.status, {"error": str(error)})
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self.send_payload(400, {"error": "请求JSON格式错误"})
         except Exception as error:  # pragma: no cover - top-level safety boundary
             self.send_payload(500, {"error": str(error)})
 

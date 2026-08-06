@@ -14,7 +14,7 @@
         <div class="trading-title">
           <div class="trading-title-row">
             <h1>QMT 实盘监控</h1>
-            <span class="read-only-badge">只读</span>
+            <span id="tradingModeBadge" class="read-only-badge">只读</span>
           </div>
           <p id="tradingStatus">正在读取真实账户数据…</p>
         </div>
@@ -28,6 +28,7 @@
             <select id="accountFilter"><option value="">全部</option></select>
           </label>
           <button id="tradingRefresh" class="trade-button" type="button">刷新</button>
+          <button id="tradeUnlockButton" class="trade-button trade-unlock-button" type="button">开启交易</button>
           <a class="trade-button" href="./index.html">返回主看板</a>
         </div>
       </header>
@@ -67,6 +68,43 @@
         </article>
       </section>
 
+      <section id="manualTradingPanel" class="manual-trading-panel" aria-label="单笔实盘交易">
+        <header>
+          <div>
+            <strong>单笔限价交易</strong>
+            <span id="tradingAccessText">当前锁定，仅可查看</span>
+          </div>
+          <small>本机限定 · 单笔≤2万元 · 限价偏离现价≤5% · 预览后再次确认</small>
+        </header>
+        <form id="orderForm" class="order-form">
+          <label>
+            <span>账户</span>
+            <select id="orderAccount" disabled></select>
+          </label>
+          <label>
+            <span>代码</span>
+            <input id="orderCode" inputmode="numeric" maxlength="9" placeholder="113707" autocomplete="off" disabled />
+          </label>
+          <label>
+            <span>方向</span>
+            <select id="orderSide" disabled>
+              <option value="buy">买入</option>
+              <option value="sell">卖出</option>
+            </select>
+          </label>
+          <label>
+            <span>限价</span>
+            <input id="orderPrice" type="number" min="0.001" step="0.001" placeholder="0.000" disabled />
+          </label>
+          <label>
+            <span>数量</span>
+            <input id="orderVolume" type="number" min="1" step="1" placeholder="10" disabled />
+          </label>
+          <button id="orderPreviewButton" class="trade-button order-preview-button" type="submit" disabled>生成下单预览</button>
+        </form>
+        <p id="orderFormMessage" class="order-form-message">开启交易后才能生成预览；页面不会自动下单。</p>
+      </section>
+
       <section class="trade-workspace">
         <nav id="tradeTabs" class="trade-tabs" aria-label="交易数据视图">
           <button type="button" data-view="summary" class="is-active">标的汇总 <span id="summaryCount">0</span></button>
@@ -84,10 +122,45 @@
       </section>
 
       <footer class="trading-footer">
-        <span>页面不提供下单或撤单操作</span>
+        <span id="tradingSafetyText">局域网访问保持只读，实盘操作只允许在本机页面进行</span>
         <span id="refreshHint">非交易时段不会自动刷新</span>
       </footer>
     </main>
+
+    <dialog id="tradeUnlockDialog" class="trade-dialog">
+      <form id="tradeUnlockForm">
+        <header>
+          <h2>开启本机实盘交易</h2>
+          <button id="closeTradeUnlock" type="button" aria-label="关闭">×</button>
+        </header>
+        <p>解锁只维持10分钟，关闭或刷新页面后需要重新解锁。输入下面的确认语：</p>
+        <code id="unlockPhrase">开启实盘交易</code>
+        <input id="unlockPhraseInput" autocomplete="off" placeholder="完整输入确认语" />
+        <p id="unlockMessage" class="dialog-message"></p>
+        <footer>
+          <button id="cancelTradeUnlock" class="trade-button" type="button">取消</button>
+          <button id="confirmTradeUnlock" class="trade-button danger" type="submit">确认开启</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog id="tradeConfirmDialog" class="trade-dialog trade-confirm-dialog">
+      <form id="tradeConfirmForm">
+        <header>
+          <h2 id="tradeConfirmTitle">确认实盘委托</h2>
+          <button id="closeTradeConfirm" type="button" aria-label="关闭">×</button>
+        </header>
+        <div id="tradePreviewSummary" class="trade-preview-summary"></div>
+        <p>请逐字输入以下确认语，预览30秒后失效：</p>
+        <code id="tradeConfirmationPhrase"></code>
+        <input id="tradeConfirmationInput" autocomplete="off" placeholder="完整输入确认语" />
+        <p id="tradeConfirmMessage" class="dialog-message"></p>
+        <footer>
+          <button id="cancelTradeConfirm" class="trade-button" type="button">取消</button>
+          <button id="executeTradeButton" class="trade-button danger" type="submit" disabled>提交实盘委托</button>
+        </footer>
+      </form>
+    </dialog>
     <script src="./trading.js" defer></script>
   </body>
 </html>

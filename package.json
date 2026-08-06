@@ -7,6 +7,7 @@
     "apply:energy-tags": "node scripts/apply-energy-theme-tags.js",
     "build:bond-search-aliases": "swift scripts/build-convertible-bond-search-aliases.swift",
     "update:stocks": "node scripts/update-a-share-list.js",
-    "sync:tdx-sectors": "node scripts/sync-tdx-sectors.js"
+    "sync:tdx-sectors": "node scripts/sync-tdx-sectors.js",
+    "test:trading": "/Users/seasnake/miniconda3/bin/python3 -m unittest discover -s tests -p 'test_*.py' -v"
   }
 }
