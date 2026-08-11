@@ -57,6 +57,8 @@ const state = {
   intradayPayloads: [],
   intradayRows: [],
   dailyPayload: null,
+  referenceDailyPayload: null,
+  referenceDailyRequest: null,
   metadata: null,
   view: params.get("view") === "daily" ? "daily" : "intraday",
   selectedIndex: -1,
@@ -67,6 +69,20 @@ const state = {
   intradayDays: Math.max(1, Math.min(5, Number(params.get("days")) || 1)),
   tagOrder: [],
   tagDraft: new Set(),
+  orderBook: null,
+  bookTimer: 0,
+  bookLoading: false,
+  tradingCapabilities: null,
+  tradeSessionToken: "",
+  tradeSessionExpiresAt: 0,
+  tradeSessionTicker: 0,
+  quickPriceMode: "ask1",
+  pendingQuickPreview: null,
+  quickConfirmReadyAt: 0,
+  holdTimer: 0,
+  holdStartedAt: 0,
+  quickSubmitting: false,
+  panelMetricKeys: null,
 };
 
 const pageParams = new URLSearchParams(window.location.search);
@@ -136,9 +152,38 @@ const nodes = {
   eventList: document.querySelector("#eventList"),
   eventsTitle: document.querySelector("#eventsTitle"),
   intradayLegend: document.querySelector("#intradayLegend"),
+  intradayLegendNote: document.querySelector("#intradayLegendNote"),
+  panelMetricControls: document.querySelector("#panelMetricControls"),
   dailyLegend: document.querySelector("#dailyLegend"),
   eventsCard: document.querySelector(".events-card"),
   dataFootnote: document.querySelector("#dataFootnote"),
+  tradePanel: document.querySelector("#bondTradePanel"),
+  bookStatus: document.querySelector("#bookStatus"),
+  bookLastPrice: document.querySelector("#bookLastPrice"),
+  bookChange: document.querySelector("#bookChange"),
+  bookTime: document.querySelector("#bookTime"),
+  orderBook: document.querySelector("#orderBook"),
+  bookSpread: document.querySelector("#bookSpread"),
+  quickTradeAccess: document.querySelector("#quickTradeAccess"),
+  quickTradeUnlock: document.querySelector("#quickTradeUnlock"),
+  quickBuyForm: document.querySelector("#quickBuyForm"),
+  quickBuyAccount: document.querySelector("#quickBuyAccount"),
+  quickBuyPrice: document.querySelector("#quickBuyPrice"),
+  quickBuyVolume: document.querySelector("#quickBuyVolume"),
+  quickPriceButtons: document.querySelector("#quickPriceButtons"),
+  quickVolumeButtons: document.querySelector("#quickVolumeButtons"),
+  quickBuyPreview: document.querySelector("#quickBuyPreview"),
+  quickTradeMessage: document.querySelector("#quickTradeMessage"),
+  tradeUnlockDialog: document.querySelector("#bondTradeUnlockDialog"),
+  tradeUnlockForm: document.querySelector("#bondTradeUnlockForm"),
+  unlockPhrase: document.querySelector("#bondUnlockPhrase"),
+  unlockInput: document.querySelector("#bondUnlockInput"),
+  unlockMessage: document.querySelector("#bondUnlockMessage"),
+  tradeConfirmDialog: document.querySelector("#bondTradeConfirmDialog"),
+  tradeConfirmForm: document.querySelector("#bondTradeConfirmForm"),
+  tradePreviewSummary: document.querySelector("#bondTradePreviewSummary"),
+  tradeConfirmMessage: document.querySelector("#bondTradeConfirmMessage"),
+  executeQuickBuy: document.querySelector("#executeQuickBuy"),
 };
 
 if (isEmbedded) {
@@ -156,6 +201,8 @@ const panelDefinitions = [
   { key: "dark", label: "暗盘资金", weight: 0.14 },
   { key: "visible", label: "明盘资金", weight: 0.16 },
 ];
+const PANEL_METRIC_STORAGE_KEY = "finance-board:bond-panel-metrics:v1";
+const DEFAULT_PANEL_METRIC_KEYS = ["price", "volumeRatio", "macd", "visible"];
 const INTRADAY_TOTAL_MINUTES = 240;
 const INTRADAY_AXIS_LABELS = [
   { minute: 0, label: "09:30" },
@@ -430,6 +477,319 @@ async function postJson(url, body, timeoutMs = 12000) {
   }
 }
 
+function currentBondMarketCode() {
+  if (state.payload?.monitor_code) return state.payload.monitor_code;
+  const market = requestedCode.startsWith("110")
+    || requestedCode.startsWith("111")
+    || requestedCode.startsWith("113")
+    || requestedCode.startsWith("118")
+    ? "SH"
+    : "SZ";
+  return requestedCode ? `${requestedCode}.${market}` : "";
+}
+
+function shanghaiDateKey(now = new Date()) {
+  const clock = shanghaiClockParts(now);
+  return `${clock.year}${String(clock.month).padStart(2, "0")}${String(clock.day).padStart(2, "0")}`;
+}
+
+function quickTradeSessionActive() {
+  return Boolean(
+    state.tradeSessionToken
+      && state.tradeSessionExpiresAt > Date.now(),
+  );
+}
+
+function setQuickTradeMessage(message, tone = "") {
+  nodes.quickTradeMessage.textContent = message;
+  nodes.quickTradeMessage.classList.toggle("is-error", tone === "error");
+  nodes.quickTradeMessage.classList.toggle("is-success", tone === "success");
+}
+
+function setBondDialogMessage(node, message, tone = "") {
+  node.textContent = message;
+  node.classList.toggle("is-error", tone === "error");
+  node.classList.toggle("is-success", tone === "success");
+}
+
+function quickTradeContextReason() {
+  const capability = state.tradingCapabilities || {};
+  if (!capability.local_access) return "局域网访问只读";
+  if (!capability.bridge_enabled) return "QMT未启用交易";
+  if (!capability.bridge_connected) return "QMT交易账户未连接";
+  if (state.view !== "intraday") return "日K模式仅看盘";
+  if (state.manualDate) return "历史分时仅看盘";
+  if (!state.orderBook || state.orderBook.date !== shanghaiDateKey()) return "盘口不是今日数据";
+  if (!marketRefreshWindow().active) return "非交易时段锁定";
+  return "";
+}
+
+function renderQuickTradeAccess() {
+  if (!nodes.tradePanel || isPanel) return;
+  const reason = quickTradeContextReason();
+  const capability = state.tradingCapabilities || {};
+  const bridgeAvailable = Boolean(
+    capability.local_access
+      && capability.bridge_enabled
+      && capability.bridge_connected,
+  );
+  const unlocked = bridgeAvailable && quickTradeSessionActive();
+  const canTrade = unlocked && !reason;
+  const hasPrice = Number(nodes.quickBuyPrice.value) > 0;
+  const fields = [nodes.quickBuyAccount, nodes.quickBuyPrice, nodes.quickBuyVolume];
+  for (const field of fields) field.disabled = !canTrade;
+  for (const button of nodes.quickPriceButtons.querySelectorAll("button")) {
+    button.disabled = !canTrade;
+  }
+  for (const button of nodes.quickVolumeButtons.querySelectorAll("button")) {
+    button.disabled = !canTrade;
+  }
+  nodes.quickBuyPreview.disabled = !canTrade || !hasPrice;
+  nodes.quickTradeUnlock.disabled = !bridgeAvailable;
+  nodes.quickTradeUnlock.classList.toggle("is-unlocked", unlocked);
+  nodes.quickTradeUnlock.textContent = unlocked ? "关闭交易" : "开启交易";
+  if (unlocked) {
+    const seconds = Math.max(0, Math.ceil((state.tradeSessionExpiresAt - Date.now()) / 1000));
+    const countdown = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+    nodes.quickTradeAccess.textContent = reason ? `已解锁 · ${reason}` : `已解锁 ${countdown}`;
+  } else {
+    nodes.quickTradeAccess.textContent = reason || "当前锁定";
+  }
+}
+
+function bookPrice(mode) {
+  const payload = state.orderBook || {};
+  if (mode === "bid1") return Number(payload.bids?.[0]?.price);
+  if (mode === "ask1") return Number(payload.asks?.[0]?.price);
+  return Number(payload.last_price);
+}
+
+function syncQuickPrice() {
+  if (state.quickPriceMode === "manual") return;
+  const price = bookPrice(state.quickPriceMode);
+  if (Number.isFinite(price) && price > 0) nodes.quickBuyPrice.value = price.toFixed(3);
+  renderQuickTradeAccess();
+}
+
+function selectQuickPrice(mode) {
+  state.quickPriceMode = mode;
+  for (const button of nodes.quickPriceButtons.querySelectorAll("button")) {
+    button.classList.toggle("is-active", button.dataset.price === mode);
+  }
+  syncQuickPrice();
+}
+
+function renderOrderBook(payload) {
+  state.orderBook = payload;
+  nodes.bookLastPrice.textContent = formatNumber(payload.last_price, 3);
+  nodes.bookLastPrice.className = toneClass(payload.change);
+  nodes.bookChange.textContent = formatPercent(payload.change);
+  nodes.bookChange.className = toneClass(payload.change);
+  nodes.bookTime.textContent = `${displayDate(payload.date)} ${payload.time || "--"}`;
+  nodes.bookSpread.textContent = Number.isFinite(Number(payload.spread))
+    ? formatNumber(payload.spread, 3)
+    : "-";
+  const current = payload.date === shanghaiDateKey();
+  const active = marketRefreshWindow().active;
+  nodes.bookStatus.textContent = current && active
+    ? `实时 ${payload.time || ""}`
+    : current
+      ? `已收盘 ${payload.time || ""}`
+      : `数据 ${displayDate(payload.date)}`;
+  nodes.bookStatus.className = `book-status${current && active ? " is-live" : " is-stale"}`;
+
+  nodes.orderBook.replaceChildren();
+  const rows = [
+    ...(payload.asks || []).slice().reverse().map((row) => ({ ...row, side: "ask" })),
+    ...(payload.bids || []).map((row) => ({ ...row, side: "bid" })),
+  ];
+  for (const row of rows) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `book-level is-${row.side}`;
+    button.disabled = !(Number(row.price) > 0);
+    button.dataset.price = row.price || "";
+    button.title = row.price ? `点击将限价设为 ${formatNumber(row.price, 3)}` : "该档无报价";
+    const level = document.createElement("span");
+    level.textContent = `${row.side === "ask" ? "卖" : "买"}${row.level}`;
+    const price = document.createElement("strong");
+    price.textContent = row.price ? formatNumber(row.price, 3) : "-";
+    const volume = document.createElement("small");
+    volume.textContent = Number.isFinite(Number(row.volume_hands))
+      ? formatNumber(row.volume_hands, 0)
+      : "-";
+    button.append(level, price, volume);
+    nodes.orderBook.append(button);
+  }
+  syncQuickPrice();
+  renderQuickTradeAccess();
+}
+
+function scheduleOrderBookRefresh() {
+  window.clearTimeout(state.bookTimer);
+  if (isPanel || document.hidden) return;
+  if (!marketRefreshWindow().active) return;
+  state.bookTimer = window.setTimeout(() => void loadOrderBook({ quiet: true }), 1000);
+}
+
+async function loadOrderBook(options = {}) {
+  if (isPanel || state.bookLoading || !currentBondMarketCode()) return;
+  state.bookLoading = true;
+  if (!options.quiet) {
+    nodes.bookStatus.textContent = "正在读取";
+    nodes.bookStatus.className = "book-status";
+  }
+  try {
+    const query = new URLSearchParams({ code: currentBondMarketCode() });
+    const payload = await fetchJson(`/api/miniqmt/order-book?${query}`, 8000);
+    renderOrderBook(payload);
+  } catch (error) {
+    nodes.bookStatus.textContent = "盘口读取失败";
+    nodes.bookStatus.className = "book-status is-error";
+    if (!options.quiet) setQuickTradeMessage(error.message || "实时盘口不可用", "error");
+  } finally {
+    state.bookLoading = false;
+    scheduleOrderBookRefresh();
+  }
+}
+
+function populateQuickTradeAccounts(accounts = []) {
+  const selected = nodes.quickBuyAccount.value;
+  nodes.quickBuyAccount.replaceChildren();
+  for (const account of accounts) {
+    if (!account.label) continue;
+    const label = `${account.label}${account.connected ? "" : "（未连接）"}`;
+    nodes.quickBuyAccount.append(new Option(label, account.label, false, account.label === selected));
+  }
+}
+
+async function loadBondTradingCapabilities() {
+  if (isPanel) return;
+  try {
+    const payload = await fetchJson("/api/miniqmt/trading/capabilities", 12000);
+    state.tradingCapabilities = payload;
+    nodes.unlockPhrase.textContent = payload.unlock_phrase || "开启实盘交易";
+    populateQuickTradeAccounts(payload.accounts || []);
+  } catch (error) {
+    state.tradingCapabilities = {
+      local_access: true,
+      bridge_enabled: false,
+      bridge_connected: false,
+    };
+    setQuickTradeMessage(`交易能力检查失败：${error.message}`, "error");
+  }
+  renderQuickTradeAccess();
+}
+
+function cancelQuickHold() {
+  window.clearInterval(state.holdTimer);
+  state.holdTimer = 0;
+  state.holdStartedAt = 0;
+  nodes.executeQuickBuy.style.setProperty("--hold-progress", "0%");
+  if (!state.quickSubmitting && state.pendingQuickPreview) {
+    nodes.executeQuickBuy.querySelector("span").textContent = "长按1.5秒提交";
+  }
+}
+
+function lockQuickTrading(message = "交易已关闭，页面恢复只读。", tone = "success") {
+  state.tradeSessionToken = "";
+  state.tradeSessionExpiresAt = 0;
+  state.pendingQuickPreview = null;
+  window.clearInterval(state.tradeSessionTicker);
+  cancelQuickHold();
+  if (nodes.tradeConfirmDialog.open) nodes.tradeConfirmDialog.close();
+  renderQuickTradeAccess();
+  setQuickTradeMessage(message, tone);
+}
+
+function startQuickSessionTicker() {
+  window.clearInterval(state.tradeSessionTicker);
+  state.tradeSessionTicker = window.setInterval(() => {
+    if (!quickTradeSessionActive()) lockQuickTrading("交易会话已到期，页面恢复只读。");
+    else renderQuickTradeAccess();
+  }, 1000);
+}
+
+function showQuickTradePreview(payload) {
+  state.pendingQuickPreview = payload;
+  state.quickConfirmReadyAt = Date.now() + 500;
+  nodes.tradePreviewSummary.replaceChildren();
+  const order = payload.order || {};
+  const rows = [
+    ["标的", `${order.name || ""} ${order.stock_code || ""}`],
+    ["方向", order.side || "买入"],
+    ["数量", `${order.order_volume || "-"}张`],
+    ["限价", formatNumber(order.price, 3)],
+    ["预计金额", formatAmount(order.amount)],
+    ["校验现价", formatNumber(payload.checks?.last_price, 3)],
+  ];
+  for (const [label, value] of rows) {
+    const item = document.createElement("div");
+    const labelNode = document.createElement("span");
+    labelNode.textContent = label;
+    const valueNode = document.createElement("strong");
+    valueNode.textContent = String(value);
+    item.append(labelNode, valueNode);
+    nodes.tradePreviewSummary.append(item);
+  }
+  nodes.executeQuickBuy.disabled = true;
+  nodes.executeQuickBuy.querySelector("span").textContent = "长按1.5秒提交";
+  setBondDialogMessage(nodes.tradeConfirmMessage, "预览30秒后失效；提交前服务端会再次检查价格与资金。", "");
+  nodes.tradeConfirmDialog.showModal();
+  window.setTimeout(() => {
+    if (state.pendingQuickPreview === payload && nodes.tradeConfirmDialog.open) {
+      nodes.executeQuickBuy.disabled = false;
+    }
+  }, 500);
+}
+
+async function executeQuickOrder() {
+  if (!state.pendingQuickPreview || state.quickSubmitting) return;
+  const preview = state.pendingQuickPreview;
+  state.quickSubmitting = true;
+  nodes.executeQuickBuy.disabled = true;
+  nodes.executeQuickBuy.querySelector("span").textContent = "正在提交…";
+  setBondDialogMessage(nodes.tradeConfirmMessage, "正在提交，请勿重复操作。", "");
+  try {
+    const payload = await postJson("/api/miniqmt/trading/order-execute", {
+      session_token: state.tradeSessionToken,
+      preview_token: preview.preview_token,
+      confirmation: preview.confirmation,
+    }, 20000);
+    state.pendingQuickPreview = null;
+    nodes.tradeConfirmDialog.close();
+    setQuickTradeMessage(
+      `${payload.message || "委托已提交"}${payload.order_id ? ` · 委托号 ${payload.order_id}` : ""}`,
+      "success",
+    );
+    await loadOrderBook({ quiet: true });
+  } catch (error) {
+    state.pendingQuickPreview = null;
+    setBondDialogMessage(nodes.tradeConfirmMessage, error.message, "error");
+    nodes.executeQuickBuy.querySelector("span").textContent = "预览失效，请关闭重试";
+  } finally {
+    state.quickSubmitting = false;
+    cancelQuickHold();
+  }
+}
+
+function startQuickHold(event) {
+  if (nodes.executeQuickBuy.disabled || !state.pendingQuickPreview || state.quickSubmitting) return;
+  event.preventDefault();
+  cancelQuickHold();
+  state.holdStartedAt = performance.now();
+  nodes.executeQuickBuy.querySelector("span").textContent = "保持按住…";
+  state.holdTimer = window.setInterval(() => {
+    const elapsed = performance.now() - state.holdStartedAt;
+    const progress = Math.min(100, (elapsed / 1500) * 100);
+    nodes.executeQuickBuy.style.setProperty("--hold-progress", `${progress}%`);
+    if (progress < 100) return;
+    window.clearInterval(state.holdTimer);
+    state.holdTimer = 0;
+    void executeQuickOrder();
+  }, 30);
+}
+
 async function loadBond(options = {}) {
   if (!requestedCode) {
     setStatus("缺少转债代码", "is-error");
@@ -483,9 +843,9 @@ async function loadBond(options = {}) {
 
 async function loadIntradayPayloads(mainPayload, requestId) {
   const dayCount = state.intradayDays;
+  const dailyPayload = await loadReferenceDailyPayload(dayCount > 1);
   if (dayCount <= 1) return [mainPayload];
-  const dailyQuery = new URLSearchParams({ code: requestedCode, count: "30" });
-  const dailyPayload = await fetchJson(`/api/miniqmt/daily?${dailyQuery}`, 120000);
+  if (!dailyPayload) throw new Error("日线参考数据暂不可用，无法加载多日分时");
   if (requestId !== state.requestId) return [mainPayload];
   const endDate = String(mainPayload.trading_date || "");
   const dates = [...new Set((dailyPayload.rows || [])
@@ -507,6 +867,28 @@ async function loadIntradayPayloads(mainPayload, requestId) {
   return payloads;
 }
 
+async function loadReferenceDailyPayload(required = false) {
+  if (state.referenceDailyPayload) return state.referenceDailyPayload;
+  if (!state.referenceDailyRequest) {
+    const dailyQuery = new URLSearchParams({ code: requestedCode, count: "30" });
+    state.referenceDailyRequest = fetchJson(`/api/miniqmt/daily?${dailyQuery}`, 120000)
+      .then((payload) => {
+        state.referenceDailyPayload = payload;
+        return payload;
+      })
+      .catch((error) => {
+        if (required) throw error;
+        return null;
+      });
+  }
+  try {
+    return await state.referenceDailyRequest;
+  } catch (error) {
+    if (required) throw error;
+    return null;
+  }
+}
+
 function setView(view, options = {}) {
   state.view = view === "daily" ? "daily" : "intraday";
   state.selectedIndex = -1;
@@ -519,6 +901,7 @@ function setView(view, options = {}) {
   nodes.intradayLegend.hidden = state.view !== "intraday";
   nodes.dailyLegend.hidden = state.view !== "daily";
   nodes.eventsCard.hidden = state.view !== "intraday";
+  renderQuickTradeAccess();
   window.clearTimeout(state.refreshTimer);
 
   if (options.updateUrl !== false) {
@@ -937,9 +1320,10 @@ function chartGeometry(canvas) {
   const top = 10;
   const bottom = 28;
   const gap = 12;
-  const usable = height - top - bottom - gap * (panelDefinitions.length - 1);
+  const definitions = activePanelDefinitions();
+  const usable = height - top - bottom - gap * (definitions.length - 1);
   let cursor = top;
-  const panels = panelDefinitions.map((definition) => {
+  const panels = definitions.map((definition) => {
     const panelHeight = usable * definition.weight;
     const panel = {
       ...definition,
@@ -952,6 +1336,56 @@ function chartGeometry(canvas) {
     return panel;
   });
   return { width, height, left, right, top, bottom, panels };
+}
+
+function panelMetricKeySet() {
+  if (!isPanel) return new Set(panelDefinitions.map((definition) => definition.key));
+  if (state.panelMetricKeys) return state.panelMetricKeys;
+  const validKeys = new Set(panelDefinitions.map((definition) => definition.key));
+  let selected = DEFAULT_PANEL_METRIC_KEYS;
+  try {
+    const stored = JSON.parse(localStorage.getItem(PANEL_METRIC_STORAGE_KEY) || "null");
+    if (Array.isArray(stored)) selected = stored;
+  } catch {
+    // Use the compact defaults when local storage is unavailable or malformed.
+  }
+  state.panelMetricKeys = new Set(
+    selected.filter((key) => validKeys.has(key)),
+  );
+  state.panelMetricKeys.add("price");
+  return state.panelMetricKeys;
+}
+
+function activePanelDefinitions() {
+  const selected = panelMetricKeySet();
+  const definitions = panelDefinitions.filter((definition) => selected.has(definition.key));
+  const totalWeight = definitions.reduce((sum, definition) => sum + definition.weight, 0) || 1;
+  return definitions.map((definition) => ({
+    ...definition,
+    weight: definition.weight / totalWeight,
+  }));
+}
+
+function syncPanelMetricControls() {
+  if (!nodes.panelMetricControls) return;
+  const selected = panelMetricKeySet();
+  for (const input of nodes.panelMetricControls.querySelectorAll("[data-panel-metric]")) {
+    input.checked = selected.has(input.dataset.panelMetric);
+  }
+}
+
+function savePanelMetricSelection() {
+  if (!nodes.panelMetricControls || !isPanel) return;
+  const selected = [...nodes.panelMetricControls.querySelectorAll("[data-panel-metric]:checked")]
+    .map((input) => input.dataset.panelMetric);
+  selected.push("price");
+  state.panelMetricKeys = new Set(selected);
+  try {
+    localStorage.setItem(PANEL_METRIC_STORAGE_KEY, JSON.stringify([...state.panelMetricKeys]));
+  } catch {
+    // The selection still applies for this page even if persistence is unavailable.
+  }
+  drawChart();
 }
 
 function finiteValues(values) {
@@ -1052,6 +1486,168 @@ function setupCanvas() {
   const context = nodes.canvas.getContext("2d");
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
   return context;
+}
+
+const INTRADAY_REFERENCE_DEFINITIONS = [
+  { key: "ma5", label: "MA5", color: "#e2a51a", dash: [] },
+  { key: "ma10", label: "MA10", color: "#d638c2", dash: [] },
+  { key: "support5", label: "支撑", color: "#159447", dash: [5, 3] },
+  { key: "resistance5", label: "压力", color: "#df2434", dash: [5, 3] },
+];
+
+function dailyRowsBefore(tradingDate) {
+  return (state.referenceDailyPayload?.rows || [])
+    .filter((row) => String(row.date || "") < String(tradingDate || ""))
+    .filter((row) => /^\d{8}$/.test(String(row.date || "")))
+    .sort((left, right) => String(left.date).localeCompare(String(right.date)));
+}
+
+function averageDailyCloses(rows, period) {
+  const values = rows
+    .map((row) => Number(row.close))
+    .filter(Number.isFinite)
+    .slice(-period);
+  return values.length === period
+    ? values.reduce((sum, value) => sum + value, 0) / period
+    : null;
+}
+
+function referenceLevelsForDate(tradingDate) {
+  const rows = dailyRowsBefore(tradingDate);
+  const recent = rows.slice(-5);
+  const levels = [];
+  const ma5 = averageDailyCloses(rows, 5);
+  const ma10 = averageDailyCloses(rows, 10);
+  if (Number.isFinite(ma5)) levels.push({ key: "ma5", value: ma5 });
+  if (Number.isFinite(ma10)) levels.push({ key: "ma10", value: ma10 });
+  const lows = recent.map((row) => Number(row.low)).filter(Number.isFinite);
+  const highs = recent.map((row) => Number(row.high)).filter(Number.isFinite);
+  if (recent.length >= 5 && lows.length >= 5) {
+    levels.push({ key: "support5", value: Math.min(...lows) });
+  }
+  if (recent.length >= 5 && highs.length >= 5) {
+    levels.push({ key: "resistance5", value: Math.max(...highs) });
+  }
+  return levels;
+}
+
+function distanceToRange(value, range) {
+  if (value < range[0]) return range[0] - value;
+  if (value > range[1]) return value - range[1];
+  return 0;
+}
+
+function referenceRenderState(rows, pricePanel, basePriceDomain) {
+  const dates = [...new Set(rows.map((row) => String(row.trading_date || "")))]
+    .filter(Boolean);
+  const levelsByDate = new Map(
+    dates.map((tradingDate) => [tradingDate, referenceLevelsForDate(tradingDate)]),
+  );
+  const baseValuesByDate = new Map();
+  for (const row of rows) {
+    const tradingDate = String(row.trading_date || "");
+    const values = baseValuesByDate.get(tradingDate) || [];
+    values.push(row.low, row.high, row.close);
+    baseValuesByDate.set(tradingDate, values);
+  }
+  const pricePerPixel = (basePriceDomain[1] - basePriceDomain[0])
+    / Math.max(1, pricePanel.height);
+  const nearDistance = Math.max(pricePerPixel * 48, 0.006 * Number(rows.at(-1)?.close || 0));
+  const allLevels = [];
+  for (const [tradingDate, levels] of levelsByDate.entries()) {
+    const curveValues = finiteValues(baseValuesByDate.get(tradingDate) || []);
+    if (!curveValues.length) continue;
+    const curveRange = [Math.min(...curveValues), Math.max(...curveValues)];
+    for (const level of levels) {
+      const definition = INTRADAY_REFERENCE_DEFINITIONS.find((item) => item.key === level.key);
+      if (!definition) continue;
+      const existing = allLevels.find((item) => item.key === level.key);
+      const target = existing || {
+        ...definition,
+        valuesByDate: new Map(),
+        visibleDates: new Set(),
+      };
+      target.valuesByDate.set(tradingDate, level.value);
+      if (distanceToRange(level.value, curveRange) <= nearDistance) {
+        target.visibleDates.add(tradingDate);
+      }
+      if (!existing) allLevels.push(target);
+    }
+  }
+  const visibleValues = allLevels.flatMap((level) =>
+    [...level.visibleDates].map((tradingDate) => level.valuesByDate.get(tradingDate)),
+  );
+  const latestDate = dates.at(-1);
+  const latestLevels = (levelsByDate.get(latestDate) || []).map((level) => {
+    const definition = INTRADAY_REFERENCE_DEFINITIONS.find((item) => item.key === level.key);
+    const rendered = allLevels.find((item) => item.key === level.key);
+    return {
+      ...definition,
+      ...level,
+      visible: Boolean(rendered?.visibleDates.has(latestDate)),
+    };
+  });
+  return { allLevels, latestLevels, visibleValues };
+}
+
+function renderIntradayReferenceSummary(levels) {
+  if (!nodes.intradayLegendNote) return;
+  if (!levels.length) {
+    nodes.intradayLegendNote.textContent = "移动鼠标查看分钟详情 · 日线参考位暂不可用";
+    return;
+  }
+  const items = levels.map((level) => {
+    const stateLabel = level.visible ? "近" : "远";
+    const stateClass = level.visible ? "is-near" : "is-far";
+    return `<span class="reference-summary-item ${stateClass}">${level.label} ${formatNumber(level.value, 3)} · ${stateLabel}</span>`;
+  });
+  nodes.intradayLegendNote.innerHTML = `移动鼠标查看分钟详情 · ${items.join(" · ")}`;
+}
+
+function drawReferenceLevels(context, rows, panel, range, referenceState) {
+  if (!referenceState.allLevels.length) return;
+  const dayCount = intradayDayCount(rows);
+  for (const level of referenceState.allLevels) {
+    for (const tradingDate of level.visibleDates) {
+      const dateRows = rows.filter((row) => String(row.trading_date || "") === tradingDate);
+      if (!dateRows.length) continue;
+      const dayIndex = Number(dateRows[0]._dayIndex) || 0;
+      const value = level.valuesByDate.get(tradingDate);
+      const y = yFor(value, panel, range);
+      const startX = panel.x + (dayIndex / dayCount) * panel.width;
+      const endX = panel.x + ((dayIndex + 1) / dayCount) * panel.width;
+      context.save();
+      context.strokeStyle = level.color;
+      context.lineWidth = 1.05;
+      context.setLineDash(level.dash);
+      context.beginPath();
+      context.moveTo(startX, y);
+      context.lineTo(endX, y);
+      context.stroke();
+      context.restore();
+    }
+  }
+
+  const latestDate = String(rows.at(-1)?.trading_date || "");
+  const latestDateRows = rows.filter((row) => String(row.trading_date || "") === latestDate);
+  if (!latestDateRows.length) return;
+  const labelX = panel.x + panel.width - 4;
+  context.save();
+  context.font = 'bold 10px Arial, "Microsoft YaHei", sans-serif';
+  context.textAlign = "right";
+  context.textBaseline = "middle";
+  for (const level of referenceState.allLevels) {
+    if (!level.visibleDates.has(latestDate)) continue;
+    const value = level.valuesByDate.get(latestDate);
+    const y = Math.max(panel.y + 10, Math.min(panel.y + panel.height - 10, yFor(value, panel, range)));
+    context.fillStyle = "rgba(255,255,255,.9)";
+    const label = `${level.label} ${formatNumber(value, 3)}`;
+    const width = context.measureText(label).width + 6;
+    context.fillRect(labelX - width, y - 8, width, 16);
+    context.fillStyle = level.color;
+    context.fillText(label, labelX - 3, y);
+  }
+  context.restore();
 }
 
 function drawChart() {
@@ -1194,7 +1790,7 @@ function drawDailyChart() {
     }
   }
 
-  const priceDomain = domain(
+    const priceDomain = domain(
     chartRows.flatMap((row) => [row.low, row.high, row.ma5, row.ma10, row.ma20]),
     { padding: 0.05 },
   );
@@ -1293,14 +1889,14 @@ function drawDailyChart() {
 }
 
 function drawPanels(context, geometry, rows) {
-  const [
-    pricePanel,
-    amountPanel,
-    volumeRatioPanel,
-    macdPanel,
-    darkPanel,
-    visiblePanel,
-  ] = geometry.panels;
+  const panelsByKey = new Map(geometry.panels.map((panel) => [panel.key, panel]));
+  const pricePanel = panelsByKey.get("price");
+  const amountPanel = panelsByKey.get("amount");
+  const volumeRatioPanel = panelsByKey.get("volumeRatio");
+  const macdPanel = panelsByKey.get("macd");
+  const darkPanel = panelsByKey.get("dark");
+  const visiblePanel = panelsByKey.get("visible");
+  if (!pricePanel) return {};
   for (const panel of geometry.panels) {
     context.fillStyle = "#ffffff";
     context.fillRect(panel.x, panel.y, panel.width, panel.height);
@@ -1327,116 +1923,132 @@ function drawPanels(context, geometry, rows) {
     ]),
     { padding: 0.06 },
   );
-  drawHighLowBand(context, rows, pricePanel, priceDomain);
-  drawPreviousCloseLines(context, rows, pricePanel, priceDomain);
-  drawLine(context, rows, pricePanel, priceDomain, "close", "#1f5fbf", 1.55);
+  const priceValues = rows.flatMap((row) => [
+    row.low,
+    row.high,
+    row.intraday_average,
+    row.purple,
+    row.previous_close ?? state.payload?.previous_close,
+  ]);
+  const referenceState = referenceRenderState(rows, pricePanel, priceDomain);
+  const adjustedPriceDomain = domain(
+    [...priceValues, ...referenceState.visibleValues],
+    { padding: 0.06 },
+  );
+  renderIntradayReferenceSummary(referenceState.latestLevels);
+  drawHighLowBand(context, rows, pricePanel, adjustedPriceDomain);
+  drawPreviousCloseLines(context, rows, pricePanel, adjustedPriceDomain);
+  drawReferenceLevels(context, rows, pricePanel, adjustedPriceDomain, referenceState);
+  drawLine(context, rows, pricePanel, adjustedPriceDomain, "close", "#1f5fbf", 1.55);
   drawLine(
     context,
     rows,
     pricePanel,
-    priceDomain,
+    adjustedPriceDomain,
     "intraday_average",
     "#e2a51a",
     1.35,
   );
-  drawLine(context, rows, pricePanel, priceDomain, "purple", "#c6ccd6", 1.05, [2, 3]);
+  drawLine(context, rows, pricePanel, adjustedPriceDomain, "purple", "#c6ccd6", 1.05, [2, 3]);
   drawConditionalLine(
     context,
     rows,
     pricePanel,
-    priceDomain,
+    adjustedPriceDomain,
     "purple",
     (row) => (row.purple_rising ? "#d638c2" : "#139a55"),
     1.8,
   );
 
-  const amountDomain = domain(rows.map((row) => row.amount), { includeZero: true, padding: 0.05 });
-  drawBars(context, rows, amountPanel, amountDomain, (row) =>
-    row.close >= row.open ? "rgba(223,36,52,.68)" : "rgba(21,148,71,.68)",
-  );
+  const domains = { price: adjustedPriceDomain };
 
-  const volumeRatioDomain = domain(
-    rows.map((row) => row.volume_ratio),
-    { includeZero: true, includeValue: 2, padding: 0.05 },
-  );
-  drawLine(
-    context,
-    rows,
-    volumeRatioPanel,
-    volumeRatioDomain,
-    "volume_ratio",
-    "#6546ad",
-    1.45,
-  );
-  drawHorizontalLine(
-    context,
-    volumeRatioPanel,
-    volumeRatioDomain,
-    1,
-    "#9a8bbd",
-    [4, 3],
-  );
-  drawHorizontalLine(
-    context,
-    volumeRatioPanel,
-    volumeRatioDomain,
-    2,
-    "#c4772b",
-    [3, 3],
-  );
+  if (amountPanel) {
+    const amountDomain = domain(rows.map((row) => row.amount), {
+      includeZero: true,
+      padding: 0.05,
+    });
+    drawBars(context, rows, amountPanel, amountDomain, (row) =>
+      row.close >= row.open ? "rgba(223,36,52,.68)" : "rgba(21,148,71,.68)",
+    );
+    domains.amount = amountDomain;
+  }
 
-  const darkDomain = domain(
-    rows.flatMap((row) => [row.dark_buy, row.dark_sell]),
-    { includeZero: true, padding: 0.08 },
-  );
-  drawBars(context, rows, darkPanel, darkDomain, (row) =>
-    row.dark_state === "inflow" ? "rgba(154,44,53,.72)" : "rgba(63,120,181,.72)",
-    (row) => (row.dark_state === "inflow" ? row.dark_buy : row.dark_sell),
-  );
-  drawZeroLine(context, darkPanel, darkDomain);
+  if (volumeRatioPanel) {
+    const volumeRatioDomain = domain(
+      rows.map((row) => row.volume_ratio),
+      { includeZero: true, includeValue: 2, padding: 0.05 },
+    );
+    drawLine(
+      context,
+      rows,
+      volumeRatioPanel,
+      volumeRatioDomain,
+      "volume_ratio",
+      "#6546ad",
+      1.45,
+    );
+    drawHorizontalLine(context, volumeRatioPanel, volumeRatioDomain, 1, "#9a8bbd", [4, 3]);
+    drawHorizontalLine(context, volumeRatioPanel, volumeRatioDomain, 2, "#c4772b", [3, 3]);
+    domains.volumeRatio = volumeRatioDomain;
+  }
 
-  const macdDomain = domain(
-    rows.flatMap((row) => [row.macd, row.dif, row.dea]),
-    { includeZero: true, padding: 0.08 },
-  );
-  drawBars(
-    context,
-    rows,
-    macdPanel,
-    macdDomain,
-    (row) => (row.macd >= 0 ? "rgba(223,36,52,.55)" : "rgba(21,148,71,.55)"),
-    (row) => row.macd,
-  );
-  drawLine(context, rows, macdPanel, macdDomain, "dif", "#32275f", 1.15);
-  drawLine(context, rows, macdPanel, macdDomain, "dea", "#d08a18", 1.05);
-  drawZeroLine(context, macdPanel, macdDomain);
+  if (darkPanel) {
+    const darkDomain = domain(
+      rows.flatMap((row) => [row.dark_buy, row.dark_sell]),
+      { includeZero: true, padding: 0.08 },
+    );
+    drawBars(
+      context,
+      rows,
+      darkPanel,
+      darkDomain,
+      (row) => row.dark_state === "inflow" ? "rgba(154,44,53,.72)" : "rgba(63,120,181,.72)",
+      (row) => (row.dark_state === "inflow" ? row.dark_buy : row.dark_sell),
+    );
+    drawZeroLine(context, darkPanel, darkDomain);
+    domains.dark = darkDomain;
+  }
 
-  const visibleDomain = domain(
-    rows.flatMap((row) => [row.visible_funds, row.visible_funds_aa]),
-    { includeZero: true, includeValue: 100, padding: 0.05 },
-  );
-  drawBars(
-    context,
-    rows,
-    visiblePanel,
-    visibleDomain,
-    (row) =>
-      row.visible_funds >= 100 ? "rgba(164,19,32,.82)" : "rgba(239,113,119,.72)",
-    (row) => row.visible_funds,
-  );
-  drawLine(context, rows, visiblePanel, visibleDomain, "visible_funds_aa", "#8e2434", 1.0);
-  drawHorizontalLine(context, visiblePanel, visibleDomain, 100, "#b13d49", [4, 3]);
-  drawVisibleCrosses(context, rows, visiblePanel, visibleDomain);
+  if (macdPanel) {
+    const macdDomain = domain(
+      rows.flatMap((row) => [row.macd, row.dif, row.dea]),
+      { includeZero: true, padding: 0.08 },
+    );
+    drawBars(
+      context,
+      rows,
+      macdPanel,
+      macdDomain,
+      (row) => (row.macd >= 0 ? "rgba(223,36,52,.55)" : "rgba(21,148,71,.55)"),
+      (row) => row.macd,
+    );
+    drawLine(context, rows, macdPanel, macdDomain, "dif", "#32275f", 1.15);
+    drawLine(context, rows, macdPanel, macdDomain, "dea", "#d08a18", 1.05);
+    drawZeroLine(context, macdPanel, macdDomain);
+    domains.macd = macdDomain;
+  }
+
+  if (visiblePanel) {
+    const visibleDomain = domain(
+      rows.flatMap((row) => [row.visible_funds, row.visible_funds_aa]),
+      { includeZero: true, includeValue: 100, padding: 0.05 },
+    );
+    drawBars(
+      context,
+      rows,
+      visiblePanel,
+      visibleDomain,
+      (row) => row.visible_funds >= 100 ? "rgba(164,19,32,.82)" : "rgba(239,113,119,.72)",
+      (row) => row.visible_funds,
+    );
+    drawLine(context, rows, visiblePanel, visibleDomain, "visible_funds_aa", "#8e2434", 1.0);
+    drawHorizontalLine(context, visiblePanel, visibleDomain, 100, "#b13d49", [4, 3]);
+    drawVisibleCrosses(context, rows, visiblePanel, visibleDomain);
+    domains.visible = visibleDomain;
+  }
   drawHalfHourSeparators(context, geometry.panels, rows);
 
-  return {
-    price: priceDomain,
-    amount: amountDomain,
-    volumeRatio: volumeRatioDomain,
-    dark: darkDomain,
-    macd: macdDomain,
-    visible: visibleDomain,
-  };
+  return domains;
 }
 
 function drawHighLowBand(context, rows, panel, range) {
@@ -1884,6 +2496,7 @@ nodes.refreshButton.addEventListener("click", () => {
 });
 nodes.dateSelect.addEventListener("change", () => {
   state.manualDate = true;
+  renderQuickTradeAccess();
   loadBond({ date: nodes.dateSelect.value });
 });
 nodes.intradayDaysSelect.addEventListener("change", () => {
@@ -1908,12 +2521,133 @@ nodes.saveTagsButton.addEventListener("click", () => void saveTagEditor());
 nodes.dailyRangeSelect.addEventListener("change", loadDaily);
 nodes.intradayViewButton.addEventListener("click", () => setView("intraday"));
 nodes.dailyViewButton.addEventListener("click", () => setView("daily"));
+if (isPanel && nodes.panelMetricControls) {
+  syncPanelMetricControls();
+  nodes.panelMetricControls.addEventListener("change", (event) => {
+    if (event.target.matches("[data-panel-metric]")) savePanelMetricSelection();
+  });
+}
 nodes.backLink.addEventListener("click", (event) => {
   if (isEmbedded && window.parent !== window) {
     event.preventDefault();
     window.parent.postMessage({ type: "finance:close-bond-overlay" }, window.location.origin);
   }
 });
+if (!isPanel) {
+  nodes.orderBook.addEventListener("click", (event) => {
+    const level = event.target.closest(".book-level[data-price]");
+    if (!level || !(Number(level.dataset.price) > 0)) return;
+    state.quickPriceMode = "manual";
+    nodes.quickBuyPrice.value = Number(level.dataset.price).toFixed(3);
+    for (const button of nodes.quickPriceButtons.querySelectorAll("button")) {
+      button.classList.remove("is-active");
+    }
+    renderQuickTradeAccess();
+  });
+  nodes.quickPriceButtons.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-price]");
+    if (button) selectQuickPrice(button.dataset.price);
+  });
+  nodes.quickVolumeButtons.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-volume]");
+    if (!button) return;
+    nodes.quickBuyVolume.value = button.dataset.volume;
+    for (const item of nodes.quickVolumeButtons.querySelectorAll("button")) {
+      item.classList.toggle("is-active", item === button);
+    }
+  });
+  nodes.quickBuyPrice.addEventListener("input", () => {
+    state.quickPriceMode = "manual";
+    for (const button of nodes.quickPriceButtons.querySelectorAll("button")) {
+      button.classList.remove("is-active");
+    }
+    renderQuickTradeAccess();
+  });
+  nodes.quickBuyVolume.addEventListener("input", () => {
+    for (const button of nodes.quickVolumeButtons.querySelectorAll("button")) {
+      button.classList.toggle("is-active", button.dataset.volume === nodes.quickBuyVolume.value);
+    }
+  });
+  nodes.quickTradeUnlock.addEventListener("click", () => {
+    if (quickTradeSessionActive()) {
+      lockQuickTrading();
+      return;
+    }
+    nodes.unlockInput.value = "";
+    setBondDialogMessage(nodes.unlockMessage, "", "");
+    nodes.tradeUnlockDialog.showModal();
+  });
+  nodes.tradeUnlockForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const button = document.querySelector("#confirmBondTradeUnlock");
+    button.disabled = true;
+    try {
+      const payload = await postJson("/api/miniqmt/trading/unlock", {
+        phrase: nodes.unlockInput.value,
+      });
+      state.tradeSessionToken = payload.session_token;
+      state.tradeSessionExpiresAt = Number(payload.expires_at || 0);
+      nodes.tradeUnlockDialog.close();
+      startQuickSessionTicker();
+      renderQuickTradeAccess();
+      setQuickTradeMessage("交易已解锁。默认使用卖一价，提交前仍会生成预览。", "success");
+    } catch (error) {
+      setBondDialogMessage(nodes.unlockMessage, error.message, "error");
+    } finally {
+      button.disabled = false;
+    }
+  });
+  for (const id of ["closeBondTradeUnlock", "cancelBondTradeUnlock"]) {
+    document.querySelector(`#${id}`).addEventListener("click", () => nodes.tradeUnlockDialog.close());
+  }
+  nodes.quickBuyForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!quickTradeSessionActive()) {
+      lockQuickTrading("交易会话已过期，请重新开启。", "error");
+      return;
+    }
+    const reason = quickTradeContextReason();
+    if (reason) {
+      setQuickTradeMessage(reason, "error");
+      renderQuickTradeAccess();
+      return;
+    }
+    nodes.quickBuyPreview.disabled = true;
+    setQuickTradeMessage("正在核对账户、资金与最新盘口…");
+    try {
+      const payload = await postJson("/api/miniqmt/trading/order-preview", {
+        session_token: state.tradeSessionToken,
+        account: nodes.quickBuyAccount.value,
+        stock_code: currentBondMarketCode(),
+        side: "buy",
+        price: Number(nodes.quickBuyPrice.value),
+        volume: Number(nodes.quickBuyVolume.value),
+      }, 20000);
+      setQuickTradeMessage("校验通过，请在弹窗中长按确认。", "success");
+      showQuickTradePreview(payload);
+    } catch (error) {
+      setQuickTradeMessage(error.message, "error");
+    } finally {
+      renderQuickTradeAccess();
+    }
+  });
+  for (const id of ["closeBondTradeConfirm", "cancelBondTradeConfirm"]) {
+    document.querySelector(`#${id}`).addEventListener("click", () => {
+      state.pendingQuickPreview = null;
+      cancelQuickHold();
+      nodes.tradeConfirmDialog.close();
+    });
+  }
+  nodes.executeQuickBuy.addEventListener("pointerdown", startQuickHold);
+  for (const eventName of ["pointerup", "pointercancel", "pointerleave"]) {
+    nodes.executeQuickBuy.addEventListener(eventName, cancelQuickHold);
+  }
+  nodes.executeQuickBuy.addEventListener("keydown", (event) => {
+    if (event.key === " " || event.key === "Enter") startQuickHold(event);
+  });
+  nodes.executeQuickBuy.addEventListener("keyup", cancelQuickHold);
+  nodes.executeQuickBuy.addEventListener("contextmenu", (event) => event.preventDefault());
+}
 if (isPanel && window.parent !== window) {
   document.addEventListener("dblclick", (event) => {
     if (event.target.closest?.("a, button, select")) return;
@@ -1937,9 +2671,20 @@ window.addEventListener("resize", () => {
     drawCurrentStockSparkline();
   }, 100);
 });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    window.clearTimeout(state.bookTimer);
+  } else if (!isPanel) {
+    void loadOrderBook({ quiet: true });
+  }
+});
 
 nodes.name.textContent = requestedName || "可转债";
 nodes.code.textContent = requestedCode;
 nodes.intradayDaysSelect.value = String(state.intradayDays);
 void loadBondMetadata();
+if (!isPanel) {
+  void loadBondTradingCapabilities();
+  void loadOrderBook();
+}
 setView(state.view, { updateUrl: false, force: true });

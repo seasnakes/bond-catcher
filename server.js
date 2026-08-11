@@ -151,6 +151,14 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (url.pathname === "/api/miniqmt/order-book") {
+      const query = new URLSearchParams();
+      const code = url.searchParams.get("code");
+      if (code) query.set("code", code);
+      await handleMiniQmtApi(`/order-book?${query}`, response);
+      return;
+    }
+
     if (url.pathname === "/api/miniqmt/trading") {
       await handleMiniQmtApi("/trading", response, 20_000);
       return;

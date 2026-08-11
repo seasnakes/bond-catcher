@@ -121,6 +121,7 @@
         <article><span id="eventCountLabel">今日信号</span><strong id="eventCount">-</strong></article>
       </section>
 
+      <div class="bond-chart-layout">
       <section class="chart-card">
         <div id="intradayLegend" class="chart-legend">
           <span><i class="legend-price"></i>价格</span>
@@ -128,7 +129,18 @@
           <span><i class="legend-previous"></i>昨收</span>
           <span><i class="legend-purple"></i>紫线</span>
           <span><i class="legend-green"></i>绿线</span>
-          <span class="legend-note">移动鼠标查看分钟详情</span>
+          <span id="intradayLegendNote" class="legend-note">移动鼠标查看分钟详情</span>
+          <details id="panelMetricControls" class="panel-metric-controls">
+            <summary>指标</summary>
+            <div class="panel-metric-menu" role="group" aria-label="选择面板指标">
+              <label><input type="checkbox" data-panel-metric="price" checked disabled />价格</label>
+              <label><input type="checkbox" data-panel-metric="volumeRatio" checked />量比</label>
+              <label><input type="checkbox" data-panel-metric="macd" checked />MACD</label>
+              <label><input type="checkbox" data-panel-metric="dark" />暗盘资金</label>
+              <label><input type="checkbox" data-panel-metric="visible" checked />明盘资金</label>
+              <label><input type="checkbox" data-panel-metric="amount" />分钟成交额</label>
+            </div>
+          </details>
         </div>
         <div id="dailyLegend" class="chart-legend" hidden>
           <span><i class="legend-candle-up"></i>上涨K线</span>
@@ -144,6 +156,66 @@
         </div>
       </section>
 
+      <aside id="bondTradePanel" class="bond-trade-panel" aria-label="实时盘口与快速买入">
+        <header class="bond-trade-header">
+          <div>
+            <span class="eyebrow">REALTIME BOOK</span>
+            <strong>五档盘口</strong>
+          </div>
+          <span id="bookStatus" class="book-status">正在读取</span>
+        </header>
+
+        <div class="book-quote-summary">
+          <strong id="bookLastPrice">-</strong>
+          <span id="bookChange">-</span>
+          <small id="bookTime">MiniQMT full_tick</small>
+        </div>
+        <div id="orderBook" class="order-book" aria-label="买卖五档"></div>
+        <div class="book-spread-row">
+          <span>买卖价差</span>
+          <strong id="bookSpread">-</strong>
+          <small>挂量单位：手</small>
+        </div>
+
+        <section class="quick-buy-card" aria-label="快速买入">
+          <header>
+            <div>
+              <strong>快速买入</strong>
+              <span id="quickTradeAccess">当前锁定</span>
+            </div>
+            <button id="quickTradeUnlock" type="button" disabled>开启交易</button>
+          </header>
+          <form id="quickBuyForm">
+            <label>
+              <span>账户</span>
+              <select id="quickBuyAccount" disabled></select>
+            </label>
+            <label>
+              <span>限价</span>
+              <input id="quickBuyPrice" type="number" min="0.001" step="0.001" placeholder="0.000" disabled />
+            </label>
+            <div id="quickPriceButtons" class="quick-price-buttons" aria-label="快捷价格">
+              <button type="button" data-price="bid1" disabled>买一</button>
+              <button type="button" data-price="last" disabled>现价</button>
+              <button type="button" data-price="ask1" class="is-active" disabled>卖一</button>
+            </div>
+            <label>
+              <span>数量</span>
+              <input id="quickBuyVolume" type="number" min="10" step="10" value="10" disabled />
+            </label>
+            <div id="quickVolumeButtons" class="quick-volume-buttons" aria-label="快捷数量">
+              <button type="button" data-volume="10" class="is-active" disabled>10张</button>
+              <button type="button" data-volume="30" disabled>30张</button>
+              <button type="button" data-volume="50" disabled>50张</button>
+              <button type="button" data-volume="100" disabled>100张</button>
+            </div>
+            <button id="quickBuyPreview" class="quick-buy-preview" type="submit" disabled>预览买入</button>
+          </form>
+          <p id="quickTradeMessage" class="quick-trade-message">本机解锁后可用；仍需核对并长按确认。</p>
+        </section>
+      </aside>
+      </div>
+
       <section class="events-card">
         <header>
           <div>
@@ -155,6 +227,41 @@
         <div id="eventList" class="event-list"></div>
       </section>
     </main>
+
+    <dialog id="bondTradeUnlockDialog" class="bond-trade-dialog">
+      <form id="bondTradeUnlockForm">
+        <header>
+          <h2>开启本机实盘交易</h2>
+          <button id="closeBondTradeUnlock" type="button" aria-label="关闭">×</button>
+        </header>
+        <p>解锁维持10分钟。请输入确认语：</p>
+        <code id="bondUnlockPhrase">开启实盘交易</code>
+        <input id="bondUnlockInput" autocomplete="off" placeholder="完整输入确认语" />
+        <p id="bondUnlockMessage" class="bond-dialog-message"></p>
+        <footer>
+          <button id="cancelBondTradeUnlock" type="button">取消</button>
+          <button id="confirmBondTradeUnlock" class="is-danger" type="submit">确认开启</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog id="bondTradeConfirmDialog" class="bond-trade-dialog bond-trade-confirm-dialog">
+      <form id="bondTradeConfirmForm">
+        <header>
+          <h2>确认快速买入</h2>
+          <button id="closeBondTradeConfirm" type="button" aria-label="关闭">×</button>
+        </header>
+        <div id="bondTradePreviewSummary" class="bond-trade-preview-summary"></div>
+        <p>再次核对价格与数量，然后长按下方按钮1.5秒提交。</p>
+        <p id="bondTradeConfirmMessage" class="bond-dialog-message">预览30秒后失效。</p>
+        <footer>
+          <button id="cancelBondTradeConfirm" type="button">取消</button>
+          <button id="executeQuickBuy" class="is-danger hold-to-submit" type="button" disabled>
+            <span>长按1.5秒提交</span>
+          </button>
+        </footer>
+      </form>
+    </dialog>
     <script src="./bond.js" defer></script>
   </body>
 </html>

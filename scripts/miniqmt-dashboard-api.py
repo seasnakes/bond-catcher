@@ -449,6 +449,81 @@ def quotes_payload(codes_input: str) -> dict[str, Any]:
     )
 
 
+def order_book_payload(code_input: str) -> dict[str, Any]:
+    stored_code = normalize_market_code(code_input)
+    bridge = MONITOR.BridgeClient(
+        f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}",
+        timeout=8.0,
+    )
+    tick = bridge.full_tick([stored_code]).get(stored_code)
+    if not isinstance(tick, dict):
+        raise LookupError(f"{stored_code} 暂无实时盘口")
+
+    def levels(price_key: str, volume_key: str) -> list[dict[str, Any]]:
+        prices = list(tick.get(price_key) or [])[:5]
+        volumes = list(tick.get(volume_key) or [])[:5]
+        output: list[dict[str, Any]] = []
+        for index in range(5):
+            price = finite_or_none(prices[index]) if index < len(prices) else None
+            volume = finite_or_none(volumes[index]) if index < len(volumes) else None
+            output.append(
+                {
+                    "level": index + 1,
+                    "price": price if price is not None and price > 0 else None,
+                    "volume_hands": volume if volume is not None and volume >= 0 else None,
+                    "volume_bonds": volume * 10 if volume is not None and volume >= 0 else None,
+                }
+            )
+        return output
+
+    asks = levels("askPrice", "askVol")
+    bids = levels("bidPrice", "bidVol")
+    last_price = finite_or_none(tick.get("lastPrice"))
+    previous_close = finite_or_none(tick.get("lastClose"))
+    timetag = str(tick.get("timetag") or "")
+    tag_row = bond_tag_row(stored_code)
+    ask_one = asks[0]["price"] if asks else None
+    bid_one = bids[0]["price"] if bids else None
+    return clean_json(
+        {
+            "ok": True,
+            "mode": "read_only",
+            "source": "MiniQMT full_tick",
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "code": stored_code,
+            "name": tag_row.get("name") or stored_code,
+            "date": timetag[:8],
+            "time": timetag[9:17],
+            "timestamp": int(tick.get("time") or 0),
+            "last_price": last_price,
+            "previous_close": previous_close,
+            "change": (
+                (last_price / previous_close - 1) * 100
+                if last_price is not None
+                and last_price > 0
+                and previous_close is not None
+                and previous_close > 0
+                else None
+            ),
+            "open": finite_or_none(tick.get("open")),
+            "high": finite_or_none(tick.get("high")),
+            "low": finite_or_none(tick.get("low")),
+            "amount": finite_or_none(tick.get("amount")) or 0,
+            "volume": finite_or_none(tick.get("volume")) or 0,
+            "up_limit": finite_or_none(tick.get("upStopPrice")),
+            "down_limit": finite_or_none(tick.get("downStopPrice")),
+            "spread": (
+                ask_one - bid_one
+                if ask_one is not None and bid_one is not None
+                else None
+            ),
+            "asks": asks,
+            "bids": bids,
+            "volume_unit": "手（1手=10张）",
+        }
+    )
+
+
 def unwrap_bridge_data(payload: Any) -> Any:
     if isinstance(payload, dict) and "data" in payload:
         return payload.get("data")
@@ -3317,6 +3392,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     (query.get("codes") or [""])[0],
                 )
                 self.send_payload(200, payload)
+                return
+            if parsed.path == "/order-book":
+                self.send_payload(
+                    200,
+                    order_book_payload((query.get("code") or [""])[0]),
+                )
                 return
             if parsed.path == "/trading":
                 self.send_payload(200, trading_payload())
