@@ -8,17 +8,21 @@ import importlib.util
 import json
 import math
 import os
+import queue
 import re
 import sqlite3
 import sys
+import threading
 import time
 import urllib.parse
 import urllib.request
+from contextlib import closing
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo
 
 from trading_execution import TradingError, TradingGuard
 
@@ -74,15 +78,81 @@ FOCUS_EVENT_TYPES = {
 DAILY_CACHE_TTL_SECONDS = 300
 DAILY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 INTRADAY_CACHE_TTL_SECONDS = 300
-INTRADAY_CURRENT_CACHE_TTL_SECONDS = 10
+# The local monitor and live tick path supply the growing current session. The
+# Bridge minute cache is only needed to fill earlier gaps, so refreshing it on
+# every fifth 2-second detail poll adds latency without improving the chart.
+INTRADAY_CURRENT_CACHE_TTL_SECONDS = 60
 INTRADAY_BACKFILL_RETRIES = 3
 INTRADAY_BACKFILL_WAIT_SECONDS = 0.4
 INTRADAY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+INTRADAY_DOWNLOAD_BACKOFF_INITIAL_SECONDS = 30
+INTRADAY_DOWNLOAD_BACKOFF_MAX_SECONDS = 300
+INTRADAY_DOWNLOAD_BACKOFF: dict[str, dict[str, Any]] = {}
+INTRADAY_ASYNC_REFRESH_TIMEOUT_SECONDS = 5.0
+INTRADAY_ASYNC_REFRESH_RETRY_SECONDS = 30.0
+INTRADAY_ASYNC_REFRESH_LOCK = threading.RLock()
+INTRADAY_ASYNC_REFRESH_STATE: dict[str, dict[str, Any]] = {}
+INTRADAY_ASYNC_ACTIVE_KEY: str | None = None
+INTRADAY_BACKFILL_MANUAL_PRIORITY = 0
+INTRADAY_BACKFILL_READ_PRIORITY = 20
+INTRADAY_BACKFILL_AUTOMATIC_PRIORITY = 100
+INTRADAY_BACKFILL_DOWNLOAD_SPACING_SECONDS = 1.0
+INTRADAY_BACKFILL_VERIFY_RETRIES = 3
+INTRADAY_BACKFILL_VERIFY_WAIT_SECONDS = 1.0
+INTRADAY_BACKFILL_MAX_RETRIES = int(
+    os.environ.get("MINIQMT_BACKFILL_MAX_RETRIES", "3")
+)
+INTRADAY_BACKFILL_FAILURE_PAUSE_AFTER = 3
+INTRADAY_BACKFILL_FAILURE_PAUSE_SECONDS = 300.0
+INTRADAY_BACKFILL_AUTOMATIC_START = os.environ.get(
+    "MINIQMT_BACKFILL_AUTOMATIC_START", "15:12:00"
+)
+INTRADAY_BACKFILL_AUTOMATIC_END = os.environ.get(
+    "MINIQMT_BACKFILL_AUTOMATIC_END", "23:30:00"
+)
+INTRADAY_BACKFILL_QUEUE: queue.PriorityQueue[tuple[int, int, str, int]] = (
+    queue.PriorityQueue()
+)
+INTRADAY_BACKFILL_SEQUENCE = 0
+INTRADAY_BACKFILL_WORKER_THREAD: threading.Thread | None = None
+INTRADAY_BACKFILL_SCHEDULER_THREAD: threading.Thread | None = None
+INTRADAY_BACKFILL_STOP_EVENT = threading.Event()
+INTRADAY_BACKFILL_LAST_DOWNLOAD_MONOTONIC = -math.inf
+INTRADAY_BACKFILL_CONSECUTIVE_FAILURES = 0
+INTRADAY_BACKFILL_PAUSED_UNTIL_MONOTONIC = 0.0
+INTRADAY_BACKFILL_POSTCLOSE_SCANNED_DATE = ""
+INTRADAY_BACKFILL_POSTCLOSE_UNIVERSE_DATE = ""
+INTRADAY_BACKFILL_POSTCLOSE_UNIVERSE_CODES: set[str] = set()
+INTRADAY_BACKFILL_STATE_LOADED = False
+INTRADAY_BACKFILL_PERSIST_LOCK = threading.Lock()
+INTRADAY_BACKFILL_CACHE_PERSIST_LOCK = threading.Lock()
+DETAIL_TICK_TIMEOUT_SECONDS = float(
+    os.environ.get("MINIQMT_DETAIL_TICK_TIMEOUT_SECONDS", "0.75")
+)
+HEALTH_STATUS_MAX_AGE_SECONDS = float(
+    os.environ.get("MINIQMT_HEALTH_STATUS_MAX_AGE_SECONDS", "30")
+)
+HEALTH_QUOTE_MAX_AGE_SECONDS = float(
+    os.environ.get("MINIQMT_HEALTH_QUOTE_MAX_AGE_SECONDS", "180")
+)
+CHINA_TIME_ZONE = ZoneInfo("Asia/Shanghai")
 HISTORICAL_VOLUME_CACHE: dict[
     str,
     tuple[float, tuple[float | None, float | None]],
 ] = {}
 FINANCE_ROOT = Path(__file__).resolve().parents[1]
+INTRADAY_BACKFILL_STATE_PATH = Path(
+    os.environ.get(
+        "MINIQMT_BACKFILL_STATE_PATH",
+        FINANCE_ROOT / "runtime" / "intraday-backfill-jobs.json",
+    )
+).expanduser()
+INTRADAY_BACKFILL_CACHE_ROOT = Path(
+    os.environ.get(
+        "MINIQMT_BACKFILL_CACHE_ROOT",
+        INTRADAY_BACKFILL_STATE_PATH.parent / "intraday-backfill-cache",
+    )
+).expanduser()
 TRADING_GUARD = TradingGuard(
     audit_path=FINANCE_ROOT / "runtime" / "trading-audit.jsonl",
 )
@@ -348,19 +418,133 @@ def process_alive(pid: int) -> bool:
         return False
 
 
-def api_health() -> dict[str, Any]:
+def china_now(now: datetime | None = None) -> datetime:
+    value = now or datetime.now(CHINA_TIME_ZONE)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=CHINA_TIME_ZONE)
+    return value.astimezone(CHINA_TIME_ZONE)
+
+
+def market_phase(now: datetime | None = None) -> tuple[str, bool]:
+    current = china_now(now)
+    if current.weekday() >= 5:
+        return "closed", False
+    clock = current.strftime("%H:%M:%S")
+    if "09:15:00" <= clock < "09:30:00":
+        return "auction", True
+    if "09:30:00" <= clock <= "11:30:30":
+        return "morning", True
+    if "11:30:30" < clock < "13:00:00":
+        return "lunch_break", False
+    if "13:00:00" <= clock <= "15:00:30":
+        return "afternoon", True
+    return "closed", False
+
+
+def parse_china_datetime(value: Any) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value or ""))
+    except ValueError:
+        return None
+    return china_now(parsed)
+
+
+def latest_quote_timestamp(database: Path | None) -> datetime | None:
+    if database is None:
+        return None
+    try:
+        with closing(connect_read_only(database)) as connection:
+            row = connection.execute(
+                "SELECT MAX(minute_ms) AS minute_ms FROM minute_observations"
+            ).fetchone()
+    except (OSError, sqlite3.Error):
+        return None
+    minute_ms = int(row["minute_ms"] or 0) if row else 0
+    if minute_ms <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(minute_ms / 1000, CHINA_TIME_ZONE)
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def api_health(now: datetime | None = None) -> dict[str, Any]:
+    current = china_now(now)
     databases = available_databases()
     status = read_json(STATUS_PATH)
     service = read_json(SERVICE_PATH)
     pid = int(service.get("pid") or 0)
     latest = databases[0] if databases else None
-    calendar_date = datetime.now().strftime("%Y%m%d")
+    calendar_date = current.strftime("%Y%m%d")
+    monitor_alive = process_alive(pid)
+    phase, market_data_expected = market_phase(current)
+    status_updated_at = parse_china_datetime(status.get("updated_at"))
+    status_age_seconds = (
+        max(0.0, (current - status_updated_at).total_seconds())
+        if status_updated_at
+        else None
+    )
+    quote_updated_at = latest_quote_timestamp(latest)
+    quote_age_seconds = (
+        max(0.0, (current - quote_updated_at).total_seconds())
+        if quote_updated_at
+        else None
+    )
+    last_returned_codes = max(0, int(status.get("last_returned_codes") or 0))
+    reasons: list[str] = []
+    if latest is None:
+        reasons.append("database_missing")
+    if not monitor_alive:
+        reasons.append("monitor_process_not_running")
+    if not status:
+        reasons.append("monitor_status_missing")
+    elif status.get("status") != "running":
+        reasons.append(f"monitor_status_{status.get('status') or 'unknown'}")
+    if status_age_seconds is None:
+        reasons.append("monitor_status_timestamp_missing")
+    elif status_age_seconds > HEALTH_STATUS_MAX_AGE_SECONDS:
+        reasons.append("monitor_status_stale")
+    if market_data_expected:
+        if latest is None or latest.stem != calendar_date:
+            reasons.append("today_database_missing")
+        if str(status.get("trading_date") or "") != calendar_date:
+            reasons.append("monitor_trading_date_mismatch")
+        if last_returned_codes <= 0:
+            reasons.append("miniqmt_returned_zero_quotes")
+        if phase in {"morning", "afternoon"}:
+            if quote_age_seconds is None:
+                reasons.append("quote_timestamp_missing")
+            elif quote_age_seconds > HEALTH_QUOTE_MAX_AGE_SECONDS:
+                reasons.append("quote_data_stale")
+    ok = not reasons
     return {
-        "ok": bool(latest),
+        "ok": ok,
+        "degraded": not ok,
+        "reason": reasons[0] if reasons else (
+            "healthy" if market_data_expected else "healthy_outside_market_session"
+        ),
+        "reasons": reasons,
         "mode": "read_only",
-        "monitor_alive": process_alive(pid),
+        "monitor_alive": monitor_alive,
         "monitor_pid": pid or None,
         "calendar_date": calendar_date,
+        "market_phase": phase,
+        "market_data_expected": market_data_expected,
+        "last_returned_codes": last_returned_codes,
+        "status_updated_at": (
+            status_updated_at.isoformat(timespec="seconds")
+            if status_updated_at
+            else None
+        ),
+        "status_age_seconds": status_age_seconds,
+        "status_max_age_seconds": HEALTH_STATUS_MAX_AGE_SECONDS,
+        "quote_updated_at": (
+            quote_updated_at.isoformat(timespec="seconds")
+            if quote_updated_at
+            else None
+        ),
+        "quote_age_seconds": quote_age_seconds,
+        "quote_max_age_seconds": HEALTH_QUOTE_MAX_AGE_SECONDS,
         "latest_trading_date": latest.stem if latest else None,
         "latest_database_is_today": bool(
             latest and latest.stem == calendar_date
@@ -429,6 +613,7 @@ def quotes_payload(codes_input: str) -> dict[str, Any]:
                 "previousClose": previous_close,
                 "date": timetag[:8],
                 "time": timetag[9:17],
+                "timetag": timetag,
                 "timestamp": int(tick.get("time") or 0),
                 "source": "MiniQMT full_tick",
             }
@@ -1170,6 +1355,14 @@ def bond_volume_ratio(
         timeout=15.0,
     )
     tick = bridge.full_tick([stored_code]).get(stored_code)
+    return bond_volume_ratio_from_tick(stored_code, trading_date, tick)
+
+
+def bond_volume_ratio_from_tick(
+    stored_code: str,
+    trading_date: str,
+    tick: dict[str, Any] | None,
+) -> tuple[float | None, float | None]:
     if not isinstance(tick, dict):
         return None, None
     if compact_date(tick.get("timetag")) != trading_date:
@@ -1298,21 +1491,6 @@ def stock_daily_closes(
         return list((payload.get("data") or {}).get(stock_code) or [])
 
     rows = fetch_rows()
-    if len(rows) < 30:
-        try:
-            bridge.post(
-                "/api/download/history_data2",
-                {
-                    "stocks": [stock_code],
-                    "period": "1d",
-                    "start_time": start_date,
-                    "end_time": end_date,
-                },
-                timeout=90.0,
-            )
-            rows = fetch_rows()
-        except Exception:
-            pass
     result: list[dict[str, Any]] = []
     for row in rows:
         trading_date = compact_date(row.get("index") or row.get("time"))
@@ -1522,21 +1700,6 @@ def stock_intraday_prices(
         return list((payload.get("data") or {}).get(stock_code) or [])
 
     rows = fetch_rows()
-    if len(rows) < 2:
-        try:
-            bridge.post(
-                "/api/download/history_data2",
-                {
-                    "stocks": [stock_code],
-                    "period": "1m",
-                    "start_time": trading_date,
-                    "end_time": trading_date,
-                },
-                timeout=90.0,
-            )
-            rows = fetch_rows()
-        except Exception:
-            pass
     result: list[dict[str, Any]] = []
     for row in rows:
         compact_time = re.sub(r"\D", "", str(row.get("index") or ""))
@@ -2325,6 +2488,117 @@ def active_index_payload() -> dict[str, Any]:
     return result
 
 
+def local_reference_daily_payload(
+    code_input: str,
+    count_input: int = 30,
+) -> dict[str, Any]:
+    """Build reference daily bars entirely from local monitor minute databases."""
+
+    code = normalize_code(code_input)
+    stored_code = monitor_code(code)
+    count = max(30, min(500, int(count_input or 30)))
+    daily_rows: list[dict[str, Any]] = []
+    errors: list[str] = []
+    query = """
+        WITH selected AS (
+          SELECT minute_ms,open,high,low,close,amount
+          FROM minute_observations
+          WHERE trading_date=? AND code=? AND (
+            substr(minute_time,12,5) BETWEEN '09:30' AND '11:30'
+            OR substr(minute_time,12,5) BETWEEN '13:00' AND '15:00'
+          )
+        )
+        SELECT
+          (SELECT open FROM selected ORDER BY minute_ms LIMIT 1) AS open,
+          MAX(high) AS high,
+          MIN(low) AS low,
+          (SELECT close FROM selected ORDER BY minute_ms DESC LIMIT 1) AS close,
+          COALESCE(SUM(amount),0) AS amount,
+          COUNT(*) AS bar_count,
+          MAX(minute_ms) AS last_minute_ms
+        FROM selected
+    """
+    for database in available_databases():
+        try:
+            with closing(connect_read_only(database)) as connection:
+                row = connection.execute(
+                    query,
+                    (database.stem, stored_code),
+                ).fetchone()
+        except (OSError, sqlite3.Error) as error:
+            errors.append(f"{database.stem}:{type(error).__name__}")
+            continue
+        if not row or int(row["bar_count"] or 0) <= 0:
+            continue
+        open_price = finite_or_none(row["open"])
+        high = finite_or_none(row["high"])
+        low = finite_or_none(row["low"])
+        close = finite_or_none(row["close"])
+        if not all(
+            value is not None and value > 0
+            for value in (open_price, high, low, close)
+        ):
+            continue
+        daily_rows.append(
+            {
+                "date": database.stem,
+                "time": int(row["last_minute_ms"] or 0),
+                "open": open_price,
+                "high": high,
+                "low": low,
+                "close": close,
+                "volume": 0,
+                "amount": finite_or_none(row["amount"]) or 0,
+                "previous_close": None,
+                "change": None,
+                "suspend": 0,
+                "bar_count": int(row["bar_count"] or 0),
+            }
+        )
+
+    daily_rows.sort(key=lambda item: item["date"])
+    daily_rows = daily_rows[-count:]
+    for index, row in enumerate(daily_rows):
+        previous_close = (
+            finite_or_none(daily_rows[index - 1]["close"])
+            if index > 0
+            else None
+        )
+        row["previous_close"] = previous_close
+        row["change"] = (
+            (float(row["close"]) / previous_close - 1) * 100
+            if previous_close is not None and previous_close > 0
+            else None
+        )
+    if not daily_rows:
+        raise LookupError(f"本地监控数据库没有{stored_code}的参考日线")
+
+    return clean_json(
+        {
+            "ok": True,
+            "mode": "read_only",
+            "source": "本地监控分钟聚合",
+            "quality": "aggregated_from_local_minute_observations",
+            "reference_only": True,
+            "local_only": True,
+            "code": code,
+            "monitor_code": stored_code,
+            "tags": bond_tags(stored_code),
+            "count": len(daily_rows),
+            "requested_count": count,
+            "start_date": daily_rows[0]["date"],
+            "end_date": daily_rows[-1]["date"],
+            "available_dates": [row["date"] for row in daily_rows],
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "download_error": None,
+            "live_tick_error": None,
+            "database_errors": errors,
+            "cached": False,
+            "rows": daily_rows,
+        }
+    )
+
+
 def daily_payload(code_input: str, count_input: int = 120) -> dict[str, Any]:
     code = normalize_code(code_input)
     count = max(30, min(500, int(count_input or 120)))
@@ -2342,20 +2616,10 @@ def daily_payload(code_input: str, count_input: int = 120) -> dict[str, Any]:
         f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}",
         timeout=30.0,
     )
-    download_error = ""
-    try:
-        bridge.post(
-            "/api/download/history_data2",
-            {
-                "stocks": [stored_code],
-                "period": "1d",
-                "start_time": start_time,
-                "end_time": end_time,
-            },
-            timeout=90.0,
-        )
-    except Exception as error:
-        download_error = f"{type(error).__name__}: {error}"
+    # Read the cache already maintained by MiniQMT. Interactive dashboard GETs
+    # must never enqueue history_data2 because the Bridge serializes xtdata and
+    # a single cold download can stall every live quote and detail request.
+    download_error = "interactive_history_download_disabled"
 
     payload = bridge.get(
         "/api/market/market_data_ex",
@@ -2534,6 +2798,106 @@ def previous_close_for_date(
     return None, None
 
 
+def intraday_download_backoff_state(
+    cache_key: str,
+    now: float | None = None,
+) -> dict[str, Any]:
+    current = time.monotonic() if now is None else float(now)
+    state = INTRADAY_DOWNLOAD_BACKOFF.get(cache_key) or {}
+    retry_at = float(state.get("retry_at") or 0)
+    return {
+        **state,
+        "active": retry_at > current,
+        "retry_in_seconds": max(0.0, retry_at - current),
+    }
+
+
+def record_intraday_download_failure(
+    cache_key: str,
+    error: str,
+    now: float | None = None,
+) -> dict[str, Any]:
+    current = time.monotonic() if now is None else float(now)
+    previous = INTRADAY_DOWNLOAD_BACKOFF.get(cache_key) or {}
+    failures = int(previous.get("failures") or 0) + 1
+    delay = min(
+        INTRADAY_DOWNLOAD_BACKOFF_MAX_SECONDS,
+        INTRADAY_DOWNLOAD_BACKOFF_INITIAL_SECONDS * (2 ** (failures - 1)),
+    )
+    state = {
+        "failures": failures,
+        "last_error": str(error or "minute_data_incomplete"),
+        "retry_at": current + delay,
+        "delay_seconds": delay,
+    }
+    INTRADAY_DOWNLOAD_BACKOFF[cache_key] = state
+    return {**state, "active": True, "retry_in_seconds": float(delay)}
+
+
+def clear_intraday_download_backoff(cache_key: str) -> None:
+    INTRADAY_DOWNLOAD_BACKOFF.pop(cache_key, None)
+
+
+def fetch_bridge_minute_rows(
+    bridge: Any,
+    stored_code: str,
+    trading_date: str,
+    timeout: float = 60.0,
+) -> tuple[list[dict[str, Any]], float | None]:
+    payload = bridge.get(
+        "/api/market/market_data_ex",
+        {
+            "stocks": stored_code,
+            "period": "1m",
+            "start_time": f"{trading_date}093000",
+            "end_time": f"{trading_date}150000",
+            "count": "-1",
+            "dividend_type": "none",
+            "fill_data": "false",
+        },
+        timeout=timeout,
+    )
+    raw_rows = list((payload.get("data") or {}).get(stored_code) or [])
+    rows: list[dict[str, Any]] = []
+    previous_close = None
+    for raw in raw_rows:
+        compact_time = str(raw.get("index") or "")
+        if not compact_time.startswith(trading_date):
+            continue
+        open_price = finite_or_none(raw.get("open"))
+        high = finite_or_none(raw.get("high"))
+        low = finite_or_none(raw.get("low"))
+        close = finite_or_none(raw.get("close"))
+        if not all(
+            value is not None and value > 0
+            for value in (open_price, high, low, close)
+        ):
+            continue
+        if previous_close is None:
+            previous_close = finite_or_none(raw.get("preClose"))
+        try:
+            minute_time = datetime.strptime(
+                compact_time[:14],
+                "%Y%m%d%H%M%S",
+            ).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+        rows.append(
+            {
+                "minute_ms": int(raw.get("time") or 0),
+                "minute_time": minute_time,
+                "open": open_price,
+                "high": high,
+                "low": low,
+                "close": close,
+                "volume": finite_or_none(raw.get("volume")) or 0,
+                "amount": finite_or_none(raw.get("amount")) or 0,
+            }
+        )
+    rows.sort(key=lambda row: (row["minute_ms"], row["minute_time"]))
+    return rows, previous_close
+
+
 def historical_minute_rows(
     stored_code: str,
     trading_date: str,
@@ -2541,6 +2905,10 @@ def historical_minute_rows(
     if not re.fullmatch(r"\d{8}", trading_date):
         raise ValueError("历史分时日期必须为YYYYMMDD")
     cache_key = f"{stored_code}:{trading_date}"
+    # The worker and the read-only detail endpoint share this cache.  Loading
+    # the disk copy here is important after a dashboard restart: a ready job
+    # without its rows would otherwise look complete but render another gap.
+    intraday_cache_snapshot(stored_code, trading_date)
     cached = INTRADAY_CACHE.get(cache_key)
     is_current_day = trading_date == datetime.now().strftime("%Y%m%d")
     cache_ttl = (
@@ -2548,136 +2916,1458 @@ def historical_minute_rows(
         if is_current_day
         else INTRADAY_CACHE_TTL_SECONDS
     )
-    if (
-        cached
-        and time.monotonic() - cached[0] < cache_ttl
-        and not minute_rows_need_backfill(list(cached[1]["rows"]), trading_date)
-    ):
+    if cached and time.monotonic() - cached[0] < cache_ttl:
         cached_payload = cached[1]
+        cached_needs_backfill = minute_rows_need_backfill(
+            list(cached_payload["rows"]),
+            trading_date,
+        )
+        partial_note = " · 部分缓存" if cached_needs_backfill else " · 缓存"
         return (
             list(cached_payload["rows"]),
             finite_or_none(cached_payload.get("previous_close")),
             cached_payload.get("previous_close_date"),
-            "MiniQMT 1m · 缓存",
+            f"MiniQMT 1m{partial_note}",
+        )
+
+    # Interactive historical views are cache-only during the realtime session.
+    # All history_data2 writes are owned by the serialized maintenance queue.
+    allowed, wait_reason = intraday_download_permission(trading_date)
+    if not allowed:
+        if cached and cached[1].get("rows"):
+            cached_payload = cached[1]
+            return (
+                list(cached_payload["rows"]),
+                finite_or_none(cached_payload.get("previous_close")),
+                cached_payload.get("previous_close_date"),
+                f"MiniQMT 1m · 上次缓存（{wait_reason}）",
+            )
+        raise LookupError(
+            f"{stored_code} 在 {trading_date} 的MiniQMT分钟缓存暂不可用："
+            f"{wait_reason}"
         )
 
     bridge = MONITOR.BridgeClient(
         f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}",
         timeout=30.0,
     )
-    download_error = ""
     try:
-        bridge.download_minute_bars([stored_code], trading_date, timeout=90.0)
-    except Exception as error:
-        download_error = f"{type(error).__name__}: {error}"
-    rows: list[dict[str, Any]] = []
-    previous_close = None
-    for attempt in range(INTRADAY_BACKFILL_RETRIES):
-        payload = bridge.get(
-            "/api/market/market_data_ex",
-            {
-                "stocks": stored_code,
-                "period": "1m",
-                "start_time": f"{trading_date}093000",
-                "end_time": f"{trading_date}150000",
-                "count": "-1",
-                "dividend_type": "none",
-                "fill_data": "false",
-            },
-            timeout=60.0,
+        rows, previous_close = fetch_bridge_minute_rows(
+            bridge,
+            stored_code,
+            trading_date,
+            timeout=INTRADAY_ASYNC_REFRESH_TIMEOUT_SECONDS,
         )
-        raw_rows = list((payload.get("data") or {}).get(stored_code) or [])
-        rows = []
-        previous_close = None
-        for raw in raw_rows:
-            compact_time = str(raw.get("index") or "")
-            if not compact_time.startswith(trading_date):
-                continue
-            open_price = finite_or_none(raw.get("open"))
-            high = finite_or_none(raw.get("high"))
-            low = finite_or_none(raw.get("low"))
-            close = finite_or_none(raw.get("close"))
-            if not all(
-                value is not None and value > 0
-                for value in (open_price, high, low, close)
-            ):
-                continue
-            if previous_close is None:
-                previous_close = finite_or_none(raw.get("preClose"))
-            try:
-                minute_time = datetime.strptime(
-                    compact_time[:14],
-                    "%Y%m%d%H%M%S",
-                ).strftime("%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                continue
-            rows.append(
-                {
-                    "minute_ms": int(raw.get("time") or 0),
-                    "minute_time": minute_time,
-                    "open": open_price,
-                    "high": high,
-                    "low": low,
-                    "close": close,
-                    "volume": finite_or_none(raw.get("volume")) or 0,
-                    "amount": finite_or_none(raw.get("amount")) or 0,
-                }
+    except Exception as error:
+        fetch_error = f"{type(error).__name__}: {error}"
+        if cached and cached[1].get("rows"):
+            cached_payload = cached[1]
+            return (
+                list(cached_payload["rows"]),
+                finite_or_none(cached_payload.get("previous_close")),
+                cached_payload.get("previous_close_date"),
+                "MiniQMT 1m · 上次缓存（读取失败）",
             )
-        rows.sort(key=lambda row: (row["minute_ms"], row["minute_time"]))
-        if not minute_rows_need_backfill(rows, trading_date):
-            break
-        if attempt + 1 < INTRADAY_BACKFILL_RETRIES:
-            time.sleep(INTRADAY_BACKFILL_WAIT_SECONDS * (attempt + 1))
-            try:
-                bridge.download_minute_bars(
-                    [stored_code],
-                    trading_date,
-                    timeout=90.0,
-                )
-            except Exception as error:
-                download_error = f"{type(error).__name__}: {error}"
+        raise LookupError(
+            f"{stored_code} 在 {trading_date} 的分钟数据读取失败：{fetch_error}"
+        ) from error
+
     if not rows:
-        detail = f"；下载错误：{download_error}" if download_error else ""
-        raise LookupError(f"{stored_code} 在 {trading_date} 没有分钟数据{detail}")
+        if cached and cached[1].get("rows"):
+            cached_payload = cached[1]
+            INTRADAY_CACHE[cache_key] = (time.monotonic(), cached_payload)
+            return (
+                list(cached_payload["rows"]),
+                finite_or_none(cached_payload.get("previous_close")),
+                cached_payload.get("previous_close_date"),
+                "MiniQMT 1m · 上次缓存（空缓存响应）",
+            )
+        raise LookupError(f"{stored_code} 在 {trading_date} 没有MiniQMT分钟缓存")
 
     cached_payload = {
         "rows": rows,
         "previous_close": previous_close,
         "previous_close_date": None,
     }
-    if minute_rows_need_backfill(rows, trading_date):
-        INTRADAY_CACHE.pop(cache_key, None)
+    needs_backfill = minute_rows_need_backfill(rows, trading_date)
+    INTRADAY_CACHE[cache_key] = (time.monotonic(), cached_payload)
+    persist_intraday_cache_payload(
+        stored_code,
+        trading_date,
+        cached_payload,
+    )
+    if not needs_backfill:
+        clear_intraday_download_backoff(cache_key)
+    source = "MiniQMT 1m · 部分缓存" if needs_backfill else "MiniQMT 1m"
+    return rows, previous_close, None, source
+
+
+def intraday_cache_snapshot(
+    stored_code: str,
+    trading_date: str,
+) -> dict[str, Any]:
+    cache_key = f"{stored_code}:{trading_date}"
+    cached = INTRADAY_CACHE.get(cache_key)
+    if not cached:
+        persisted = load_persisted_intraday_cache(stored_code, trading_date)
+        if persisted:
+            age_seconds = max(
+                0.0,
+                time.time() - float(persisted.get("saved_at_epoch") or time.time()),
+            )
+            INTRADAY_CACHE[cache_key] = (
+                time.monotonic() - age_seconds,
+                {
+                    "rows": list(persisted.get("rows") or []),
+                    "previous_close": persisted.get("previous_close"),
+                    "previous_close_date": persisted.get("previous_close_date"),
+                },
+            )
+            cached = INTRADAY_CACHE[cache_key]
+    if not cached:
+        return {
+            "rows": [],
+            "previous_close": None,
+            "previous_close_date": None,
+            "age_seconds": None,
+            "fresh": False,
+        }
+    age_seconds = max(0.0, time.monotonic() - float(cached[0]))
+    payload = cached[1]
+    return {
+        "rows": list(payload.get("rows") or []),
+        "previous_close": finite_or_none(payload.get("previous_close")),
+        "previous_close_date": payload.get("previous_close_date"),
+        "age_seconds": age_seconds,
+        "fresh": age_seconds < INTRADAY_CURRENT_CACHE_TTL_SECONDS,
+    }
+
+
+def intraday_backfill_cache_path(stored_code: str, trading_date: str) -> Path:
+    if not MARKET_CODE_PATTERN.fullmatch(stored_code):
+        raise ValueError("分钟缓存代码无效")
+    if not re.fullmatch(r"\d{8}", trading_date):
+        raise ValueError("分钟缓存日期无效")
+    return INTRADAY_BACKFILL_CACHE_ROOT / trading_date / f"{stored_code}.json"
+
+
+def load_persisted_intraday_cache(
+    stored_code: str,
+    trading_date: str,
+) -> dict[str, Any] | None:
+    try:
+        path = intraday_backfill_cache_path(stored_code, trading_date)
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        rows = raw.get("rows") if isinstance(raw, dict) else None
+        if not isinstance(rows, list):
+            return None
+        valid_rows = [row for row in rows if isinstance(row, dict)]
+        if not valid_rows:
+            return None
+        return {
+            "rows": merge_minute_rows(valid_rows),
+            "previous_close": finite_or_none(raw.get("previous_close")),
+            "previous_close_date": raw.get("previous_close_date"),
+            "saved_at_epoch": float(
+                raw.get("saved_at_epoch") or path.stat().st_mtime
+            ),
+        }
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def persist_intraday_cache_payload(
+    stored_code: str,
+    trading_date: str,
+    payload: dict[str, Any],
+) -> None:
+    rows = [row for row in payload.get("rows") or [] if isinstance(row, dict)]
+    if not rows:
+        return
+    path = intraday_backfill_cache_path(stored_code, trading_date)
+    saved_at_epoch = time.time()
+    serializable = {
+        "version": 1,
+        "stored_code": stored_code,
+        "trading_date": trading_date,
+        "saved_at_epoch": saved_at_epoch,
+        "previous_close": finite_or_none(payload.get("previous_close")),
+        "previous_close_date": payload.get("previous_close_date"),
+        "rows": rows,
+    }
+    with INTRADAY_BACKFILL_CACHE_PERSIST_LOCK:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(
+            f"{path.name}.{os.getpid()}.{threading.get_ident()}.{time.time_ns()}.tmp"
+        )
+        temporary.write_text(
+            json.dumps(serializable, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+
+
+INTRADAY_BACKFILL_WORKING_STATUSES = {
+    "queued",
+    "reading_cache",
+    "downloading",
+    "verifying",
+    "persisting",
+    "waiting_for_market_close",
+    "waiting_for_bridge_cooldown",
+}
+
+
+def intraday_backfill_cache_key(stored_code: str, trading_date: str) -> str:
+    return f"{stored_code}:{trading_date}"
+
+
+def intraday_backfill_now_text(now: datetime | None = None) -> str:
+    return china_now(now).isoformat(timespec="seconds")
+
+
+def intraday_backfill_persistable_state(state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in state.items()
+        if key not in {"retry_at", "queued_internal"}
+    }
+
+
+def persist_intraday_backfill_state() -> None:
+    with INTRADAY_BACKFILL_PERSIST_LOCK:
+        with INTRADAY_ASYNC_REFRESH_LOCK:
+            payload = {
+                "version": 2,
+                "saved_at": intraday_backfill_now_text(),
+                "postclose_scanned_date": INTRADAY_BACKFILL_POSTCLOSE_SCANNED_DATE,
+                "postclose_universe_date": (
+                    INTRADAY_BACKFILL_POSTCLOSE_UNIVERSE_DATE
+                ),
+                "postclose_universe_codes": sorted(
+                    INTRADAY_BACKFILL_POSTCLOSE_UNIVERSE_CODES
+                ),
+                "active_key": INTRADAY_ASYNC_ACTIVE_KEY,
+                "jobs": {
+                    key: intraday_backfill_persistable_state(value)
+                    for key, value in INTRADAY_ASYNC_REFRESH_STATE.items()
+                },
+            }
+        path = INTRADAY_BACKFILL_STATE_PATH
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(
+            f"{path.name}.{os.getpid()}.{threading.get_ident()}.{time.time_ns()}.tmp"
+        )
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+
+
+def load_intraday_backfill_state() -> None:
+    global INTRADAY_BACKFILL_POSTCLOSE_SCANNED_DATE
+    global INTRADAY_BACKFILL_POSTCLOSE_UNIVERSE_DATE
+    global INTRADAY_BACKFILL_POSTCLOSE_UNIVERSE_CODES
+    global INTRADAY_BACKFILL_STATE_LOADED
+    with INTRADAY_ASYNC_REFRESH_LOCK:
+        if INTRADAY_BACKFILL_STATE_LOADED:
+            return
+        INTRADAY_BACKFILL_STATE_LOADED = True
+    payload = read_json(INTRADAY_BACKFILL_STATE_PATH)
+    jobs = payload.get("jobs") if isinstance(payload, dict) else {}
+    interrupted = False
+    with INTRADAY_ASYNC_REFRESH_LOCK:
+        INTRADAY_BACKFILL_POSTCLOSE_SCANNED_DATE = str(
+            payload.get("postclose_scanned_date") or ""
+        )
+        INTRADAY_BACKFILL_POSTCLOSE_UNIVERSE_DATE = str(
+            payload.get("postclose_universe_date") or ""
+        )
+        INTRADAY_BACKFILL_POSTCLOSE_UNIVERSE_CODES = {
+            str(code)
+            for code in payload.get("postclose_universe_codes") or []
+            if MARKET_CODE_PATTERN.fullmatch(str(code))
+        }
+        for cache_key, raw in (jobs or {}).items():
+            if not isinstance(raw, dict):
+                continue
+            state = dict(raw)
+            if str(state.get("status") or "") in (
+                INTRADAY_BACKFILL_WORKING_STATUSES
+                - {"waiting_for_market_close", "waiting_for_bridge_cooldown"}
+            ):
+                state.update(
+                    {
+                        "status": "interrupted",
+                        "active": False,
+                        "queued": False,
+                        "retryable": True,
+                        "error": "dashboard_service_restarted_during_backfill",
+                        "updated_at": intraday_backfill_now_text(),
+                    }
+                )
+                interrupted = True
+            INTRADAY_ASYNC_REFRESH_STATE[str(cache_key)] = state
+    if interrupted:
+        persist_intraday_backfill_state()
+
+
+def intraday_backfill_retry_seconds(state: dict[str, Any]) -> float:
+    retry_epoch = float(state.get("retry_at_epoch") or 0)
+    if retry_epoch > 0:
+        return max(0.0, retry_epoch - time.time())
+    retry_at = float(state.get("retry_at") or 0)
+    return max(0.0, retry_at - time.monotonic())
+
+
+def intraday_backfill_status_for_key(cache_key: str) -> dict[str, Any]:
+    with INTRADAY_ASYNC_REFRESH_LOCK:
+        state = dict(INTRADAY_ASYNC_REFRESH_STATE.get(cache_key) or {})
+        active_key = INTRADAY_ASYNC_ACTIVE_KEY
+        queued_keys = [
+            key
+            for key, value in sorted(
+                INTRADAY_ASYNC_REFRESH_STATE.items(),
+                key=lambda item: (
+                    int(item[1].get("priority", 999)),
+                    int(item[1].get("sequence") or 0),
+                ),
+            )
+            if str(value.get("status") or "") == "queued"
+        ]
+    internal_status = str(state.get("status") or "idle")
+    if internal_status in {
+        "reading_cache",
+        "downloading",
+        "verifying",
+        "persisting",
+    }:
+        public_status = "running"
+    elif internal_status in {
+        "waiting_for_market_close",
+        "waiting_for_bridge_cooldown",
+    }:
+        public_status = "queued"
     else:
-        INTRADAY_CACHE[cache_key] = (time.monotonic(), cached_payload)
-    return rows, previous_close, None, "MiniQMT 1m"
+        public_status = internal_status
+    row_count_before = int(state.get("row_count_before") or 0)
+    row_count_after = int(state.get("row_count") or 0)
+    expected = int(state.get("expected_bar_count") or 0)
+    return {
+        **state,
+        "job_id": cache_key,
+        "date": str(state.get("trading_date") or ""),
+        "status": public_status,
+        "phase": internal_status,
+        "active": active_key == cache_key,
+        "queued": public_status == "queued",
+        "queue_position": (
+            queued_keys.index(cache_key) + 1
+            if internal_status == "queued" and cache_key in queued_keys
+            else None
+        ),
+        "row_count": row_count_after,
+        "row_count_before": row_count_before,
+        "row_count_after": row_count_after,
+        "expected_bar_count": expected,
+        "missing_before": max(0, expected - row_count_before),
+        "missing_after": max(0, expected - row_count_after),
+        "error": str(state.get("error") or ""),
+        "retry_in_seconds": intraday_backfill_retry_seconds(state),
+        "poll_after_seconds": (
+            1 if public_status in {"queued", "running"} else 3
+        ),
+    }
+
+
+def intraday_async_refresh_status(cache_key: str) -> dict[str, Any]:
+    state = intraday_backfill_status_for_key(cache_key)
+    raw_status = state["phase"]
+    if raw_status in {
+        "waiting_for_market_close",
+        "waiting_for_bridge_cooldown",
+    }:
+        # Waiting for the maintenance window is not active work.  The browser
+        # should stop its fast loop and let the daemon scheduler resume it.
+        public_status = "deferred"
+    elif raw_status in INTRADAY_BACKFILL_WORKING_STATUSES:
+        public_status = "pending"
+    elif raw_status == "interrupted":
+        public_status = "failed"
+    else:
+        public_status = raw_status
+    return {
+        "status": public_status,
+        "job_status": raw_status,
+        "active": bool(state["active"]),
+        "row_count": int(state["row_count"]),
+        "error": str(state["error"]),
+        "retry_in_seconds": float(state["retry_in_seconds"]),
+        "wait_reason": str(state.get("wait_reason") or ""),
+        "retry_count": int(state.get("retry_count") or 0),
+    }
+
+
+def intraday_monitor_active(now: datetime | None = None) -> bool:
+    current = china_now(now)
+    service = read_json(SERVICE_PATH)
+    status = read_json(STATUS_PATH)
+    return bool(
+        process_alive(int(service.get("pid") or 0))
+        and str(status.get("status") or "") == "running"
+        and str(status.get("trading_date") or "") == current.strftime("%Y%m%d")
+    )
+
+
+def intraday_download_permission(
+    trading_date: str,
+    now: datetime | None = None,
+) -> tuple[bool, str]:
+    current = china_now(now)
+    if intraday_monitor_active(current):
+        return False, "waiting_for_monitor_to_stop"
+    calendar_date = current.strftime("%Y%m%d")
+    if trading_date > calendar_date:
+        return False, "future_trading_date"
+    phase, _ = market_phase(current)
+    if phase != "closed":
+        return False, "waiting_for_market_close"
+    clock = current.strftime("%H:%M:%S")
+    if clock < INTRADAY_BACKFILL_AUTOMATIC_START:
+        return False, "waiting_for_1512"
+    if clock > INTRADAY_BACKFILL_AUTOMATIC_END:
+        return False, "maintenance_window_closed"
+    return True, "maintenance_window"
+
+
+def intraday_automatic_window_open(now: datetime | None = None) -> bool:
+    current = china_now(now)
+    clock = current.strftime("%H:%M:%S")
+    return bool(
+        current.weekday() < 5
+        and INTRADAY_BACKFILL_AUTOMATIC_START
+        <= clock
+        <= INTRADAY_BACKFILL_AUTOMATIC_END
+    )
+
+
+def merge_intraday_backfill_cache(
+    stored_code: str,
+    trading_date: str,
+    rows: list[dict[str, Any]],
+    previous_close: float | None,
+) -> list[dict[str, Any]]:
+    cache_key = intraday_backfill_cache_key(stored_code, trading_date)
+    with INTRADAY_ASYNC_REFRESH_LOCK:
+        cached = INTRADAY_CACHE.get(cache_key)
+        payload = cached[1] if cached else {}
+        existing_rows = list(payload.get("rows") or [])
+        combined_rows = merge_minute_rows(existing_rows, rows)
+        merged_payload = {
+            "rows": combined_rows,
+            "previous_close": (
+                previous_close
+                or finite_or_none(payload.get("previous_close"))
+            ),
+            "previous_close_date": payload.get("previous_close_date"),
+        }
+        INTRADAY_CACHE[cache_key] = (time.monotonic(), merged_payload)
+    # Keep the completed/partial rows available across API restarts.  This is
+    # deliberately separate from the monitor SQLite database, which remains
+    # read-only for the dashboard process.
+    persist_intraday_cache_payload(stored_code, trading_date, merged_payload)
+    return combined_rows
+
+
+def update_intraday_backfill_state(
+    cache_key: str,
+    generation: int,
+    **updates: Any,
+) -> bool:
+    with INTRADAY_ASYNC_REFRESH_LOCK:
+        current = INTRADAY_ASYNC_REFRESH_STATE.get(cache_key) or {}
+        if int(current.get("generation") or 0) != generation:
+            return False
+        current.update(updates)
+        current["updated_at"] = intraday_backfill_now_text()
+        INTRADAY_ASYNC_REFRESH_STATE[cache_key] = current
+    persist_intraday_backfill_state()
+    return True
+
+
+def enqueue_intraday_backfill(
+    stored_code: str,
+    trading_date: str,
+    *,
+    requested_by: str,
+    download_requested: bool,
+    priority: int,
+    force: bool = False,
+    expected_generation: int | None = None,
+    expected_status: str = "",
+) -> dict[str, Any]:
+    global INTRADAY_BACKFILL_SEQUENCE
+    load_intraday_backfill_state()
+    cache_key = intraday_backfill_cache_key(stored_code, trading_date)
+    with INTRADAY_ASYNC_REFRESH_LOCK:
+        previous = dict(INTRADAY_ASYNC_REFRESH_STATE.get(cache_key) or {})
+        previous_status = str(previous.get("status") or "idle")
+        if (
+            expected_generation is not None
+            and (
+                int(previous.get("generation") or 0) != int(expected_generation)
+                or (expected_status and previous_status != expected_status)
+            )
+        ):
+            return {
+                **intraday_backfill_status_for_key(cache_key),
+                "deduplicated": True,
+                "stale_candidate": True,
+            }
+        is_manual_upgrade = (
+            requested_by == "manual"
+            and (
+                previous.get("requested_by") != "manual"
+                or not previous.get("download_requested")
+            )
+        )
+        if (
+            not force
+            and not is_manual_upgrade
+            and previous_status in INTRADAY_BACKFILL_WORKING_STATUSES
+        ):
+            return {**intraday_backfill_status_for_key(cache_key), "deduplicated": True}
+        generation = int(previous.get("generation") or 0) + 1
+        INTRADAY_BACKFILL_SEQUENCE += 1
+        sequence = INTRADAY_BACKFILL_SEQUENCE
+        cache_snapshot = intraday_cache_snapshot(stored_code, trading_date)
+        row_count_before = len(cache_snapshot["rows"])
+        expected_bar_count = expected_minute_count(trading_date)
+        state = {
+            **previous,
+            "key": cache_key,
+            "code": stored_code,
+            "trading_date": trading_date,
+            "status": "queued",
+            "active": False,
+            "queued": True,
+            "priority": int(priority),
+            "requested_by": requested_by,
+            "download_requested": bool(download_requested),
+            "generation": generation,
+            "sequence": sequence,
+            "retry_count": (
+                0
+                if requested_by == "manual"
+                else int(previous.get("retry_count") or 0)
+            ),
+            "row_count": int(previous.get("row_count") or 0),
+            "row_count_before": row_count_before,
+            "expected_bar_count": expected_bar_count,
+            "error": "",
+            "retry_at": 0,
+            "retry_at_epoch": 0,
+            "retryable": True,
+            "created_at": previous.get("created_at") or intraday_backfill_now_text(),
+            "updated_at": intraday_backfill_now_text(),
+        }
+        INTRADAY_ASYNC_REFRESH_STATE[cache_key] = state
+        INTRADAY_BACKFILL_QUEUE.put((int(priority), sequence, cache_key, generation))
+    persist_intraday_backfill_state()
+    return {**intraday_backfill_status_for_key(cache_key), "deduplicated": False}
+
+
+def next_intraday_backfill_job(
+    timeout: float = 0.5,
+) -> tuple[str, int, dict[str, Any]] | None:
+    deadline = time.monotonic() + max(0.0, timeout)
+    while not INTRADAY_BACKFILL_STOP_EVENT.is_set():
+        remaining = max(0.0, deadline - time.monotonic())
+        try:
+            _priority, _sequence, cache_key, generation = (
+                INTRADAY_BACKFILL_QUEUE.get(timeout=remaining)
+            )
+        except queue.Empty:
+            return None
+        with INTRADAY_ASYNC_REFRESH_LOCK:
+            state = dict(INTRADAY_ASYNC_REFRESH_STATE.get(cache_key) or {})
+        if (
+            int(state.get("generation") or 0) == generation
+            and str(state.get("status") or "") == "queued"
+        ):
+            return cache_key, generation, state
+        INTRADAY_BACKFILL_QUEUE.task_done()
+        if time.monotonic() >= deadline:
+            return None
+    return None
+
+
+def finish_intraday_backfill_job(
+    cache_key: str,
+    generation: int,
+    status: str,
+    rows: list[dict[str, Any]],
+    *,
+    error: str = "",
+    retry_seconds: float = 0,
+    download_attempted: bool = False,
+    download_succeeded: bool = False,
+    wait_reason: str = "",
+) -> None:
+    global INTRADAY_ASYNC_ACTIVE_KEY
+    now_epoch = time.time()
+    with INTRADAY_ASYNC_REFRESH_LOCK:
+        current = dict(INTRADAY_ASYNC_REFRESH_STATE.get(cache_key) or {})
+    retry_count = int(current.get("retry_count") or 0)
+    if status in {"partial", "failed"}:
+        retry_count += 1
+    retryable = status not in {"ready"} and (
+        status not in {"partial", "failed"}
+        or retry_count < INTRADAY_BACKFILL_MAX_RETRIES
+    )
+    effective_retry_seconds = retry_seconds if retryable else 0
+    updates = {
+        "status": status,
+        "active": False,
+        "queued": False,
+        "row_count": len(rows),
+        "error": error,
+        "wait_reason": wait_reason,
+        "retry_at": (
+            time.monotonic() + effective_retry_seconds
+            if effective_retry_seconds > 0
+            else 0
+        ),
+        "retry_at_epoch": (
+            now_epoch + effective_retry_seconds
+            if effective_retry_seconds > 0
+            else 0
+        ),
+        "retryable": retryable,
+        "retry_count": retry_count,
+        "download_attempted": download_attempted,
+        "download_succeeded": download_succeeded,
+        "completed_at": (
+            intraday_backfill_now_text()
+            if status in {"ready", "partial", "failed"}
+            else ""
+        ),
+    }
+    update_intraday_backfill_state(cache_key, generation, **updates)
+    with INTRADAY_ASYNC_REFRESH_LOCK:
+        if INTRADAY_ASYNC_ACTIVE_KEY == cache_key:
+            INTRADAY_ASYNC_ACTIVE_KEY = None
+    persist_intraday_backfill_state()
+
+
+def record_intraday_backfill_bridge_failure() -> None:
+    global INTRADAY_BACKFILL_CONSECUTIVE_FAILURES
+    global INTRADAY_BACKFILL_PAUSED_UNTIL_MONOTONIC
+    INTRADAY_BACKFILL_CONSECUTIVE_FAILURES += 1
+    if (
+        INTRADAY_BACKFILL_CONSECUTIVE_FAILURES
+        >= INTRADAY_BACKFILL_FAILURE_PAUSE_AFTER
+    ):
+        INTRADAY_BACKFILL_PAUSED_UNTIL_MONOTONIC = (
+            time.monotonic() + INTRADAY_BACKFILL_FAILURE_PAUSE_SECONDS
+        )
+
+
+def clear_intraday_backfill_bridge_failures() -> None:
+    global INTRADAY_BACKFILL_CONSECUTIVE_FAILURES
+    global INTRADAY_BACKFILL_PAUSED_UNTIL_MONOTONIC
+    INTRADAY_BACKFILL_CONSECUTIVE_FAILURES = 0
+    INTRADAY_BACKFILL_PAUSED_UNTIL_MONOTONIC = 0
+
+
+def execute_intraday_backfill_job(
+    cache_key: str,
+    generation: int,
+    state: dict[str, Any],
+) -> None:
+    global INTRADAY_BACKFILL_LAST_DOWNLOAD_MONOTONIC
+    stored_code = str(state.get("code") or "")
+    trading_date = str(state.get("trading_date") or "")
+    download_requested = bool(state.get("download_requested"))
+    existing = intraday_cache_snapshot(stored_code, trading_date)
+    rows: list[dict[str, Any]] = list(existing["rows"])
+    previous_close = finite_or_none(existing.get("previous_close"))
+    read_error = ""
+    update_intraday_backfill_state(
+        cache_key,
+        generation,
+        status="reading_cache",
+        active=True,
+        queued=False,
+        started_at=intraday_backfill_now_text(),
+    )
+    if rows and not minute_rows_need_backfill(rows, trading_date):
+        clear_intraday_download_backoff(cache_key)
+        finish_intraday_backfill_job(
+            cache_key,
+            generation,
+            "ready",
+            rows,
+        )
+        return
+    allowed, wait_reason = intraday_download_permission(trading_date)
+    if (
+        not allowed
+        or (
+            str(state.get("requested_by") or "") != "manual"
+            and not intraday_automatic_window_open()
+        )
+    ):
+        # No queued history task may touch serialized xtdata outside the
+        # maintenance window, including the old cache-only automatic reader.
+        finish_intraday_backfill_job(
+            cache_key,
+            generation,
+            "waiting_for_market_close",
+            rows,
+            wait_reason=(
+                wait_reason if not allowed else "automatic_window_1512_1800"
+            ),
+        )
+        return
+    bridge = MONITOR.BridgeClient(
+        f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}",
+        timeout=INTRADAY_ASYNC_REFRESH_TIMEOUT_SECONDS,
+    )
+    try:
+        fetched_rows, previous_close = fetch_bridge_minute_rows(
+            bridge,
+            stored_code,
+            trading_date,
+            timeout=INTRADAY_ASYNC_REFRESH_TIMEOUT_SECONDS,
+        )
+        rows = merge_intraday_backfill_cache(
+            stored_code,
+            trading_date,
+            fetched_rows,
+            previous_close,
+        )
+    except Exception as error:
+        read_error = f"cache_read:{type(error).__name__}: {error}"
+        rows = list(intraday_cache_snapshot(stored_code, trading_date)["rows"])
+
+    if rows and not minute_rows_need_backfill(rows, trading_date):
+        clear_intraday_download_backoff(cache_key)
+        finish_intraday_backfill_job(
+            cache_key,
+            generation,
+            "ready",
+            rows,
+        )
+        return
+    if not download_requested:
+        finish_intraday_backfill_job(
+            cache_key,
+            generation,
+            "partial" if rows else "failed",
+            rows,
+            error=read_error or ("" if rows else "market_data_ex returned no minute rows"),
+            retry_seconds=INTRADAY_ASYNC_REFRESH_RETRY_SECONDS,
+        )
+        return
+
+    cooldown = max(
+        0.0,
+        INTRADAY_BACKFILL_PAUSED_UNTIL_MONOTONIC - time.monotonic(),
+    )
+    if cooldown > 0:
+        finish_intraday_backfill_job(
+            cache_key,
+            generation,
+            "waiting_for_bridge_cooldown",
+            rows,
+            error="consecutive_bridge_failures",
+            retry_seconds=cooldown,
+            wait_reason="bridge_failure_cooldown",
+        )
+        return
+
+    spacing = max(
+        0.0,
+        INTRADAY_BACKFILL_DOWNLOAD_SPACING_SECONDS
+        - (time.monotonic() - INTRADAY_BACKFILL_LAST_DOWNLOAD_MONOTONIC),
+    )
+    if spacing > 0 and INTRADAY_BACKFILL_STOP_EVENT.wait(spacing):
+        finish_intraday_backfill_job(
+            cache_key,
+            generation,
+            "interrupted",
+            rows,
+            error="service_stopping",
+        )
+        return
+    # Recheck at the last possible moment. The monitor can be restarted, or the
+    # 18:00 boundary can pass, while this job is waiting behind another symbol.
+    allowed, wait_reason = intraday_download_permission(trading_date)
+    if not allowed:
+        finish_intraday_backfill_job(
+            cache_key,
+            generation,
+            "waiting_for_market_close",
+            rows,
+            wait_reason=wait_reason,
+        )
+        return
+    update_intraday_backfill_state(
+        cache_key,
+        generation,
+        status="downloading",
+        download_attempted=True,
+    )
+    row_count_before_download = len(rows)
+    try:
+        download_payload = bridge.download_minute_bars(
+            [stored_code],
+            trading_date,
+            timeout=90.0,
+        )
+        if not isinstance(download_payload, dict):
+            raise RuntimeError("Bridge下载响应不是JSON对象")
+        outer_status = str(download_payload.get("status") or "").lower()
+        if outer_status not in {"ok", "success"}:
+            raise RuntimeError(f"Bridge返回状态：{outer_status or 'empty'}")
+        per_code = download_payload.get("result")
+        if not isinstance(per_code, dict) or stored_code not in per_code:
+            raise RuntimeError(f"Bridge下载响应缺少{stored_code}结果")
+        code_status = str(per_code.get(stored_code) or "").strip()
+        if code_status.lower() not in {"ok", "success"}:
+            raise RuntimeError(
+                f"{stored_code}下载结果：{code_status or 'empty'}"
+            )
+    except Exception as error:
+        record_intraday_backfill_bridge_failure()
+        try:
+            finish_intraday_backfill_job(
+                cache_key,
+                generation,
+                "failed",
+                rows,
+                error=f"download:{type(error).__name__}: {error}",
+                retry_seconds=INTRADAY_ASYNC_REFRESH_RETRY_SECONDS,
+                download_attempted=True,
+            )
+        finally:
+            INTRADAY_BACKFILL_LAST_DOWNLOAD_MONOTONIC = time.monotonic()
+        return
+
+    verification_errors: list[str] = []
+    successful_verifications = 0
+    for _attempt in range(INTRADAY_BACKFILL_VERIFY_RETRIES):
+        update_intraday_backfill_state(
+            cache_key,
+            generation,
+            status="verifying",
+            download_attempted=True,
+            download_succeeded=True,
+        )
+        if INTRADAY_BACKFILL_STOP_EVENT.wait(
+            INTRADAY_BACKFILL_VERIFY_WAIT_SECONDS
+        ):
+            break
+        allowed, wait_reason = intraday_download_permission(trading_date)
+        if not allowed:
+            verification_errors.append(f"verify_blocked:{wait_reason}")
+            break
+        try:
+            fetched_rows, refreshed_previous_close = fetch_bridge_minute_rows(
+                bridge,
+                stored_code,
+                trading_date,
+                timeout=INTRADAY_ASYNC_REFRESH_TIMEOUT_SECONDS,
+            )
+            rows = merge_intraday_backfill_cache(
+                stored_code,
+                trading_date,
+                fetched_rows,
+                refreshed_previous_close or previous_close,
+            )
+        except Exception as error:
+            verification_errors.append(
+                f"verify:{type(error).__name__}: {error}"
+            )
+            continue
+        successful_verifications += 1
+        if rows and not minute_rows_need_backfill(rows, trading_date):
+            break
+
+    incomplete = minute_rows_need_backfill(rows, trading_date)
+    failure_reason = ""
+    if incomplete and successful_verifications == 0:
+        failure_reason = "verification_all_failed"
+    elif incomplete and len(rows) <= row_count_before_download:
+        failure_reason = "no_source_data" if not rows else "download_no_row_growth"
+    if failure_reason == "verification_all_failed":
+        record_intraday_backfill_bridge_failure()
+    else:
+        # A successful verify with no new rows can be legitimate for suspended,
+        # delisted, or otherwise source-empty bonds and must not stop the queue.
+        clear_intraday_backfill_bridge_failures()
+    if failure_reason:
+        verification_errors.append(failure_reason)
+    if not incomplete:
+        clear_intraday_download_backoff(cache_key)
+    try:
+        finish_intraday_backfill_job(
+            cache_key,
+            generation,
+            "partial" if incomplete else "ready",
+            rows,
+            error="; ".join(verification_errors),
+            retry_seconds=(INTRADAY_ASYNC_REFRESH_RETRY_SECONDS if incomplete else 0),
+            download_attempted=True,
+            download_succeeded=failure_reason != "verification_all_failed",
+        )
+    finally:
+        # The next symbol waits at least one full spacing interval after this
+        # task's verification/persistence completes, not after download starts.
+        INTRADAY_BACKFILL_LAST_DOWNLOAD_MONOTONIC = time.monotonic()
+
+
+def _refresh_current_intraday_cache(
+    stored_code: str,
+    trading_date: str,
+) -> None:
+    """Compatibility entry point for one cache-only refresh."""
+    global INTRADAY_ASYNC_ACTIVE_KEY
+    cache_key = intraday_backfill_cache_key(stored_code, trading_date)
+    with INTRADAY_ASYNC_REFRESH_LOCK:
+        state = dict(INTRADAY_ASYNC_REFRESH_STATE.get(cache_key) or {})
+        generation = int(state.get("generation") or 0) + 1
+        state.update(
+            {
+                "key": cache_key,
+                "code": stored_code,
+                "trading_date": trading_date,
+                "status": "reading_cache",
+                "generation": generation,
+                "requested_by": "automatic_read",
+                "download_requested": False,
+            }
+        )
+        INTRADAY_ASYNC_REFRESH_STATE[cache_key] = state
+        INTRADAY_ASYNC_ACTIVE_KEY = cache_key
+    execute_intraday_backfill_job(cache_key, generation, state)
+
+
+def intraday_backfill_worker_loop() -> None:
+    global INTRADAY_ASYNC_ACTIVE_KEY
+    while not INTRADAY_BACKFILL_STOP_EVENT.is_set():
+        job = next_intraday_backfill_job()
+        if job is None:
+            continue
+        cache_key, generation, state = job
+        with INTRADAY_ASYNC_REFRESH_LOCK:
+            INTRADAY_ASYNC_ACTIVE_KEY = cache_key
+        try:
+            execute_intraday_backfill_job(cache_key, generation, state)
+        except Exception as error:  # pragma: no cover - tested via safe helper state
+            # A disk/persistence or unexpected Bridge adapter error must not kill
+            # the only serialized worker. Preserve a retryable in-memory terminal
+            # state even when persisting that state fails too.
+            detail = f"worker:{type(error).__name__}: {error}"
+            try:
+                finish_intraday_backfill_job(
+                    cache_key,
+                    generation,
+                    "failed",
+                    list(intraday_cache_snapshot(
+                        str(state.get("code") or ""),
+                        str(state.get("trading_date") or ""),
+                    )["rows"]),
+                    error=detail,
+                )
+            except Exception as persist_error:
+                with INTRADAY_ASYNC_REFRESH_LOCK:
+                    current = INTRADAY_ASYNC_REFRESH_STATE.get(cache_key) or {}
+                    if int(current.get("generation") or 0) == generation:
+                        current.update(
+                            {
+                                "status": "failed",
+                                "active": False,
+                                "queued": False,
+                                "retryable": True,
+                                "error": detail,
+                                "updated_at": intraday_backfill_now_text(),
+                            }
+                        )
+                        INTRADAY_ASYNC_REFRESH_STATE[cache_key] = current
+                print(
+                    "MiniQMT backfill worker state persistence error: "
+                    f"{persist_error}",
+                    flush=True,
+                )
+            print(f"MiniQMT backfill worker error: {error}", flush=True)
+        finally:
+            with INTRADAY_ASYNC_REFRESH_LOCK:
+                if INTRADAY_ASYNC_ACTIVE_KEY == cache_key:
+                    INTRADAY_ASYNC_ACTIVE_KEY = None
+            INTRADAY_BACKFILL_QUEUE.task_done()
+
+
+def schedule_current_intraday_refresh(
+    stored_code: str,
+    trading_date: str,
+) -> dict[str, Any]:
+    cache_key = intraday_backfill_cache_key(stored_code, trading_date)
+    cache_snapshot = intraday_cache_snapshot(stored_code, trading_date)
+    if cache_snapshot["rows"] and not minute_rows_need_backfill(
+        cache_snapshot["rows"], trading_date
+    ):
+        return {
+            "status": "ready",
+            "job_status": "ready",
+            "row_count": len(cache_snapshot["rows"]),
+            "error": "",
+            "retry_in_seconds": 0,
+        }
+    existing = intraday_backfill_status_for_key(cache_key)
+    if (
+        existing["phase"] in INTRADAY_BACKFILL_WORKING_STATUSES
+        or existing["retry_in_seconds"] > 0
+    ):
+        return intraday_async_refresh_status(cache_key)
+    existing_requested_by = str(existing.get("requested_by") or "")
+    preserve_download = bool(existing.get("download_requested"))
+    requested_by = (
+        existing_requested_by
+        if preserve_download and existing_requested_by
+        else "automatic_read"
+    )
+    enqueue_intraday_backfill(
+        stored_code,
+        trading_date,
+        requested_by=requested_by,
+        download_requested=preserve_download,
+        priority=(
+            INTRADAY_BACKFILL_AUTOMATIC_PRIORITY
+            if preserve_download
+            else INTRADAY_BACKFILL_READ_PRIORITY
+        ),
+    )
+    return intraday_async_refresh_status(cache_key)
+
+
+def request_intraday_backfill(body: dict[str, Any]) -> dict[str, Any]:
+    code = normalize_code(str(body.get("code") or ""))
+    stored_code = monitor_code(code)
+    trading_date = str(
+        body.get("trading_date") or body.get("date") or ""
+    ).strip()
+    if trading_date and not re.fullmatch(r"\d{8}", trading_date):
+        raise ValueError("补齐日期必须为YYYYMMDD")
+    if not trading_date:
+        trading_date = database_for_date().stem
+    database_for_date(trading_date)
+    state = enqueue_intraday_backfill(
+        stored_code,
+        trading_date,
+        requested_by="manual",
+        download_requested=True,
+        priority=INTRADAY_BACKFILL_MANUAL_PRIORITY,
+    )
+    return clean_json(
+        {
+            "ok": True,
+            "accepted": True,
+            "mode": "maintenance_market_data_backfill",
+            **state,
+            "code": code,
+            "monitor_code": stored_code,
+            "date": trading_date,
+            "trading_date": trading_date,
+            "job": state,
+        }
+    )
+
+
+def intraday_backfill_status_payload(
+    code_input: str = "",
+    trading_date_input: str = "",
+    job_id_input: str = "",
+) -> dict[str, Any]:
+    load_intraday_backfill_state()
+    if job_id_input:
+        cache_key = urllib.parse.unquote(str(job_id_input or "")).strip()
+        match = re.fullmatch(r"((?:110|111|113|118|123|127|128)\d{3}\.(?:SH|SZ)):(\d{8})", cache_key)
+        if not match:
+            raise ValueError("补齐任务ID无效")
+        stored_code, trading_date = match.groups()
+        code = stored_code.split(".")[0]
+    elif code_input:
+        code = normalize_code(code_input)
+        stored_code = monitor_code(code)
+        trading_date = str(trading_date_input or "").strip()
+        if trading_date and not re.fullmatch(r"\d{8}", trading_date):
+            raise ValueError("补齐日期必须为YYYYMMDD")
+        if not trading_date:
+            trading_date = database_for_date().stem
+        cache_key = intraday_backfill_cache_key(stored_code, trading_date)
+    else:
+        cache_key = ""
+    if cache_key:
+        state = intraday_backfill_status_for_key(cache_key)
+        return clean_json(
+            {
+                "ok": True,
+                "mode": "read_only_status",
+                **state,
+                "code": code,
+                "monitor_code": stored_code,
+                "date": trading_date,
+                "trading_date": trading_date,
+                "job": state,
+            }
+        )
+    with INTRADAY_ASYNC_REFRESH_LOCK:
+        states = [
+            intraday_backfill_status_for_key(key)
+            for key in INTRADAY_ASYNC_REFRESH_STATE
+        ]
+        active_key = INTRADAY_ASYNC_ACTIVE_KEY
+    return clean_json(
+        {
+            "ok": True,
+            "mode": "read_only_status",
+            "active_key": active_key,
+            "queued": sum(1 for state in states if state["status"] == "queued"),
+            "waiting_for_market_close": sum(
+                1
+                for state in states
+                if state["phase"] == "waiting_for_market_close"
+            ),
+            "postclose_scanned_date": INTRADAY_BACKFILL_POSTCLOSE_SCANNED_DATE,
+            "jobs": states,
+        }
+    )
+
+
+def postclose_intraday_universe(
+    database: Path,
+    trading_date: str,
+) -> tuple[set[str], str]:
+    sqlite_codes: set[str] = set()
+    monitor_codes: set[str] = set()
+    with connect_read_only(database) as connection:
+        sqlite_codes = {
+            str(row["code"])
+            for row in connection.execute(
+                """
+                SELECT DISTINCT code
+                FROM minute_observations
+                WHERE trading_date=?
+                """,
+                (trading_date,),
+            )
+            if MARKET_CODE_PATTERN.fullmatch(str(row["code"]))
+        }
+        try:
+            event_codes = {
+                str(row["code"])
+                for row in connection.execute(
+                    """
+                    SELECT DISTINCT code
+                    FROM qmt_events
+                    WHERE trading_date=?
+                    """,
+                    (trading_date,),
+                )
+                if MARKET_CODE_PATTERN.fullmatch(str(row["code"]))
+            }
+        except sqlite3.OperationalError:
+            event_codes = set()
+        sqlite_codes.update(event_codes)
+        try:
+            meta_row = connection.execute(
+                "SELECT value FROM meta WHERE key='codes'"
+            ).fetchone()
+        except sqlite3.OperationalError:
+            meta_row = None
+        if meta_row:
+            try:
+                raw_codes = json.loads(str(meta_row["value"] or "[]"))
+            except json.JSONDecodeError:
+                raw_codes = []
+            monitor_codes = {
+                str(code)
+                for code in raw_codes
+                if MARKET_CODE_PATTERN.fullmatch(str(code))
+            }
+    if monitor_codes:
+        return sqlite_codes | monitor_codes, "sqlite_meta_codes"
+
+    with INTRADAY_ASYNC_REFRESH_LOCK:
+        if INTRADAY_BACKFILL_POSTCLOSE_UNIVERSE_DATE == trading_date:
+            persisted_codes = set(INTRADAY_BACKFILL_POSTCLOSE_UNIVERSE_CODES)
+        else:
+            persisted_codes = set()
+    if persisted_codes:
+        return sqlite_codes | persisted_codes, "persisted_universe"
+
+    allowed, reason = intraday_download_permission(trading_date)
+    if not allowed:
+        raise LookupError(f"postclose_universe_blocked:{reason}")
+    # Legacy monitor databases may not have meta.codes. One read-only bond-list
+    # request supplies the missing zero-row symbols; it is never called per code.
+    bridge = MONITOR.BridgeClient(
+        f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}",
+        timeout=10.0,
+    )
+    bridge_codes = {
+        str(code)
+        for code in bridge.convertible_bonds()
+        if MARKET_CODE_PATTERN.fullmatch(str(code))
+    }
+    if not bridge_codes:
+        raise LookupError("postclose_universe_bridge_returned_empty")
+    return sqlite_codes | bridge_codes, "bridge_convertible_bonds"
+
+
+def scan_postclose_intraday_gaps(
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    global INTRADAY_BACKFILL_POSTCLOSE_SCANNED_DATE
+    global INTRADAY_BACKFILL_POSTCLOSE_UNIVERSE_DATE
+    global INTRADAY_BACKFILL_POSTCLOSE_UNIVERSE_CODES
+    current = china_now(now)
+    calendar_date = current.strftime("%Y%m%d")
+    clock = current.strftime("%H:%M:%S")
+    if (
+        current.weekday() >= 5
+        or not (
+            INTRADAY_BACKFILL_AUTOMATIC_START
+            <= clock
+            <= INTRADAY_BACKFILL_AUTOMATIC_END
+        )
+    ):
+        return {"scheduled": False, "reason": "outside_postclose_window"}
+    if intraday_monitor_active(current):
+        return {"scheduled": False, "reason": "monitor_still_active"}
+    database = DATA_ROOT / f"{calendar_date}.sqlite3"
+    if not database.exists():
+        return {"scheduled": False, "reason": "today_database_missing"}
+    try:
+        universe, universe_source = postclose_intraday_universe(
+            database,
+            calendar_date,
+        )
+    except Exception as error:
+        return {
+            "scheduled": False,
+            "reason": "postclose_universe_unavailable",
+            "error": f"{type(error).__name__}: {error}",
+        }
+    with INTRADAY_ASYNC_REFRESH_LOCK:
+        already_covered = bool(
+            INTRADAY_BACKFILL_POSTCLOSE_SCANNED_DATE == calendar_date
+            and INTRADAY_BACKFILL_POSTCLOSE_UNIVERSE_DATE == calendar_date
+            and universe.issubset(
+                INTRADAY_BACKFILL_POSTCLOSE_UNIVERSE_CODES
+            )
+        )
+    if already_covered:
+        return {"scheduled": False, "reason": "already_scanned"}
+
+    grouped: dict[str, list[Any]] = {code: [] for code in universe}
+    with connect_read_only(database) as connection:
+        for row in connection.execute(
+            """
+            SELECT code,minute_ms,minute_time,open,high,low,close,amount
+            FROM minute_observations
+            WHERE trading_date=?
+            ORDER BY code,minute_ms
+            """,
+            (calendar_date,),
+        ):
+            stored_code = str(row["code"])
+            if MARKET_CODE_PATTERN.fullmatch(stored_code):
+                grouped.setdefault(stored_code, []).append(row)
+    missing_codes = [
+        code
+        for code, rows in grouped.items()
+        if minute_rows_need_backfill(rows, calendar_date)
+    ]
+    scheduled_codes: list[str] = []
+    preserved_codes: list[str] = []
+    for stored_code in missing_codes:
+        cache_key = intraday_backfill_cache_key(stored_code, calendar_date)
+        with INTRADAY_ASYNC_REFRESH_LOCK:
+            existing = dict(INTRADAY_ASYNC_REFRESH_STATE.get(cache_key) or {})
+        if existing:
+            existing_requested_by = str(existing.get("requested_by") or "")
+            existing_status = str(existing.get("status") or "")
+            if (
+                existing_requested_by == "automatic_read"
+                and existing_status != "ready"
+            ):
+                result = enqueue_intraday_backfill(
+                    stored_code,
+                    calendar_date,
+                    requested_by="postclose_automatic",
+                    download_requested=True,
+                    priority=INTRADAY_BACKFILL_AUTOMATIC_PRIORITY,
+                    force=True,
+                    expected_generation=int(existing.get("generation") or 0),
+                    expected_status=existing_status,
+                )
+                if not result.get("deduplicated"):
+                    scheduled_codes.append(stored_code)
+                else:
+                    preserved_codes.append(stored_code)
+                continue
+            # Preserve manual priority and old ready/terminal results. Waiting
+            # automatic-download jobs are resumed by the normal requeue pass.
+            preserved_codes.append(stored_code)
+            continue
+        result = enqueue_intraday_backfill(
+            stored_code,
+            calendar_date,
+            requested_by="postclose_automatic",
+            download_requested=True,
+            priority=INTRADAY_BACKFILL_AUTOMATIC_PRIORITY,
+        )
+        if not result.get("deduplicated"):
+            scheduled_codes.append(stored_code)
+    with INTRADAY_ASYNC_REFRESH_LOCK:
+        INTRADAY_BACKFILL_POSTCLOSE_SCANNED_DATE = calendar_date
+        INTRADAY_BACKFILL_POSTCLOSE_UNIVERSE_DATE = calendar_date
+        INTRADAY_BACKFILL_POSTCLOSE_UNIVERSE_CODES = set(universe)
+    persist_intraday_backfill_state()
+    return {
+        "scheduled": True,
+        "trading_date": calendar_date,
+        "scanned_codes": len(grouped),
+        "missing_codes": len(missing_codes),
+        "scheduled_codes": len(scheduled_codes),
+        "preserved_codes": len(preserved_codes),
+        "universe_source": universe_source,
+    }
+
+
+def requeue_due_intraday_backfills(now: datetime | None = None) -> int:
+    current_epoch = time.time()
+    queued = 0
+    with INTRADAY_ASYNC_REFRESH_LOCK:
+        candidates = [dict(state) for state in INTRADAY_ASYNC_REFRESH_STATE.values()]
+    for state in candidates:
+        status = str(state.get("status") or "")
+        requested_by = str(state.get("requested_by") or "")
+        trading_date = str(state.get("trading_date") or "")
+        allowed, _reason = intraday_download_permission(trading_date, now)
+        if not allowed:
+            continue
+        if requested_by != "manual" and not intraday_automatic_window_open(now):
+            continue
+        retry_epoch = float(state.get("retry_at_epoch") or 0)
+        if status not in {
+            "waiting_for_market_close",
+            "waiting_for_bridge_cooldown",
+            "interrupted",
+            "partial",
+            "failed",
+        }:
+            continue
+        if status in {"partial", "failed"} and not bool(
+            state.get("retryable", True)
+        ):
+            continue
+        if retry_epoch > current_epoch:
+            continue
+        priority = (
+            INTRADAY_BACKFILL_MANUAL_PRIORITY
+            if requested_by == "manual"
+            else INTRADAY_BACKFILL_READ_PRIORITY
+            if requested_by == "automatic_read"
+            else INTRADAY_BACKFILL_AUTOMATIC_PRIORITY
+        )
+        result = enqueue_intraday_backfill(
+            str(state.get("code") or ""),
+            trading_date,
+            requested_by=requested_by or "postclose_automatic",
+            download_requested=bool(state.get("download_requested")),
+            priority=priority,
+            force=True,
+            expected_generation=int(state.get("generation") or 0),
+            expected_status=status,
+        )
+        if not result.get("stale_candidate") and not result.get("deduplicated"):
+            queued += 1
+    return queued
+
+
+def intraday_backfill_scheduler_loop() -> None:
+    while not INTRADAY_BACKFILL_STOP_EVENT.is_set():
+        try:
+            scan_postclose_intraday_gaps()
+            requeue_due_intraday_backfills()
+        except Exception as error:  # pragma: no cover - daemon safety boundary
+            print(f"MiniQMT backfill scheduler error: {error}", flush=True)
+        INTRADAY_BACKFILL_STOP_EVENT.wait(15.0)
+
+
+def start_intraday_backfill_service() -> None:
+    global INTRADAY_BACKFILL_WORKER_THREAD
+    global INTRADAY_BACKFILL_SCHEDULER_THREAD
+    load_intraday_backfill_state()
+    INTRADAY_BACKFILL_STOP_EVENT.clear()
+    if (
+        INTRADAY_BACKFILL_WORKER_THREAD is None
+        or not INTRADAY_BACKFILL_WORKER_THREAD.is_alive()
+    ):
+        INTRADAY_BACKFILL_WORKER_THREAD = threading.Thread(
+            target=intraday_backfill_worker_loop,
+            name="miniqmt-intraday-backfill",
+            daemon=True,
+        )
+        INTRADAY_BACKFILL_WORKER_THREAD.start()
+    if (
+        INTRADAY_BACKFILL_SCHEDULER_THREAD is None
+        or not INTRADAY_BACKFILL_SCHEDULER_THREAD.is_alive()
+    ):
+        INTRADAY_BACKFILL_SCHEDULER_THREAD = threading.Thread(
+            target=intraday_backfill_scheduler_loop,
+            name="miniqmt-intraday-backfill-scheduler",
+            daemon=True,
+        )
+        INTRADAY_BACKFILL_SCHEDULER_THREAD.start()
 
 
 def live_tick_minute_rows(
     stored_code: str,
     trading_date: str,
-) -> tuple[list[dict[str, Any]], float | None, str, float]:
+    source_name: str = "",
+) -> tuple[
+    list[dict[str, Any]],
+    float | None,
+    str,
+    float,
+    dict[str, Any] | None,
+]:
     bridge = MONITOR.BridgeClient(
         f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}",
-        timeout=15.0,
+        timeout=DETAIL_TICK_TIMEOUT_SECONDS,
     )
-    ticks = bridge.full_tick([stored_code])
+    payload = bridge.get(
+        "/api/market/full_tick",
+        {"stocks": stored_code},
+        timeout=DETAIL_TICK_TIMEOUT_SECONDS,
+    )
+    ticks = payload.get("data", payload) if isinstance(payload, dict) else {}
     tick = ticks.get(stored_code)
     if (
         not isinstance(tick, dict)
         or compact_date(tick.get("timetag")) != trading_date
     ):
-        return [], None, "", 0
-    tick_rows = update_active_index_tick_minutes(
-        ticks,
-        [stored_code],
-        trading_date,
-    ).get(stored_code) or []
+        return [], None, "", 0, None
     rows: list[dict[str, Any]] = []
-    for raw in tick_rows:
-        timestamp = int(raw.get("time") or 0)
-        close = finite_or_none(raw.get("close"))
-        if timestamp <= 0 or close is None or close <= 0:
-            continue
+    timestamp = tick_minute_timestamp(tick)
+    close = finite_or_none(tick.get("lastPrice"))
+    if timestamp > 0 and close is not None and close > 0:
         moment = datetime.fromtimestamp(timestamp / 1000)
         rows.append(
             {
@@ -2687,19 +4377,25 @@ def live_tick_minute_rows(
                 "high": close,
                 "low": close,
                 "close": close,
-                "amount": finite_or_none(raw.get("amount")) or 0,
+                # full_tick.amount is the session-to-date cumulative amount,
+                # not the amount of this one-minute bucket.  A sparse in-memory
+                # tick cache cannot safely derive the bucket amount because its
+                # previous sample may be many minutes old.  The merge below
+                # keeps the authoritative SQLite/market_data_ex minute amount.
+                "amount": 0.0,
             }
         )
     names = resolve_active_index_names(
         bridge,
         [stored_code],
-        {stored_code: ""},
+        {stored_code: source_name},
     )
     return (
         rows,
         finite_or_none(tick.get("lastClose")),
         names.get(stored_code) or "",
         finite_or_none(tick.get("amount")) or 0,
+        tick,
     )
 
 
@@ -2778,6 +4474,61 @@ def merge_minute_rows(*sources: list[Any]) -> list[Any]:
     return [by_timestamp[timestamp] for timestamp in sorted(by_timestamp)]
 
 
+def merge_bond_minute_rows(
+    local_rows: list[Any],
+    historical_rows: list[Any],
+    live_rows: list[Any],
+) -> list[Any]:
+    """Fill historical gaps, prefer monitor bars, then overlay only live price.
+
+    SQLite minute observations and market_data_ex rows contain per-minute
+    amounts.  full_tick contains a cumulative session amount, so a live row is
+    never allowed to replace a trusted bucket amount.  When the monitor has not
+    written the new minute yet, the provisional live row starts at zero rather
+    than displaying the whole cumulative amount as one minute.
+    """
+
+    by_timestamp: dict[int, dict[str, Any]] = {}
+    # Bridge history only fills holes; the local monitor remains authoritative
+    # for timestamps present in both sources, especially the unfinished minute.
+    for source in (historical_rows, local_rows):
+        for row in source:
+            timestamp = int(row["minute_ms"] or 0)
+            if timestamp > 0:
+                by_timestamp[timestamp] = dict(row)
+
+    for row in live_rows:
+        timestamp = int(row["minute_ms"] or 0)
+        if timestamp <= 0:
+            continue
+        live = dict(row)
+        existing = by_timestamp.get(timestamp)
+        if existing is None:
+            live["amount"] = 0.0
+            by_timestamp[timestamp] = live
+            continue
+
+        close = finite_or_none(live.get("close"))
+        if close is None or close <= 0:
+            continue
+        merged = dict(existing)
+        merged["close"] = close
+        merged["high"] = max(
+            finite_or_none(existing.get("high")) or close,
+            finite_or_none(live.get("high")) or close,
+            close,
+        )
+        merged["low"] = min(
+            finite_or_none(existing.get("low")) or close,
+            finite_or_none(live.get("low")) or close,
+            close,
+        )
+        # Intentionally retain existing open, amount, and volume.
+        by_timestamp[timestamp] = merged
+
+    return [by_timestamp[timestamp] for timestamp in sorted(by_timestamp)]
+
+
 def optional_row_value(row: Any, key: str) -> Any:
     try:
         return row[key]
@@ -2785,11 +4536,16 @@ def optional_row_value(row: Any, key: str) -> Any:
         return None
 
 
-def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
+def bond_payload(
+    code_input: str,
+    date_input: str = "",
+    fast: bool = False,
+) -> dict[str, Any]:
     code = normalize_code(code_input)
     stored_code = monitor_code(code)
     if date_input and not re.fullmatch(r"\d{8}", date_input):
         raise ValueError("历史分时日期必须为YYYYMMDD")
+    fast_mode = bool(fast and not date_input)
     database = None
     trading_date = date_input
     minute_rows: list[Any] = []
@@ -2799,6 +4555,8 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
     previous_close = None
     previous_close_date = None
     live_cumulative_amount = 0.0
+    history_cache_age_seconds = None
+    history_backfill_status: dict[str, Any] = {"status": "not_needed"}
 
     try:
         database = database_for_date(date_input)
@@ -2830,9 +4588,10 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
             raise
 
     local_rows = list(minute_rows)
+    local_needs_backfill = minute_rows_need_backfill(local_rows, trading_date)
     downloaded_rows: list[dict[str, Any]] = []
     downloaded_previous_close = None
-    if date_input or minute_rows_need_backfill(local_rows, trading_date):
+    if date_input:
         try:
             (
                 downloaded_rows,
@@ -2842,17 +4601,33 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
             ) = historical_minute_rows(stored_code, trading_date)
         except Exception:
             downloaded_rows = []
+        history_backfill_status = {"status": "cache_only"}
+    elif local_needs_backfill:
+        # The current-day detail path is stale-while-revalidate: return local
+        # SQLite data immediately and only merge a previously populated Bridge
+        # cache. A single background GET fills the early gap for a later poll.
+        cache_snapshot = intraday_cache_snapshot(stored_code, trading_date)
+        downloaded_rows = list(cache_snapshot["rows"])
+        downloaded_previous_close = cache_snapshot["previous_close"]
+        previous_close_date = cache_snapshot["previous_close_date"]
+        history_cache_age_seconds = cache_snapshot["age_seconds"]
     live_rows: list[dict[str, Any]] = []
     live_previous_close = None
     live_name = ""
-    if not date_input:
-        (
-            live_rows,
-            live_previous_close,
-            live_name,
-            live_cumulative_amount,
-        ) = live_tick_minute_rows(stored_code, trading_date)
-    minute_rows = merge_minute_rows(local_rows, downloaded_rows, live_rows)
+    live_tick: dict[str, Any] | None = None
+    live_tick_error = ""
+    if not date_input and not fast_mode:
+        try:
+            (
+                live_rows,
+                live_previous_close,
+                live_name,
+                live_cumulative_amount,
+                live_tick,
+            ) = live_tick_minute_rows(stored_code, trading_date, name)
+        except Exception as error:
+            live_tick_error = f"{type(error).__name__}: {error}"
+    minute_rows = merge_bond_minute_rows(local_rows, downloaded_rows, live_rows)
     previous_close = live_previous_close or downloaded_previous_close
     if live_name:
         name = live_name
@@ -2860,7 +4635,7 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
     if local_rows:
         source_parts.append("本地监控")
     if downloaded_rows:
-        source_parts.append("MiniQMT 1m补齐")
+        source_parts.append("MiniQMT 1m补齐" if date_input else "MiniQMT 1m缓存")
     if live_rows:
         source_parts.append("实时快照")
     if source_parts:
@@ -2887,9 +4662,10 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
                 trading_date,
             )
         else:
-            volume_ratio, average5_volume = bond_volume_ratio(
+            volume_ratio, average5_volume = bond_volume_ratio_from_tick(
                 stored_code,
                 trading_date,
+                live_tick,
             )
     except Exception:
         volume_ratio = None
@@ -3038,6 +4814,43 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
         else None
     )
     health = api_health()
+    history_gap_remaining = minute_rows_need_backfill(minute_rows, trading_date)
+    if fast_mode:
+        history_backfill_status = {
+            "status": "deferred" if history_gap_remaining else "ready"
+        }
+    elif not date_input:
+        if not local_needs_backfill or not history_gap_remaining:
+            history_backfill_status = {
+                "status": "not_needed" if not local_needs_backfill else "ready"
+            }
+        else:
+            history_backfill_status = schedule_current_intraday_refresh(
+                stored_code,
+                trading_date,
+            )
+            if history_backfill_status.get("status") == "ready":
+                # The worker may finish before this response is serialized, but
+                # its rows were not part of this payload. Ask the client for one
+                # cheap follow-up so the completed cache is actually merged.
+                history_backfill_status = {
+                    **history_backfill_status,
+                    "status": "pending",
+                }
+    history_backfill = {
+        "status": str(history_backfill_status.get("status") or "idle"),
+        "asynchronous": not bool(date_input),
+        "required": bool(history_gap_remaining),
+        "local_gap_detected": bool(local_needs_backfill),
+        "cached_bar_count": len(downloaded_rows),
+        "cache_age_seconds": history_cache_age_seconds,
+        "retry_in_seconds": finite_or_none(
+            history_backfill_status.get("retry_in_seconds")
+        ),
+        "wait_reason": str(history_backfill_status.get("wait_reason") or ""),
+        "retry_count": int(history_backfill_status.get("retry_count") or 0),
+        "error": str(history_backfill_status.get("error") or ""),
+    }
     database_updated_at = (
         datetime.fromtimestamp(database.stat().st_mtime).isoformat(timespec="seconds")
         if database is not None
@@ -3050,6 +4863,7 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
         {
             "ok": True,
             "mode": "read_only",
+            "fast_preview": fast_mode,
             "formula_source": str(MONITOR_ROOT / "shortline_monitor.py"),
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "database_updated_at": database_updated_at,
@@ -3058,6 +4872,7 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
             "name": name,
             "tags": bond_tags(stored_code),
             "source": minute_source,
+            "history_backfill": history_backfill,
             "trading_date": trading_date,
             "available_dates": available_dates,
             "bar_count": len(rows),
@@ -3110,6 +4925,8 @@ def bond_payload(code_input: str, date_input: str = "") -> dict[str, Any]:
                 "data_is_stale": trading_date != health["calendar_date"],
                 "auto_follow_latest": not bool(date_input),
                 "refresh_interval_seconds": 2,
+                "live_tick_error": live_tick_error,
+                "live_tick_skipped": fast_mode,
             },
             "rows": rows,
             "events": events,
@@ -3125,9 +4942,10 @@ def events_payload(
     event_types_input: str = "",
     min_daily_amount_input: str = "",
     min_daily_amplitude_input: str = "",
+    cursor_trading_date: str = "",
 ) -> dict[str, Any]:
     normalized_scope = scope if scope in {"focus", "all"} else "focus"
-    safe_after_id = max(0, int(after_id))
+    requested_after_id = max(0, int(after_id))
     safe_limit = min(200, max(1, int(limit)))
     try:
         min_daily_amount = max(0.0, float(min_daily_amount_input or 0))
@@ -3139,6 +4957,26 @@ def events_payload(
         min_daily_amplitude = 0.0
     database = database_for_date()
     trading_date = database.stem
+    with closing(connect_read_only(database)) as connection:
+        current_max_id_row = connection.execute(
+            "SELECT MAX(id) AS max_id FROM qmt_events WHERE trading_date=?",
+            (trading_date,),
+        ).fetchone()
+    current_max_id = (
+        int(current_max_id_row["max_id"] or 0)
+        if current_max_id_row
+        else 0
+    )
+    cursor_reset_reason = ""
+    if (
+        cursor_trading_date
+        and cursor_trading_date != trading_date
+        and requested_after_id > 0
+    ):
+        cursor_reset_reason = "cursor_trading_date_changed"
+    elif requested_after_id > current_max_id:
+        cursor_reset_reason = "after_id_ahead_of_current_day"
+    effective_after_id = 0 if cursor_reset_reason else requested_after_id
     conditions = ["trading_date=?"]
     parameters: list[Any] = [trading_date]
     monitored_codes: list[str] = []
@@ -3171,10 +5009,10 @@ def events_payload(
         placeholders = ",".join("?" for _ in event_types)
         conditions.append(f"event_type IN ({placeholders})")
         parameters.extend(event_types)
-    if safe_after_id:
+    if effective_after_id:
         conditions.append("id>?")
-        parameters.append(safe_after_id)
-    order = "ASC" if safe_after_id else "DESC"
+        parameters.append(effective_after_id)
+    order = "ASC" if effective_after_id else "DESC"
     query = f"""
         SELECT id,event_time_ms,event_time,code,name,event_type,direction,price,
                tier,speed_1m,speed_3m,speed_5m,amount_1m,confidence,score,
@@ -3190,7 +5028,7 @@ def events_payload(
         else safe_limit
     )
     parameters.append(query_limit)
-    with connect_read_only(database) as connection:
+    with closing(connect_read_only(database)) as connection:
         rows = connection.execute(query, parameters).fetchall()
 
     live_market: dict[str, dict[str, float | None]] = {}
@@ -3309,7 +5147,7 @@ def events_payload(
         )
         if len(events) >= safe_limit:
             break
-    if safe_after_id:
+    if effective_after_id:
         events.reverse()
 
     health = api_health()
@@ -3323,7 +5161,7 @@ def events_payload(
     )
     latest_id = max(
         scanned_event_ids,
-        default=safe_after_id,
+        default=(current_max_id if cursor_reset_reason else effective_after_id),
     )
     return clean_json(
         {
@@ -3334,6 +5172,10 @@ def events_payload(
             "min_daily_amount": min_daily_amount,
             "min_daily_amplitude": min_daily_amplitude,
             "trading_date": trading_date,
+            "requested_after_id": requested_after_id,
+            "effective_after_id": effective_after_id,
+            "cursor_reset": bool(cursor_reset_reason),
+            "cursor_reset_reason": cursor_reset_reason or None,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "monitor_alive": bool(health["monitor_alive"]),
             "data_is_stale": trading_date != health["calendar_date"],
@@ -3355,10 +5197,26 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if parsed.path == "/health":
                 self.send_payload(200, api_health())
                 return
+            if parsed.path == "/intraday-backfill":
+                self.send_payload(
+                    200,
+                    intraday_backfill_status_payload(
+                        (query.get("code") or [""])[0],
+                        (
+                            query.get("trading_date")
+                            or query.get("date")
+                            or [""]
+                        )[0],
+                        (query.get("job_id") or [""])[0],
+                    ),
+                )
+                return
             if parsed.path == "/bond":
                 payload = bond_payload(
                     (query.get("code") or [""])[0],
                     (query.get("date") or [""])[0],
+                    (query.get("fast") or [""])[0].lower()
+                    in {"1", "true", "yes"},
                 )
                 self.send_payload(200, payload)
                 return
@@ -3369,7 +5227,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 )
                 return
             if parsed.path == "/daily":
-                payload = daily_payload(
+                reference_only = (
+                    (query.get("reference") or [""])[0].lower()
+                    in {"1", "true", "yes"}
+                )
+                payload_factory = (
+                    local_reference_daily_payload if reference_only else daily_payload
+                )
+                payload = payload_factory(
                     (query.get("code") or [""])[0],
                     int((query.get("count") or ["120"])[0]),
                 )
@@ -3384,6 +5249,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     (query.get("types") or [""])[0],
                     (query.get("min_daily_amount") or [""])[0],
                     (query.get("min_daily_amplitude") or [""])[0],
+                    (query.get("trading_date") or [""])[0],
                 )
                 self.send_payload(200, payload)
                 return
@@ -3434,6 +5300,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length).decode("utf-8"))
             if not isinstance(body, dict):
                 raise TradingError("请求内容必须是JSON对象")
+            if parsed.path == "/intraday-backfill":
+                self.send_payload(202, request_intraday_backfill(body))
+                return
             handlers = {
                 "/trading/unlock": trading_unlock_payload,
                 "/trading/order-preview": trading_order_preview_payload,
@@ -3450,6 +5319,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_payload(error.status, {"error": str(error)})
         except (json.JSONDecodeError, UnicodeDecodeError):
             self.send_payload(400, {"error": "请求JSON格式错误"})
+        except ValueError as error:
+            self.send_payload(400, {"error": str(error)})
         except Exception as error:  # pragma: no cover - top-level safety boundary
             self.send_payload(500, {"error": str(error)})
 
@@ -3483,12 +5354,16 @@ def main() -> int:
     if args.health:
         print(json.dumps(api_health(), ensure_ascii=False, indent=2))
         return 0
+    start_intraday_backfill_service()
     server = ThreadingHTTPServer((args.host, args.port), DashboardHandler)
     print(
         f"MiniQMT dashboard API listening on http://{args.host}:{args.port}",
         flush=True,
     )
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        INTRADAY_BACKFILL_STOP_EVENT.set()
     return 0
 
 

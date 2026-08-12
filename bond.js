@@ -34,6 +34,7 @@ const EVENT_LABELS = {
   platform_dive: "平台跳水",
   pole_jump: "旱地拔葱",
   near_up_limit: "接近涨停",
+  at_up_limit: "触及涨停",
   open_high: "高开",
   open_low: "低开",
   volume_surge: "分钟放量",
@@ -56,13 +57,33 @@ const state = {
   payload: null,
   intradayPayloads: [],
   intradayRows: [],
+  intradayPayloadCache: new Map(),
+  intradayPayloadRequests: new Map(),
+  intradayPayloadRetryAt: new Map(),
   dailyPayload: null,
   referenceDailyPayload: null,
   referenceDailyRequest: null,
+  referenceDailyTimer: 0,
+  referenceDailyFailureCount: 0,
+  referenceDailyNextAllowedAt: 0,
   metadata: null,
   view: params.get("view") === "daily" ? "daily" : "intraday",
   selectedIndex: -1,
   refreshTimer: 0,
+  panelHistoryBackfillTimer: 0,
+  panelHistoryBackfillLoading: false,
+  panelHistoryBackfillFailureCount: 0,
+  panelHistoryBackfillNextAllowedAt: 0,
+  panelHistoryBackfillTradingDate: "",
+  manualBackfillJob: null,
+  manualBackfillGeneration: 0,
+  manualBackfillPollTimer: 0,
+  manualBackfillPollToken: "",
+  manualBackfillPollFailureCount: 0,
+  manualBackfillReloadedJobKey: "",
+  manualBackfillRedrawJobKey: "",
+  manualBackfillRedrawRequest: null,
+  manualBackfillRedrawFailureCount: 0,
   resizeTimer: 0,
   requestId: 0,
   manualDate: Boolean(params.get("date")),
@@ -72,6 +93,7 @@ const state = {
   orderBook: null,
   bookTimer: 0,
   bookLoading: false,
+  bookFailureCount: 0,
   tradingCapabilities: null,
   tradeSessionToken: "",
   tradeSessionExpiresAt: 0,
@@ -83,6 +105,7 @@ const state = {
   holdStartedAt: 0,
   quickSubmitting: false,
   panelMetricKeys: null,
+  panelActive: true,
 };
 
 const pageParams = new URLSearchParams(window.location.search);
@@ -212,6 +235,27 @@ const INTRADAY_AXIS_LABELS = [
   { minute: 240, label: "15:00" },
 ];
 const INTRADAY_GRID_MINUTES = [30, 60, 90, 120, 150, 180, 210];
+const ORDER_BOOK_REFRESH_INTERVAL_MS = 1000;
+const ORDER_BOOK_FAILURE_RETRY_BASE_MS = 15_000;
+const ORDER_BOOK_FAILURE_RETRY_MAX_MS = 30_000;
+const ORDER_BOOK_MAX_AGE_MS = 15_000;
+const ORDER_BOOK_FUTURE_TOLERANCE_MS = 5_000;
+const PANEL_HISTORY_BACKFILL_INITIAL_DELAY_MS = 1_500;
+const PANEL_HISTORY_BACKFILL_PENDING_DELAY_MS = 5_000;
+const PANEL_HISTORY_BACKFILL_PARTIAL_DELAY_MS = 30_000;
+const PANEL_HISTORY_BACKFILL_FAILURE_BASE_MS = 15_000;
+const PANEL_HISTORY_BACKFILL_FAILURE_MAX_MS = 120_000;
+const PANEL_HISTORY_BACKFILL_SUCCESS_COOLDOWN_MS = 60_000;
+const MANUAL_BACKFILL_MIN_POLL_MS = 3_000;
+const MANUAL_BACKFILL_DEFAULT_POLL_MS = 5_000;
+const MANUAL_BACKFILL_POLL_FAILURE_MAX_MS = 30_000;
+const MANUAL_BACKFILL_MARKET_WAIT_POLL_MS = 30_000;
+const MANUAL_BACKFILL_REDRAW_RETRY_BASE_MS = 5_000;
+const MANUAL_BACKFILL_REDRAW_RETRY_MAX_MS = 30_000;
+const INTRADAY_HISTORY_FAILURE_RETRY_MS = 60_000;
+const REFERENCE_DAILY_INITIAL_DELAY_MS = 0;
+const REFERENCE_DAILY_FAILURE_BASE_MS = 15_000;
+const REFERENCE_DAILY_FAILURE_MAX_MS = 120_000;
 
 function formatNumber(value, digits = 2) {
   return value !== null && value !== undefined && Number.isFinite(Number(value))
@@ -477,20 +521,761 @@ async function postJson(url, body, timeoutMs = 12000) {
   }
 }
 
+function applyBondPayload(payload, intradayPayloads = [payload]) {
+  state.payload = payload;
+  state.intradayPayloads = intradayPayloads;
+  state.intradayRows = intradayPayloads.flatMap((dayPayload, dayIndex) =>
+    (dayPayload.rows || []).map((row) => ({
+      ...row,
+      trading_date: dayPayload.trading_date,
+      previous_close: dayPayload.previous_close,
+      _dayIndex: dayIndex,
+      _dayCount: intradayPayloads.length,
+    })),
+  );
+  state.selectedIndex = Math.max(0, state.intradayRows.length - 1);
+  renderPayload(payload);
+}
+
+function panelHistoryBackfillRequired(payload = state.payload) {
+  const historyBackfill = payload?.history_backfill;
+  if (!historyBackfill?.required) return false;
+  const status = String(historyBackfill.status || "").toLowerCase();
+  if (["pending", "queued", "running"].includes(status)) return true;
+  if (["partial", "failed"].includes(status)) {
+    return Number(historyBackfill.retry_in_seconds) > 0;
+  }
+  return false;
+}
+
+function panelHistoryBackfillAllowed() {
+  return Boolean(
+    isPanel
+    && state.panelActive
+    && !document.hidden
+    && state.view === "intraday"
+    && !state.manualDate
+    && Number(state.intradayDays) === 1
+    && !manualBackfillActiveForCurrentView()
+  );
+}
+
+function clearPanelHistoryBackfillTimer() {
+  window.clearTimeout(state.panelHistoryBackfillTimer);
+  state.panelHistoryBackfillTimer = 0;
+}
+
+function resetPanelHistoryBackfillForDate(payload) {
+  const tradingDate = String(payload?.trading_date || "");
+  if (!tradingDate || tradingDate === state.panelHistoryBackfillTradingDate) return;
+  clearPanelHistoryBackfillTimer();
+  state.panelHistoryBackfillTradingDate = tradingDate;
+  state.panelHistoryBackfillFailureCount = 0;
+  state.panelHistoryBackfillNextAllowedAt = 0;
+}
+
+function panelHistoryBackfillFailureDelay() {
+  return Math.min(
+    PANEL_HISTORY_BACKFILL_FAILURE_MAX_MS,
+    PANEL_HISTORY_BACKFILL_FAILURE_BASE_MS
+      * (2 ** Math.max(0, state.panelHistoryBackfillFailureCount - 1)),
+  );
+}
+
+function panelHistoryBackfillRetryDelay(payload) {
+  const historyBackfill = payload?.history_backfill || {};
+  const retrySeconds = Number(historyBackfill.retry_in_seconds);
+  if (Number.isFinite(retrySeconds) && retrySeconds > 0) {
+    return Math.max(
+      PANEL_HISTORY_BACKFILL_PENDING_DELAY_MS,
+      Math.ceil(retrySeconds * 1000),
+    );
+  }
+  return String(historyBackfill.status || "").toLowerCase() === "partial"
+    ? PANEL_HISTORY_BACKFILL_PARTIAL_DELAY_MS
+    : PANEL_HISTORY_BACKFILL_PENDING_DELAY_MS;
+}
+
+function schedulePanelHistoryBackfill(payload = state.payload) {
+  resetPanelHistoryBackfillForDate(payload);
+  if (!panelHistoryBackfillAllowed() || !panelHistoryBackfillRequired(payload)) {
+    clearPanelHistoryBackfillTimer();
+    return;
+  }
+  if (state.panelHistoryBackfillLoading || state.panelHistoryBackfillTimer) return;
+  const now = Date.now();
+  const firstAttemptDelay = state.panelHistoryBackfillNextAllowedAt > 0
+    ? 0
+    : PANEL_HISTORY_BACKFILL_INITIAL_DELAY_MS;
+  const delay = Math.max(
+    firstAttemptDelay,
+    state.panelHistoryBackfillNextAllowedAt - now,
+    0,
+  );
+  state.panelHistoryBackfillTimer = window.setTimeout(() => {
+    state.panelHistoryBackfillTimer = 0;
+    void loadPanelHistoryBackfill();
+  }, delay);
+}
+
+async function loadPanelHistoryBackfill() {
+  if (
+    !panelHistoryBackfillAllowed()
+    || state.panelHistoryBackfillLoading
+    || !panelHistoryBackfillRequired(state.payload)
+  ) return;
+  resetPanelHistoryBackfillForDate(state.payload);
+  const requestedTradingDate = String(state.payload?.trading_date || "");
+  let schedulingPayload = state.payload;
+  state.panelHistoryBackfillLoading = true;
+  state.panelHistoryBackfillNextAllowedAt = Math.max(
+    state.panelHistoryBackfillNextAllowedAt,
+    Date.now() + PANEL_HISTORY_BACKFILL_PENDING_DELAY_MS,
+  );
+  try {
+    // Omitting fast intentionally invokes the server's ordinary read-only GET.
+    // The backend refreshes its existing MiniQMT minute cache asynchronously;
+    // this browser path never calls a history download endpoint.
+    const query = new URLSearchParams({ code: requestedCode });
+    const payload = await fetchJson(`/api/miniqmt/bond?${query}`, 12000);
+    schedulingPayload = payload;
+    if (
+      requestedTradingDate
+      && String(payload.trading_date || "") !== requestedTradingDate
+    ) {
+      throw new Error("history_backfill_trading_date_changed");
+    }
+    if (
+      requestedTradingDate
+      && String(state.payload?.trading_date || "") !== requestedTradingDate
+    ) {
+      schedulingPayload = state.payload;
+      return;
+    }
+    const historyBackfill = payload.history_backfill || {};
+    if (
+      String(historyBackfill.status || "").toLowerCase() === "failed"
+      || historyBackfill.error
+    ) {
+      throw new Error(historyBackfill.error || "history_backfill_failed");
+    }
+
+    state.panelHistoryBackfillFailureCount = 0;
+    state.panelHistoryBackfillNextAllowedAt = Date.now() + (
+      panelHistoryBackfillRequired(payload)
+        ? panelHistoryBackfillRetryDelay(payload)
+        : PANEL_HISTORY_BACKFILL_SUCCESS_COOLDOWN_MS
+    );
+    const currentRowCount = Array.isArray(state.payload?.rows)
+      ? state.payload.rows.length
+      : 0;
+    const incomingRowCount = Array.isArray(payload.rows) ? payload.rows.length : 0;
+    if (
+      panelHistoryBackfillAllowed()
+      && incomingRowCount > 0
+      && incomingRowCount >= currentRowCount
+    ) {
+      applyBondPayload(payload, [payload]);
+      setStatus(statusText(payload), statusTone(payload));
+      scheduleRefresh();
+    }
+  } catch (_error) {
+    schedulingPayload = state.payload;
+    state.panelHistoryBackfillFailureCount += 1;
+    state.panelHistoryBackfillNextAllowedAt =
+      Date.now() + panelHistoryBackfillFailureDelay();
+  } finally {
+    state.panelHistoryBackfillLoading = false;
+    schedulePanelHistoryBackfill(schedulingPayload);
+  }
+}
+
+function normalizeManualBackfillStatus(value) {
+  const status = String(value || "").trim().toLowerCase();
+  if ([
+    "accepted",
+    "pending",
+    "waiting",
+    "waiting_for_market_close",
+    "waiting_for_bridge_cooldown",
+  ].includes(status)) return "queued";
+  if ([
+    "refreshing",
+    "processing",
+    "in_progress",
+    "reading_cache",
+    "downloading",
+    "verifying",
+    "persisting",
+  ].includes(status)) return "running";
+  if (["complete", "completed", "success", "succeeded", "not_needed"].includes(status)) {
+    return "ready";
+  }
+  if (["error", "cancelled", "canceled", "interrupted"].includes(status)) return "failed";
+  return ["submitting", "queued", "running", "partial", "ready", "failed"]
+    .includes(status)
+    ? status
+    : "queued";
+}
+
+function manualBackfillIsActive(job = state.manualBackfillJob) {
+  return ["submitting", "queued", "running"]
+    .includes(normalizeManualBackfillStatus(job?.status));
+}
+
+function manualBackfillCodeKey(value) {
+  return String(value || "").replace(/\D/g, "").slice(-6);
+}
+
+function currentIntradayBackfillDate() {
+  const selectedDate = state.manualDate ? nodes.dateSelect.value : "";
+  const date = String(selectedDate || state.payload?.trading_date || "");
+  return /^\d{8}$/.test(date) ? date : "";
+}
+
+function manualBackfillMatchesCurrentView(job = state.manualBackfillJob) {
+  return Boolean(
+    job
+    && state.view === "intraday"
+    && manualBackfillCodeKey(job.code) === manualBackfillCodeKey(requestedCode)
+    && String(job.date || "") === currentIntradayBackfillDate(),
+  );
+}
+
+function manualBackfillContextVisible(job = state.manualBackfillJob) {
+  return Boolean(
+    manualBackfillMatchesCurrentView(job)
+    && !document.hidden
+    && (!isPanel || state.panelActive),
+  );
+}
+
+function manualBackfillActiveForCurrentView() {
+  return Boolean(
+    state.manualBackfillJob
+    && manualBackfillIsActive(state.manualBackfillJob)
+    && manualBackfillMatchesCurrentView(state.manualBackfillJob),
+  );
+}
+
+function clearManualBackfillPollTimer() {
+  window.clearTimeout(state.manualBackfillPollTimer);
+  state.manualBackfillPollTimer = 0;
+}
+
+function manualBackfillWaitReasons(job) {
+  return new Set(
+    [job?.wait_reason, job?.phase, job?.raw_status]
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+function manualBackfillPollDelay(payload) {
+  const explicitMilliseconds = Number(payload?.poll_after_ms);
+  const seconds = [
+    payload?.poll_after_seconds,
+    payload?.poll_after,
+    payload?.retry_after_seconds,
+    payload?.retry_in_seconds,
+  ]
+    .map(Number)
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const requestedDelay = Math.max(
+    Number.isFinite(explicitMilliseconds) && explicitMilliseconds > 0
+      ? Math.ceil(explicitMilliseconds)
+      : 0,
+    seconds.length ? Math.ceil(Math.max(...seconds) * 1000) : 0,
+  );
+  let delay = Math.max(
+    MANUAL_BACKFILL_MIN_POLL_MS,
+    requestedDelay || MANUAL_BACKFILL_DEFAULT_POLL_MS,
+  );
+  const waitReasons = manualBackfillWaitReasons(payload);
+  if (
+    waitReasons.has("waiting_for_market_close")
+    || waitReasons.has("waiting_for_monitor_to_stop")
+    || waitReasons.has("waiting_for_1512")
+  ) {
+    delay = Math.max(delay, MANUAL_BACKFILL_MARKET_WAIT_POLL_MS);
+  }
+  return delay;
+}
+
+function manualBackfillMissingCount(job) {
+  if (Array.isArray(job?.missing_after)) return job.missing_after.length;
+  const value = Number(job?.missing_after ?? job?.missing_count);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function manualBackfillStatusPresentation(job) {
+  const status = normalizeManualBackfillStatus(job?.status);
+  if (status === "submitting") {
+    return { text: "正在提交补齐任务", tone: "", button: "提交中…", disabled: true };
+  }
+  if (status === "queued") {
+    const position = Number(job?.queue_position);
+    const waitReasons = manualBackfillWaitReasons(job);
+    const waitingForMarket = [
+      "waiting_for_market_close",
+      "waiting_for_monitor_to_stop",
+      "waiting_for_1512",
+    ].some((reason) => waitReasons.has(reason));
+    const waitingForBridge = [
+      "waiting_for_bridge_cooldown",
+      "bridge_failure_cooldown",
+    ].some((reason) => waitReasons.has(reason));
+    const waitingText = waitingForMarket
+      ? "已排队 · 盘后执行"
+      : waitingForBridge
+        ? "已排队 · Bridge冷却"
+        : Number.isFinite(position) && position > 0
+          ? `已排队 · 第${Math.ceil(position)}位`
+          : "已排队 · 等待执行";
+    return {
+      text: waitingText,
+      tone: "is-warning",
+      button: "排队中…",
+      disabled: true,
+    };
+  }
+  if (status === "running") {
+    const current = Number(job?.after_bar_count ?? job?.row_count);
+    const expected = Number(job?.expected_bar_count);
+    const progress = Number.isFinite(current) && current >= 0
+      ? Number.isFinite(expected) && expected > 0
+        ? ` · 已获取${Math.floor(current)}/${Math.floor(expected)}分钟`
+        : ` · 已获取${Math.floor(current)}分钟`
+      : "";
+    return {
+      text: `正在补齐${progress}`,
+      tone: "is-live",
+      button: "补齐中…",
+      disabled: true,
+    };
+  }
+  if (status === "partial") {
+    const missing = manualBackfillMissingCount(job);
+    return {
+      text: missing === null || missing <= 0
+        ? "本次补齐结束 · 仍有缺口"
+        : `本次补齐结束 · 还缺${missing}分钟`,
+      tone: "is-warning",
+      button: "立即刷新",
+      disabled: false,
+    };
+  }
+  if (status === "ready") {
+    const after = Number(
+      job?.after_bar_count
+      ?? job?.row_count_after
+      ?? job?.row_count,
+    );
+    return {
+      text: Number.isFinite(after)
+        ? `补齐完成 · 已获取${Math.floor(after)}分钟`
+        : "补齐完成 · 分时已重绘",
+      tone: "is-live",
+      button: "立即刷新",
+      disabled: false,
+    };
+  }
+  const error = String(job?.error || job?.message || "未知原因").slice(0, 80);
+  return {
+    text: `补齐失败：${error} · 点击重试`,
+    tone: "is-error",
+    button: "立即刷新",
+    disabled: false,
+  };
+}
+
+function renderManualBackfillState(job = state.manualBackfillJob) {
+  if (!manualBackfillMatchesCurrentView(job)) return false;
+  const presentation = manualBackfillStatusPresentation(job);
+  nodes.refreshButton.textContent = presentation.button;
+  nodes.refreshButton.disabled = presentation.disabled;
+  if (job?.poll_error && manualBackfillIsActive(job)) {
+    setStatus("补齐任务仍在运行 · 状态查询稍后重试", "is-warning");
+  } else {
+    setStatus(presentation.text, presentation.tone);
+  }
+  return true;
+}
+
+function manualBackfillJobKey(job) {
+  return String(job?.job_id || `${job?.code || ""}:${job?.date || ""}:${job?.generation || 0}`);
+}
+
+function manualBackfillRedrawRetryDelay() {
+  return Math.min(
+    MANUAL_BACKFILL_REDRAW_RETRY_MAX_MS,
+    MANUAL_BACKFILL_REDRAW_RETRY_BASE_MS
+      * (2 ** Math.max(0, state.manualBackfillRedrawFailureCount - 1)),
+  );
+}
+
+function scheduleManualBackfillRedrawRetry(job, generation) {
+  clearManualBackfillPollTimer();
+  if (
+    generation !== state.manualBackfillGeneration
+    || normalizeManualBackfillStatus(job?.status) !== "ready"
+    || !manualBackfillContextVisible(job)
+  ) return;
+  state.manualBackfillPollTimer = window.setTimeout(() => {
+    state.manualBackfillPollTimer = 0;
+    void redrawReadyManualBackfill(job, generation);
+  }, manualBackfillRedrawRetryDelay());
+}
+
+async function redrawReadyManualBackfill(job, generation) {
+  if (
+    normalizeManualBackfillStatus(job?.status) !== "ready"
+    || generation !== state.manualBackfillGeneration
+    || !manualBackfillContextVisible(job)
+  ) return false;
+  const jobKey = manualBackfillJobKey(job);
+  if (state.manualBackfillReloadedJobKey === jobKey) return true;
+  if (
+    state.manualBackfillRedrawJobKey === jobKey
+    && state.manualBackfillRedrawRequest
+  ) return state.manualBackfillRedrawRequest;
+
+  state.intradayPayloadCache.delete(String(job.date || ""));
+  state.intradayPayloadRetryAt.delete(String(job.date || ""));
+  const redrawRequest = (async () => {
+    let applied = false;
+    try {
+      applied = await loadBond({
+        date: state.manualDate ? String(job.date || "") : "",
+      }) === true;
+    } catch (_error) {
+      applied = false;
+    }
+    const stillMatching = Boolean(
+      generation === state.manualBackfillGeneration
+      && manualBackfillMatchesCurrentView(job),
+    );
+    if (applied && stillMatching) {
+      clearManualBackfillPollTimer();
+      state.manualBackfillReloadedJobKey = jobKey;
+      state.manualBackfillRedrawFailureCount = 0;
+      renderManualBackfillState(state.manualBackfillJob);
+      return true;
+    }
+    if (stillMatching && manualBackfillContextVisible(job)) {
+      state.manualBackfillRedrawFailureCount += 1;
+      scheduleManualBackfillRedrawRetry(job, generation);
+    }
+    return false;
+  })();
+  state.manualBackfillRedrawJobKey = jobKey;
+  state.manualBackfillRedrawRequest = redrawRequest;
+  try {
+    return await redrawRequest;
+  } finally {
+    if (state.manualBackfillRedrawRequest === redrawRequest) {
+      state.manualBackfillRedrawJobKey = "";
+      state.manualBackfillRedrawRequest = null;
+    }
+  }
+}
+
+function scheduleManualBackfillPoll(payload = state.manualBackfillJob, options = {}) {
+  clearManualBackfillPollTimer();
+  if (
+    !manualBackfillIsActive(payload)
+    || !manualBackfillContextVisible(payload)
+    || !payload?.job_id
+  ) return;
+  const delay = options.immediate
+    ? 0
+    : Number.isFinite(Number(options.delayMs))
+      ? Math.max(MANUAL_BACKFILL_MIN_POLL_MS, Number(options.delayMs))
+      : manualBackfillPollDelay(payload);
+  state.manualBackfillPollTimer = window.setTimeout(() => {
+    state.manualBackfillPollTimer = 0;
+    void pollManualBackfill();
+  }, delay);
+}
+
+async function applyManualBackfillPayload(payload, generation, target) {
+  if (generation !== state.manualBackfillGeneration) return null;
+  const currentJob = state.manualBackfillJob || {};
+  const jobId = payload?.job_id || payload?.task_id || payload?.id || currentJob.job_id || "";
+  const status = normalizeManualBackfillStatus(payload?.status || currentJob.status);
+  const job = {
+    ...currentJob,
+    ...(payload || {}),
+    job_id: String(jobId),
+    code: payload?.code || currentJob.code || target.code,
+    date: String(payload?.date || payload?.trading_date || currentJob.date || target.date),
+    status,
+    raw_status: String(payload?.status || currentJob.raw_status || ""),
+    generation,
+    poll_error: "",
+  };
+  if (manualBackfillIsActive(job) && !job.job_id) {
+    throw new Error("补齐服务未返回任务编号");
+  }
+  state.manualBackfillJob = job;
+  state.manualBackfillPollFailureCount = 0;
+  if (manualBackfillMatchesCurrentView(job)) renderManualBackfillState(job);
+  if (manualBackfillIsActive(job)) {
+    scheduleManualBackfillPoll(job);
+  } else {
+    clearManualBackfillPollTimer();
+    await redrawReadyManualBackfill(job, generation);
+  }
+  return job;
+}
+
+async function pollManualBackfill() {
+  const job = state.manualBackfillJob;
+  if (
+    !manualBackfillIsActive(job)
+    || !manualBackfillContextVisible(job)
+    || !job?.job_id
+  ) return;
+  const generation = state.manualBackfillGeneration;
+  const pollToken = `${generation}:${String(job.job_id)}`;
+  if (state.manualBackfillPollToken === pollToken) return;
+  const target = { code: job.code, date: job.date };
+  state.manualBackfillPollToken = pollToken;
+  try {
+    const query = new URLSearchParams({ job_id: String(job.job_id) });
+    const payload = await fetchJson(`/api/miniqmt/intraday-backfill?${query}`, 12000);
+    await applyManualBackfillPayload(payload, generation, target);
+  } catch (error) {
+    if (generation !== state.manualBackfillGeneration) return;
+    state.manualBackfillPollFailureCount += 1;
+    state.manualBackfillJob = {
+      ...state.manualBackfillJob,
+      poll_error: error?.message || "状态查询失败",
+    };
+    if (manualBackfillMatchesCurrentView(state.manualBackfillJob)) {
+      renderManualBackfillState(state.manualBackfillJob);
+    }
+    const retryDelay = Math.min(
+      MANUAL_BACKFILL_POLL_FAILURE_MAX_MS,
+      MANUAL_BACKFILL_DEFAULT_POLL_MS
+        * (2 ** Math.max(0, state.manualBackfillPollFailureCount - 1)),
+    );
+    scheduleManualBackfillPoll(state.manualBackfillJob, { delayMs: retryDelay });
+  } finally {
+    if (state.manualBackfillPollToken === pollToken) {
+      state.manualBackfillPollToken = "";
+    }
+    const currentJob = state.manualBackfillJob;
+    const currentToken = currentJob?.job_id
+      ? `${state.manualBackfillGeneration}:${String(currentJob.job_id)}`
+      : "";
+    if (
+      currentToken
+      && currentToken !== pollToken
+      && manualBackfillIsActive(currentJob)
+      && manualBackfillContextVisible(currentJob)
+      && !state.manualBackfillPollTimer
+      && state.manualBackfillPollToken !== currentToken
+    ) {
+      scheduleManualBackfillPoll(currentJob);
+    }
+  }
+}
+
+function resumeManualBackfillForView() {
+  const job = state.manualBackfillJob;
+  if (!manualBackfillContextVisible(job)) return;
+  renderManualBackfillState(job);
+  if (manualBackfillIsActive(job)) {
+    scheduleManualBackfillPoll(job, { immediate: true });
+  } else if (normalizeManualBackfillStatus(job?.status) === "ready") {
+    void redrawReadyManualBackfill(job, state.manualBackfillGeneration);
+  }
+}
+
+async function startManualIntradayRefresh() {
+  if (state.view !== "intraday") return null;
+  const target = {
+    code: requestedCode,
+    date: currentIntradayBackfillDate(),
+  };
+  if (!target.date) {
+    void loadBond({ date: state.manualDate ? nodes.dateSelect.value : "" });
+    setStatus("正在读取交易日，稍后可再次刷新", "is-warning");
+    return null;
+  }
+  if (
+    manualBackfillIsActive(state.manualBackfillJob)
+    && manualBackfillMatchesCurrentView(state.manualBackfillJob)
+  ) {
+    renderManualBackfillState(state.manualBackfillJob);
+    resumeManualBackfillForView();
+    return state.manualBackfillJob;
+  }
+
+  const generation = state.manualBackfillGeneration + 1;
+  state.manualBackfillGeneration = generation;
+  state.manualBackfillPollFailureCount = 0;
+  state.manualBackfillReloadedJobKey = "";
+  state.manualBackfillRedrawJobKey = "";
+  state.manualBackfillRedrawRequest = null;
+  state.manualBackfillRedrawFailureCount = 0;
+  clearPanelHistoryBackfillTimer();
+  clearManualBackfillPollTimer();
+  state.manualBackfillJob = {
+    job_id: "",
+    code: target.code,
+    date: target.date,
+    reason: "manual",
+    status: "submitting",
+    generation,
+  };
+  renderManualBackfillState(state.manualBackfillJob);
+
+  // Refresh the already available rows immediately. Enqueuing the maintenance
+  // job happens in parallel and never blocks the first chart repaint.
+  void loadBond({ date: state.manualDate ? target.date : "" });
+  try {
+    const payload = await postJson("/api/miniqmt/intraday-backfill", {
+      code: target.code,
+      date: target.date,
+      reason: "manual",
+    });
+    return await applyManualBackfillPayload(payload, generation, target);
+  } catch (error) {
+    if (generation !== state.manualBackfillGeneration) return null;
+    return applyManualBackfillPayload(
+      {
+        status: "failed",
+        error: error?.message || "补齐任务提交失败",
+      },
+      generation,
+      target,
+    );
+  }
+}
+
+function referenceDailyLoadAllowed() {
+  return Boolean(
+    state.view === "intraday"
+    && !document.hidden
+    && (!isPanel || state.panelActive),
+  );
+}
+
+function clearReferenceDailyTimer() {
+  window.clearTimeout(state.referenceDailyTimer);
+  state.referenceDailyTimer = 0;
+}
+
+function referenceDailyFailureDelay() {
+  return Math.min(
+    REFERENCE_DAILY_FAILURE_MAX_MS,
+    REFERENCE_DAILY_FAILURE_BASE_MS
+      * (2 ** Math.max(0, state.referenceDailyFailureCount - 1)),
+  );
+}
+
+function scheduleReferenceDailyLoad() {
+  if (
+    state.referenceDailyPayload
+    || state.referenceDailyRequest
+    || state.referenceDailyTimer
+  ) return;
+  if (!referenceDailyLoadAllowed()) {
+    clearReferenceDailyTimer();
+    return;
+  }
+  const delay = Math.max(
+    state.referenceDailyNextAllowedAt - Date.now(),
+    REFERENCE_DAILY_INITIAL_DELAY_MS,
+    0,
+  );
+  state.referenceDailyTimer = window.setTimeout(() => {
+    state.referenceDailyTimer = 0;
+    void loadReferenceDailyPayload();
+  }, delay);
+}
+
+async function loadReferenceDailyPayload() {
+  clearReferenceDailyTimer();
+  if (!referenceDailyLoadAllowed()) return state.referenceDailyPayload;
+  if (state.referenceDailyPayload) return state.referenceDailyPayload;
+  if (state.referenceDailyRequest) return state.referenceDailyRequest;
+
+  const query = new URLSearchParams({
+    code: requestedCode,
+    count: "30",
+    reference: "1",
+  });
+  state.referenceDailyRequest = fetchJson(`/api/miniqmt/daily?${query}`, 12000);
+  try {
+    const payload = await state.referenceDailyRequest;
+    if (!Array.isArray(payload?.rows)) {
+      throw new Error("reference_daily_rows_missing");
+    }
+    state.referenceDailyPayload = payload;
+    state.referenceDailyFailureCount = 0;
+    state.referenceDailyNextAllowedAt = 0;
+    if (referenceDailyLoadAllowed() && state.intradayRows.length) drawChart();
+    return payload;
+  } catch (_error) {
+    state.referenceDailyFailureCount += 1;
+    state.referenceDailyNextAllowedAt = Date.now() + referenceDailyFailureDelay();
+    return null;
+  } finally {
+    state.referenceDailyRequest = null;
+    if (!state.referenceDailyPayload) scheduleReferenceDailyLoad();
+  }
+}
+
 function currentBondMarketCode() {
-  if (state.payload?.monitor_code) return state.payload.monitor_code;
-  const market = requestedCode.startsWith("110")
-    || requestedCode.startsWith("111")
-    || requestedCode.startsWith("113")
-    || requestedCode.startsWith("118")
+  const payloadCode = String(state.payload?.monitor_code || "").trim().toUpperCase();
+  if (/^\d{6}\.(?:SH|SZ)$/.test(payloadCode)) return payloadCode;
+  const code = payloadCode.replace(/\D/g, "").slice(-6) || requestedCode;
+  const market = code.startsWith("110")
+    || code.startsWith("111")
+    || code.startsWith("113")
+    || code.startsWith("118")
     ? "SH"
     : "SZ";
-  return requestedCode ? `${requestedCode}.${market}` : "";
+  return code ? `${code}.${market}` : "";
 }
 
 function shanghaiDateKey(now = new Date()) {
   const clock = shanghaiClockParts(now);
   return `${clock.year}${String(clock.month).padStart(2, "0")}${String(clock.day).padStart(2, "0")}`;
+}
+
+function orderBookTimestamp(payload) {
+  let timestamp = Number(payload?.timestamp);
+  if (Number.isFinite(timestamp) && timestamp > 0) {
+    if (timestamp < 100_000_000_000) timestamp *= 1000;
+    return timestamp;
+  }
+  const date = String(payload?.date || "");
+  const time = String(payload?.time || "");
+  const timeMatch = /^(\d{2}):(\d{2}):(\d{2})$/.exec(time);
+  if (!/^\d{8}$/.test(date) || !timeMatch) return Number.NaN;
+  const hour = Number(timeMatch[1]);
+  const minute = Number(timeMatch[2]);
+  const second = Number(timeMatch[3]);
+  if (hour > 23 || minute > 59 || second > 59) return Number.NaN;
+  return shanghaiInstant(
+    Number(date.slice(0, 4)),
+    Number(date.slice(4, 6)),
+    Number(date.slice(6, 8)),
+    hour,
+    minute,
+  ) + second * 1000;
+}
+
+function orderBookIsFresh(payload, now = new Date()) {
+  if (!payload || payload.date !== shanghaiDateKey(now)) return false;
+  const timestamp = orderBookTimestamp(payload);
+  if (!Number.isFinite(timestamp)) return false;
+  const ageMs = now.getTime() - timestamp;
+  return ageMs >= -ORDER_BOOK_FUTURE_TOLERANCE_MS && ageMs <= ORDER_BOOK_MAX_AGE_MS;
 }
 
 function quickTradeSessionActive() {
@@ -512,15 +1297,17 @@ function setBondDialogMessage(node, message, tone = "") {
   node.classList.toggle("is-success", tone === "success");
 }
 
-function quickTradeContextReason() {
+function quickTradeContextReason(now = new Date()) {
   const capability = state.tradingCapabilities || {};
   if (!capability.local_access) return "局域网访问只读";
   if (!capability.bridge_enabled) return "QMT未启用交易";
   if (!capability.bridge_connected) return "QMT交易账户未连接";
   if (state.view !== "intraday") return "日K模式仅看盘";
   if (state.manualDate) return "历史分时仅看盘";
-  if (!state.orderBook || state.orderBook.date !== shanghaiDateKey()) return "盘口不是今日数据";
-  if (!marketRefreshWindow().active) return "非交易时段锁定";
+  if (!state.orderBook || state.orderBook.date !== shanghaiDateKey(now)) return "盘口不是今日数据";
+  if (!marketRefreshWindow(now).active) return "非交易时段锁定";
+  if (state.bookFailureCount > 0) return "盘口连接中断，等待重试";
+  if (!orderBookIsFresh(state.orderBook, now)) return "盘口已过期，等待实时刷新";
   return "";
 }
 
@@ -589,14 +1376,18 @@ function renderOrderBook(payload) {
   nodes.bookSpread.textContent = Number.isFinite(Number(payload.spread))
     ? formatNumber(payload.spread, 3)
     : "-";
-  const current = payload.date === shanghaiDateKey();
-  const active = marketRefreshWindow().active;
-  nodes.bookStatus.textContent = current && active
+  const now = new Date();
+  const current = payload.date === shanghaiDateKey(now);
+  const active = marketRefreshWindow(now).active;
+  const fresh = orderBookIsFresh(payload, now);
+  nodes.bookStatus.textContent = current && active && fresh
     ? `实时 ${payload.time || ""}`
+    : current && active
+      ? `盘口已过期 ${payload.time || ""}`
     : current
       ? `已收盘 ${payload.time || ""}`
       : `数据 ${displayDate(payload.date)}`;
-  nodes.bookStatus.className = `book-status${current && active ? " is-live" : " is-stale"}`;
+  nodes.bookStatus.className = `book-status${current && active && fresh ? " is-live" : " is-stale"}`;
 
   nodes.orderBook.replaceChildren();
   const rows = [
@@ -625,11 +1416,26 @@ function renderOrderBook(payload) {
   renderQuickTradeAccess();
 }
 
+function orderBookRefreshDelay() {
+  if (state.bookFailureCount <= 0) return ORDER_BOOK_REFRESH_INTERVAL_MS;
+  return Math.min(
+    ORDER_BOOK_FAILURE_RETRY_MAX_MS,
+    ORDER_BOOK_FAILURE_RETRY_BASE_MS * (2 ** (state.bookFailureCount - 1)),
+  );
+}
+
 function scheduleOrderBookRefresh() {
   window.clearTimeout(state.bookTimer);
   if (isPanel || document.hidden) return;
-  if (!marketRefreshWindow().active) return;
-  state.bookTimer = window.setTimeout(() => void loadOrderBook({ quiet: true }), 1000);
+  const refreshWindow = marketRefreshWindow();
+  const delay = refreshWindow.active
+    ? orderBookRefreshDelay()
+    : refreshWindow.nextDelayMs;
+  if (!(delay > 0)) return;
+  state.bookTimer = window.setTimeout(
+    () => void loadOrderBook({ quiet: true }),
+    Math.max(ORDER_BOOK_REFRESH_INTERVAL_MS, delay),
+  );
 }
 
 async function loadOrderBook(options = {}) {
@@ -642,10 +1448,14 @@ async function loadOrderBook(options = {}) {
   try {
     const query = new URLSearchParams({ code: currentBondMarketCode() });
     const payload = await fetchJson(`/api/miniqmt/order-book?${query}`, 8000);
+    state.bookFailureCount = 0;
     renderOrderBook(payload);
   } catch (error) {
-    nodes.bookStatus.textContent = "盘口读取失败";
+    state.bookFailureCount += 1;
+    const retrySeconds = Math.ceil(orderBookRefreshDelay() / 1000);
+    nodes.bookStatus.textContent = `盘口读取失败 · ${retrySeconds}秒后重试`;
     nodes.bookStatus.className = "book-status is-error";
+    renderQuickTradeAccess();
     if (!options.quiet) setQuickTradeMessage(error.message || "实时盘口不可用", "error");
   } finally {
     state.bookLoading = false;
@@ -791,9 +1601,10 @@ function startQuickHold(event) {
 }
 
 async function loadBond(options = {}) {
+  if (isPanel && !state.panelActive) return false;
   if (!requestedCode) {
     setStatus("缺少转债代码", "is-error");
-    return;
+    return false;
   }
   const requestId = (state.requestId += 1);
   const date = options.date !== undefined
@@ -802,91 +1613,112 @@ async function loadBond(options = {}) {
       ? nodes.dateSelect.value || params.get("date") || ""
       : "";
   setStatus("正在读取MiniQMT");
+  if (manualBackfillMatchesCurrentView()) renderManualBackfillState();
   try {
     const query = new URLSearchParams({ code: requestedCode });
     if (date) query.set("date", date);
+    if (isPanel && !date) query.set("fast", "1");
     const payload = await fetchJson(
       `/api/miniqmt/bond?${query}`,
       date ? 120000 : 12000,
     );
-    if (requestId !== state.requestId) return;
+    if (requestId !== state.requestId) return false;
     const intradayPayloads = await loadIntradayPayloads(payload, requestId);
-    if (requestId !== state.requestId) return;
-    state.payload = payload;
-    state.intradayPayloads = intradayPayloads;
-    state.intradayRows = intradayPayloads.flatMap((dayPayload, dayIndex) =>
-      dayPayload.rows.map((row) => ({
-        ...row,
-        trading_date: dayPayload.trading_date,
-        previous_close: dayPayload.previous_close,
-        _dayIndex: dayIndex,
-        _dayCount: intradayPayloads.length,
-      })),
-    );
-    state.selectedIndex = Math.max(0, state.intradayRows.length - 1);
-    renderPayload(payload);
+    if (requestId !== state.requestId) return false;
+    applyBondPayload(payload, intradayPayloads);
     setStatus(
       intradayPayloads.length > 1
         ? `${intradayPayloads.length}日分时 · MiniQMT真实分钟数据`
         : statusText(payload),
       statusTone(payload),
     );
+    if (manualBackfillMatchesCurrentView()) {
+      renderManualBackfillState();
+    } else {
+      nodes.refreshButton.textContent = "立即刷新";
+      nodes.refreshButton.disabled = false;
+    }
     scheduleRefresh();
+    schedulePanelHistoryBackfill(payload);
+    scheduleReferenceDailyLoad();
+    return true;
   } catch (error) {
-    if (requestId !== state.requestId) return;
+    if (requestId !== state.requestId) return false;
     setStatus(error.message || "MiniQMT读取失败", "is-error");
     nodes.eventList.innerHTML = `<div class="empty-events">${escapeHtml(
       error.message || "MiniQMT读取失败",
     )}</div>`;
+    if (manualBackfillMatchesCurrentView()) renderManualBackfillState();
+    return false;
   }
+}
+
+function intradayAvailableDates(mainPayload, dayCount) {
+  const endDate = String(mainPayload.trading_date || "");
+  if (!/^\d{8}$/.test(endDate)) return [];
+  const referenceDates = state.referenceDailyPayload
+    ? state.referenceDailyPayload.available_dates
+      || (state.referenceDailyPayload.rows || []).map((row) => row.date)
+    : [];
+  const candidateDates = referenceDates.length
+    ? referenceDates
+    : mainPayload.available_dates || [];
+  return [...new Set([
+    ...candidateDates.map((value) => String(value || "")),
+    endDate,
+  ].filter((value) => /^\d{8}$/.test(value) && value <= endDate))]
+    .sort();
 }
 
 async function loadIntradayPayloads(mainPayload, requestId) {
   const dayCount = state.intradayDays;
-  const dailyPayload = await loadReferenceDailyPayload(dayCount > 1);
   if (dayCount <= 1) return [mainPayload];
-  if (!dailyPayload) throw new Error("日线参考数据暂不可用，无法加载多日分时");
-  if (requestId !== state.requestId) return [mainPayload];
   const endDate = String(mainPayload.trading_date || "");
-  const dates = [...new Set((dailyPayload.rows || [])
-    .map((row) => String(row.date || ""))
-    .filter((value) => /^\d{8}$/.test(value) && value <= endDate))]
-    .sort()
-    .slice(-dayCount);
-  if (!dates.includes(endDate)) dates.push(endDate);
-  const selectedDates = dates.sort().slice(-dayCount);
+  const candidateDates = intradayAvailableDates(mainPayload, dayCount).reverse();
   const payloads = [];
-  for (const tradingDate of selectedDates) {
+  for (const tradingDate of candidateDates) {
+    if (requestId !== state.requestId) return [mainPayload];
+    if (payloads.length >= dayCount) break;
     if (tradingDate === endDate) {
       payloads.push(mainPayload);
       continue;
     }
-    const query = new URLSearchParams({ code: requestedCode, date: tradingDate });
-    payloads.push(await fetchJson(`/api/miniqmt/bond?${query}`, 120000));
+    const cachedPayload = state.intradayPayloadCache.get(tradingDate);
+    if (cachedPayload) {
+      payloads.push(cachedPayload);
+      continue;
+    }
+    if ((state.intradayPayloadRetryAt.get(tradingDate) || 0) > Date.now()) continue;
+    let historyRequest = state.intradayPayloadRequests.get(tradingDate);
+    if (!historyRequest) {
+      const query = new URLSearchParams({ code: requestedCode, date: tradingDate });
+      historyRequest = fetchJson(`/api/miniqmt/bond?${query}`, 120000)
+        .then((payload) => {
+          if (String(payload?.trading_date || "") !== tradingDate) {
+            throw new Error("historical_intraday_date_mismatch");
+          }
+          state.intradayPayloadCache.set(tradingDate, payload);
+          state.intradayPayloadRetryAt.delete(tradingDate);
+          return payload;
+        })
+        .catch(() => {
+          state.intradayPayloadRetryAt.set(
+            tradingDate,
+            Date.now() + INTRADAY_HISTORY_FAILURE_RETRY_MS,
+          );
+          return null;
+        })
+        .finally(() => {
+          if (state.intradayPayloadRequests.get(tradingDate) === historyRequest) {
+            state.intradayPayloadRequests.delete(tradingDate);
+          }
+        });
+      state.intradayPayloadRequests.set(tradingDate, historyRequest);
+    }
+    const payload = await historyRequest;
+    if (payload) payloads.push(payload);
   }
-  return payloads;
-}
-
-async function loadReferenceDailyPayload(required = false) {
-  if (state.referenceDailyPayload) return state.referenceDailyPayload;
-  if (!state.referenceDailyRequest) {
-    const dailyQuery = new URLSearchParams({ code: requestedCode, count: "30" });
-    state.referenceDailyRequest = fetchJson(`/api/miniqmt/daily?${dailyQuery}`, 120000)
-      .then((payload) => {
-        state.referenceDailyPayload = payload;
-        return payload;
-      })
-      .catch((error) => {
-        if (required) throw error;
-        return null;
-      });
-  }
-  try {
-    return await state.referenceDailyRequest;
-  } catch (error) {
-    if (required) throw error;
-    return null;
-  }
+  return payloads.reverse();
 }
 
 function setView(view, options = {}) {
@@ -903,6 +1735,13 @@ function setView(view, options = {}) {
   nodes.eventsCard.hidden = state.view !== "intraday";
   renderQuickTradeAccess();
   window.clearTimeout(state.refreshTimer);
+  clearPanelHistoryBackfillTimer();
+  clearReferenceDailyTimer();
+  clearManualBackfillPollTimer();
+  if (state.view === "daily") {
+    nodes.refreshButton.textContent = "立即刷新";
+    nodes.refreshButton.disabled = false;
+  }
 
   if (options.updateUrl !== false) {
     const url = new URL(window.location.href);
@@ -919,6 +1758,9 @@ function setView(view, options = {}) {
     renderPayload(state.payload);
     setStatus(statusText(state.payload), statusTone(state.payload));
     scheduleRefresh();
+    schedulePanelHistoryBackfill(state.payload);
+    scheduleReferenceDailyLoad();
+    resumeManualBackfillForView();
   } else {
     void loadBond();
   }
@@ -928,6 +1770,7 @@ async function openDailyIntraday(index) {
   const row = state.dailyPayload?.rows?.[index];
   const tradingDate = String(row?.date || "");
   if (!/^\d{8}$/.test(tradingDate)) return;
+  clearManualBackfillPollTimer();
   state.manualDate = true;
   const url = new URL(window.location.href);
   url.searchParams.delete("view");
@@ -1084,7 +1927,27 @@ function renderPayload(payload) {
   );
   window.requestAnimationFrame(drawCurrentStockSparkline);
   const autoRefreshPaused = !state.manualDate && !marketRefreshWindow().active;
-  nodes.dataFootnote.textContent = autoRefreshPaused
+  const historyStatus = String(payload.history_backfill?.status || "")
+    .toLowerCase();
+  const historyBackfillInProgress = ["pending", "queued", "running"]
+    .includes(historyStatus);
+  const historyBackfillDeferred = historyStatus === "deferred";
+  const historyBackfillPartial = ["partial", "failed"].includes(historyStatus);
+  nodes.dataFootnote.textContent = payload.fast_preview
+    ? historyBackfillInProgress
+      ? `${payload.source || "本地监控"} · 极速预览只读取本地监控和已有缓存；早盘历史分钟正在后台低频补齐，完成后将自动重绘。`
+      : historyBackfillDeferred
+      ? `${payload.source || "本地监控"} · 维护窗口外暂不读取历史分钟；将在盘后自动补齐。`
+      : historyBackfillPartial
+      ? `${payload.source || "本地监控"} · 历史分钟当前部分可用，后台将在维护窗口内有限重试。`
+      : `${payload.source || "本地监控"} · 极速预览已包含当前可用的完整分钟缓存。`
+    : historyBackfillInProgress
+    ? `${payload.source || "本地监控"} · 早盘历史分钟正在后台低频补齐；当前图已先展示可用数据，完成后将自动重绘。`
+    : historyBackfillDeferred
+    ? `${payload.source || "本地监控"} · 当前不在历史分钟维护窗口；已有分时先行展示，盘后自动补齐。`
+    : historyBackfillPartial
+    ? `${payload.source || "本地监控"} · 历史分钟部分可用；后台将在维护窗口内有限重试。`
+    : autoRefreshPaused
     ? `${payload.source || "MiniQMT"} · 当前为非交易时段，自动刷新已暂停；可使用“立即刷新”手动检查。`
     : payload.full_session
     ? `${payload.source || "MiniQMT"} · 当前为完整交易日数据；黄色均价线按分钟成交额估算，普通行情不等同于Level-2逐笔。`
@@ -1095,6 +1958,35 @@ function renderPayload(payload) {
 }
 
 function statusText(payload) {
+  const historyStatus = String(payload.history_backfill?.status || "")
+    .toLowerCase();
+  const historyBackfillInProgress = ["pending", "queued", "running"]
+    .includes(historyStatus);
+  if (payload.fast_preview) {
+    return historyBackfillInProgress
+      ? "极速预览 · 后台补齐中"
+      : historyStatus === "deferred"
+      ? "极速预览 · 待盘后补齐"
+      : ["partial", "failed"].includes(historyStatus)
+      ? "极速预览 · 历史分钟部分可用"
+      : "极速预览 · 分时已补齐";
+  }
+  if (historyBackfillInProgress) {
+    return "历史分钟补齐中 · 已先展示本地分时";
+  }
+  if (historyStatus === "deferred") {
+    return "历史分钟待盘后补齐 · 已先展示本地分时";
+  }
+  if (historyStatus === "partial") {
+    return "历史分钟部分补齐 · 后台有限重试";
+  }
+  if (historyStatus === "failed") {
+    return "历史分钟补齐失败 · 可点击立即刷新";
+  }
+  if (
+    payload.history_backfill?.status === "ready"
+    && payload.history_backfill?.local_gap_detected
+  ) return "历史分钟已补齐 · 只读";
   if (
     !state.manualDate &&
     !marketRefreshWindow().active &&
@@ -1194,9 +2086,12 @@ function renderEvents(events) {
     price.textContent = formatNumber(event.price, 3);
     const score = document.createElement("span");
     score.className = "event-score";
-    score.textContent = Number.isFinite(Number(event.speed_1m))
-      ? `1分钟 ${Number(event.speed_1m) > 0 ? "+" : ""}${formatNumber(
-          Number(event.speed_1m) * 100,
+    const speed = event.speed_1m === null || event.speed_1m === undefined
+      ? Number.NaN
+      : Number(event.speed_1m);
+    score.textContent = Number.isFinite(speed)
+      ? `1分钟 ${speed > 0 ? "+" : ""}${formatNumber(
+          speed * 100,
           2,
         )}%`
       : `评分 ${formatNumber(event.score, 2)}`;
@@ -1291,6 +2186,20 @@ async function saveTagEditor() {
 function scheduleRefresh() {
   window.clearTimeout(state.refreshTimer);
   if (state.view !== "intraday") return;
+  if (isPanel && (!state.panelActive || document.hidden)) return;
+  const historyStatus = String(state.payload?.history_backfill?.status || "")
+    .toLowerCase();
+  if (
+    !isPanel
+    && ["pending", "queued", "running"].includes(historyStatus)
+    && !manualBackfillActiveForCurrentView()
+  ) {
+    state.refreshTimer = window.setTimeout(
+      () => loadBond({ date: "" }),
+      1000,
+    );
+    return;
+  }
   const realtime = state.payload?.realtime;
   const waitingForToday = !state.manualDate && realtime?.data_is_stale;
   const followingLive = realtime?.monitor_alive && realtime?.is_latest_trading_date;
@@ -2489,15 +3398,18 @@ nodes.canvas.addEventListener("pointerleave", () => {
 });
 nodes.refreshButton.addEventListener("click", () => {
   if (state.view === "daily") {
-    loadDaily();
+    void loadDaily();
   } else {
-    loadBond({ date: state.manualDate ? nodes.dateSelect.value : "" });
+    void startManualIntradayRefresh();
   }
 });
 nodes.dateSelect.addEventListener("change", () => {
+  clearManualBackfillPollTimer();
   state.manualDate = true;
   renderQuickTradeAccess();
-  loadBond({ date: nodes.dateSelect.value });
+  void loadBond({ date: nodes.dateSelect.value }).then(() => {
+    resumeManualBackfillForView();
+  });
 });
 nodes.intradayDaysSelect.addEventListener("change", () => {
   state.intradayDays = Math.max(1, Math.min(5, Number(nodes.intradayDaysSelect.value) || 1));
@@ -2505,7 +3417,7 @@ nodes.intradayDaysSelect.addEventListener("change", () => {
   if (state.intradayDays > 1) url.searchParams.set("days", String(state.intradayDays));
   else url.searchParams.delete("days");
   window.history.replaceState(window.history.state, "", url);
-  loadBond({ date: state.manualDate ? nodes.dateSelect.value : "" });
+  void loadBond({ date: state.manualDate ? nodes.dateSelect.value : "" });
 });
 nodes.manageTagsButton.addEventListener("click", () => {
   if (!nodes.tagEditor.hidden) {
@@ -2649,6 +3561,24 @@ if (!isPanel) {
   nodes.executeQuickBuy.addEventListener("contextmenu", (event) => event.preventDefault());
 }
 if (isPanel && window.parent !== window) {
+  window.addEventListener("message", (event) => {
+    if (event.origin !== window.location.origin) return;
+    if (event.data?.type !== "finance:bond-panel-active") return;
+    state.panelActive = Boolean(event.data.active);
+    window.clearTimeout(state.refreshTimer);
+    clearPanelHistoryBackfillTimer();
+    clearReferenceDailyTimer();
+    clearManualBackfillPollTimer();
+    if (state.panelActive && !document.hidden) {
+      if (state.payload) {
+        scheduleRefresh();
+        schedulePanelHistoryBackfill(state.payload);
+        scheduleReferenceDailyLoad();
+        resumeManualBackfillForView();
+      }
+      else void loadBond();
+    }
+  });
   document.addEventListener("dblclick", (event) => {
     if (event.target.closest?.("a, button, select")) return;
     event.preventDefault();
@@ -2674,8 +3604,24 @@ window.addEventListener("resize", () => {
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     window.clearTimeout(state.bookTimer);
+    window.clearTimeout(state.refreshTimer);
+    clearPanelHistoryBackfillTimer();
+    clearReferenceDailyTimer();
+    clearManualBackfillPollTimer();
   } else if (!isPanel) {
     void loadOrderBook({ quiet: true });
+    if (state.referenceDailyPayload) drawChart();
+    else scheduleReferenceDailyLoad();
+    resumeManualBackfillForView();
+  } else if (state.panelActive) {
+    if (state.payload) {
+      scheduleRefresh();
+      schedulePanelHistoryBackfill(state.payload);
+      if (state.referenceDailyPayload) drawChart();
+      else scheduleReferenceDailyLoad();
+      resumeManualBackfillForView();
+    }
+    else void loadBond();
   }
 });
 
