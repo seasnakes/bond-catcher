@@ -2575,45 +2575,7 @@ function drawChart() {
   const domains = drawPanels(context, geometry, rows);
   drawEvents(context, geometry.panels[0], rows, domains.price);
   drawAxes(context, geometry, rows, domains);
-  drawLatestPurpleMarker(context, geometry.panels[0], rows, domains.price);
   if (state.selectedIndex >= 0) drawCrosshair(context, geometry, rows, state.selectedIndex);
-}
-
-function drawLatestPurpleMarker(context, panel, rows, priceDomain) {
-  const latest = [...rows]
-    .reverse()
-    .find((row) => Number.isFinite(Number(row.purple)));
-  if (!latest) return;
-  const value = Number(latest.purple);
-  const color = latest.purple_rising ? "#d638c2" : "#139a55";
-  const rawY = yFor(value, panel, priceDomain);
-  const label = `紫 ${formatNumber(value, 3)}`;
-  context.save();
-  context.font = 'bold 10px Arial, "Microsoft YaHei", sans-serif';
-  const labelWidth = context.measureText(label).width + 10;
-  const labelHeight = 17;
-  const labelX = panel.x + panel.width - labelWidth - 4;
-  const labelY = Math.max(
-    panel.y + 18,
-    Math.min(panel.y + panel.height - labelHeight - 3, rawY - labelHeight / 2),
-  );
-  context.strokeStyle = color;
-  context.lineWidth = 0.8;
-  context.setLineDash([3, 3]);
-  context.beginPath();
-  context.moveTo(Math.max(panel.x, labelX - 48), rawY);
-  context.lineTo(panel.x + panel.width - 2, rawY);
-  context.stroke();
-  context.setLineDash([]);
-  context.fillStyle = "rgba(255,255,255,.94)";
-  context.fillRect(labelX, labelY, labelWidth, labelHeight);
-  context.strokeStyle = color;
-  context.strokeRect(labelX + 0.5, labelY + 0.5, labelWidth - 1, labelHeight - 1);
-  context.fillStyle = color;
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  context.fillText(label, labelX + labelWidth / 2, labelY + labelHeight / 2 + 0.5);
-  context.restore();
 }
 
 function dailyChartGeometry(canvas) {
