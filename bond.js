@@ -3147,11 +3147,6 @@ function drawAxes(context, geometry, rows, domains) {
         context.fillStyle = "#586355";
       }
     }
-    if (panel.key === "price" && Number(state.payload?.previous_close) > 0) {
-      context.fillStyle = "#596579";
-      context.textAlign = "right";
-      context.fillText("当日涨跌幅", panel.x + panel.width - 6, panel.y + 10);
-    }
   });
 
   const lastPanel = geometry.panels.at(-1);
