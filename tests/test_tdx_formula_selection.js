@@ -10,16 +10,23 @@ const {
   normalizeFormulaBatchResult,
   normalizeTdxUniverse,
 } = require("../src/domain/tdx-formula-selection");
-const { canResume } = require("../src/application/run-tdx-formula-selection");
+const {
+  canResume,
+  runTdxFormulaSelections,
+} = require("../src/application/run-tdx-formula-selection");
 
-test("normalizes the TDX A-share universe with names and board secids", () => {
+test("normalizes the TDX security universe with names and board secids", () => {
   assert.deepEqual(normalizeTdxUniverse([
     { Code: "600519.SH", Name: "贵州茅台" },
     { Code: "000001.SZ", Name: "平安银行" },
+    { Code: "123064.SZ", Name: "万孚转债" },
+    { Code: "810011.BJ", Name: "优机定转" },
     { Code: "600519.SH", Name: "duplicate" },
   ]), [
     { code: "600519.SH", secid: "1.600519", name: "贵州茅台" },
     { code: "000001.SZ", secid: "0.000001", name: "平安银行" },
+    { code: "123064.SZ", secid: "0.123064", name: "万孚转债" },
+    { code: "810011.BJ", secid: "0.810011", name: "优机定转" },
   ]);
 });
 
@@ -88,4 +95,28 @@ test("resume requires the same universe and formula signature", () => {
   assert.equal(canResume(snapshot, signature, ["单针"]), true);
   assert.equal(canResume(snapshot, "other", ["单针"]), false);
   assert.equal(canResume({ ...snapshot, status: "complete" }, signature, ["单针"]), false);
+});
+
+test("uses the TDX convertible-bond category by default", async () => {
+  const calls = [];
+  const snapshot = await runTdxFormulaSelections({
+    formulas: ["单针"],
+    callTq: async (_options, method, params) => {
+      calls.push({ method, params });
+      if (method === "formula_get_all") return [{ acCode: "单针" }];
+      if (method === "formula_get_info") return { acName: "单针", ParaNum: 0, Line: [{ LineName: "XG" }] };
+      if (method === "get_stock_list") return [{ Code: "123064.SZ", Name: "万孚转债" }];
+      if (method === "formula_process_mul_xg") {
+        return { "123064.SZ": { XG: [{ Date: "20260818", Value: "1" }] }, ErrorId: "0" };
+      }
+      throw new Error(`unexpected method ${method}`);
+    },
+    readSnapshot: async () => null,
+    writeSnapshot: async () => {},
+  });
+
+  assert.equal(calls.find((call) => call.method === "get_stock_list").params.market, "32");
+  assert.equal(snapshot.universe.label, "可转债");
+  assert.equal(snapshot.universe.count, 1);
+  assert.equal(snapshot.formulas[0].selectedCount, 1);
 });

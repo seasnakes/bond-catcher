@@ -26,6 +26,13 @@ function latestDate(dates) {
   return Object.keys(dates || {}).sort().at(-1) || "";
 }
 
+function marketLabel(market) {
+  return ({
+    "5": "全部A股",
+    "32": "可转债",
+  })[String(market)] || `通达信市场 ${market}`;
+}
+
 function newFormulaState(code, info, totalBatches) {
   return {
     code,
@@ -66,7 +73,7 @@ function initialSnapshot(options) {
     },
     universe: {
       market: options.market,
-      label: options.market === "5" ? "全部A股" : `通达信市场 ${options.market}`,
+      label: marketLabel(options.market),
       count: options.universe.length,
       signature: options.signature,
     },
@@ -113,7 +120,7 @@ async function runTdxFormulaSelections(rawOptions = {}) {
   const invoke = rawOptions.callTq || callTq;
   const readSnapshot = rawOptions.readSnapshot || readFormulaSelectionSnapshot;
   const writeSnapshot = rawOptions.writeSnapshot || writeFormulaSelectionSnapshot;
-  const market = String(rawOptions.market || "5");
+  const market = String(rawOptions.market || "32");
   const period = String(rawOptions.period || "1d");
   const dividendType = Number(rawOptions.dividendType ?? 1);
 

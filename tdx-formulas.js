@@ -38,7 +38,7 @@ function render() {
   if (!snapshot?.exists) {
     runSummary.textContent = "还没有公式选股快照，请先运行一次数据更新。";
     runMeta.innerHTML = "";
-    formulaGrid.innerHTML = '<div class="empty-state">暂无结果。运行项目里的“通达信公式选股”更新后，这里会显示单针、异动和 ZX 的命中股票。</div>';
+    formulaGrid.innerHTML = '<div class="empty-state">暂无结果。运行项目里的“通达信公式选股”更新后，这里会显示单针、异动和 ZX 的命中转债。</div>';
     return;
   }
 
@@ -46,7 +46,7 @@ function render() {
   runSummary.textContent = `${statusText(snapshot.status)} · 数据更新于 ${formatDateTime(snapshot.updatedAt)}`;
   runMeta.innerHTML = [
     ["数据来源", snapshot.source?.system || "通达信 TQ"],
-    ["选股范围", `${snapshot.universe?.label || "A股"} ${snapshot.universe?.count || 0} 只`],
+    ["选股范围", `${snapshot.universe?.label || "可转债"} ${snapshot.universe?.count || 0} 只`],
     ["K线口径", `${snapshot.settings?.period || "1d"} · 前复权 · ${snapshot.settings?.historyCount || "-"} 根`],
     ["运行状态", statusText(snapshot.status)],
   ].map(([label, value]) => `<article class="meta-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`).join("");
@@ -61,7 +61,7 @@ function render() {
             <div class="stock-name"><strong>${escapeHtml(row.name)}</strong><span>${escapeHtml(row.code)}</span></div>
             <span class="stock-date">${escapeHtml(row.date || formula.asOf || "")}</span>
           </div>`).join("")
-      : `<div class="card-empty">${query ? "没有匹配股票" : "本次没有命中"}</div>`;
+      : `<div class="card-empty">${query ? "没有匹配转债" : "本次没有命中"}</div>`;
     return `
       <article class="formula-card">
         <header>

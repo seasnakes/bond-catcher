@@ -30,7 +30,7 @@ async function main() {
     formulas,
     outputPath,
     resume: !args.fresh,
-    market: args.market || "5",
+    market: args.market || "32",
     period: args.period || "1d",
     historyCount: Number(args["history-count"] || 250),
     dividendType: Number(args["dividend-type"] ?? 1),
@@ -64,7 +64,7 @@ function printHelp() {
 
 Formula run:
   --formulas 单针,异动,ZX  Condition formulas (default: 单针,异动,ZX)
-  --market 5               TDX stock market group (default: 5, all A-shares)
+  --market 32              TDX category (default: 32, convertible bonds; 5=all A-shares)
   --period 1d              K-line period (default: 1d)
   --history-count 250      Bars supplied to each formula (default: 250)
   --dividend-type 1        0=none, 1=front, 2=back (default: 1)

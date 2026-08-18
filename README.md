@@ -59,7 +59,7 @@ npm run build:active-bond-index -- \
 npm run run:tdx-formulas
 ```
 
-当前默认运行 `单针`、`异动`、`ZX`，结果保存在未跟踪的 `runtime/` 目录。详细说明见 [通达信公式选股结果看板](docs/runbooks/tdx-formula-selection.md)。
+当前默认在通达信“可转债”分类中运行 `单针`、`异动`、`ZX`，结果保存在未跟踪的 `runtime/` 目录。详细说明见 [通达信公式选股结果看板](docs/runbooks/tdx-formula-selection.md)。
 
 生成器会用 880677 当日成交额审计本地转债历史是否完整；未通过审计的日期不会混入复刻统计。
 
