@@ -54,7 +54,7 @@ for _ in $(seq 1 30); do
   sleep 0.2
 done
 
-for endpoint in / /api/state /api/indices; do
+for endpoint in / /tdx-formulas.html /api/state /api/indices /api/tdx-formula-selections; do
   if ! curl --noproxy '*' --max-time 25 --silent --fail \
     "http://127.0.0.1:${VERIFY_PORT}${endpoint}" >/dev/null; then
     sed -n '1,240p' "$SERVER_LOG"

@@ -53,6 +53,14 @@ npm run build:active-bond-index -- \
   --output data/active-convertible-bond-index.json
 ```
 
+通达信 TQ 中已有的条件选股公式可直接生成项目快照，并在“公式选股”页面查看：
+
+```bash
+npm run run:tdx-formulas
+```
+
+当前默认运行 `单针`、`异动`、`ZX`，结果保存在未跟踪的 `runtime/` 目录。详细说明见 [通达信公式选股结果看板](docs/runbooks/tdx-formula-selection.md)。
+
 生成器会用 880677 当日成交额审计本地转债历史是否完整；未通过审计的日期不会混入复刻统计。
 
 ## 可转债标签

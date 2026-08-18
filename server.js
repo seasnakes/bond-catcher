@@ -8,6 +8,7 @@ const PORT = Number(process.env.PORT || 5173);
 const ROOT = __dirname;
 const LOCAL_A_SHARE_LIST_PATH = path.join(ROOT, "data", "a-share-list.json");
 const BOARD_STATE_PATH = path.join(ROOT, "data", "board-state.json");
+const TDX_FORMULA_SELECTION_PATH = path.join(ROOT, "runtime", "tdx-formula-selections.json");
 const BOND_TAGS_PATH = path.join(ROOT, "data", "convertible-bond-tags.json");
 const BOND_TAG_OVERRIDES_PATH = path.join(ROOT, "data", "convertible-bond-tag-overrides.json");
 const AUCTION_CACHE_PATH = path.join(ROOT, "runtime", "auction-series.json");
@@ -280,6 +281,11 @@ const server = http.createServer(async (request, response) => {
 
     if (url.pathname === "/api/state") {
       await handleState(request, response);
+      return;
+    }
+
+    if (url.pathname === "/api/tdx-formula-selections") {
+      await handleTdxFormulaSelections(request, response);
       return;
     }
 
@@ -1494,6 +1500,27 @@ async function handleState(request, response) {
     Allow: "GET, POST",
   });
   response.end("Method not allowed");
+}
+
+async function handleTdxFormulaSelections(request, response) {
+  if (request.method !== "GET") {
+    response.writeHead(405, {
+      "Content-Type": "text/plain; charset=utf-8",
+      Allow: "GET",
+    });
+    response.end("Method not allowed");
+    return;
+  }
+  try {
+    const raw = await fs.promises.readFile(TDX_FORMULA_SELECTION_PATH, "utf8");
+    sendJson(response, 200, { exists: true, ...JSON.parse(raw) });
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      sendJson(response, 200, { exists: false, status: "not_run", formulas: [] });
+      return;
+    }
+    throw error;
+  }
 }
 
 async function readBoardStateFile() {

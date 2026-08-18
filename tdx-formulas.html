@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>通达信公式选股</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./tdx-formulas.css" />
+  </head>
+  <body>
+    <main class="formula-shell">
+      <header class="formula-head">
+        <div>
+          <a href="./" class="back-link">← 返回主看板</a>
+          <h1>通达信公式选股</h1>
+          <p id="runSummary">正在读取最近一次公式结果…</p>
+        </div>
+        <div class="head-actions">
+          <label>
+            <span>筛选股票</span>
+            <input id="formulaSearch" type="search" placeholder="代码或名称" autocomplete="off" />
+          </label>
+          <button id="refreshFormulaResults" type="button">刷新结果</button>
+        </div>
+      </header>
+
+      <section id="runMeta" class="run-meta" aria-live="polite"></section>
+      <section id="formulaGrid" class="formula-grid" aria-live="polite">
+        <div class="empty-state">正在载入…</div>
+      </section>
+      <p class="formula-note">结果来自通达信 TQ 条件选股公式，只读展示，不会自动下单或修改看板板块。</p>
+    </main>
+    <script src="./tdx-formulas.js" defer></script>
+  </body>
+</html>
