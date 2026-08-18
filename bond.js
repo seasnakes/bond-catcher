@@ -692,6 +692,7 @@ async function loadPanelHistoryBackfill() {
 
 function normalizeManualBackfillStatus(value) {
   const status = String(value || "").trim().toLowerCase();
+  if (status === "not_applicable") return "not_applicable";
   if ([
     "accepted",
     "pending",
@@ -810,6 +811,14 @@ function manualBackfillMissingCount(job) {
 
 function manualBackfillStatusPresentation(job) {
   const status = normalizeManualBackfillStatus(job?.status);
+  if (status === "not_applicable") {
+    return {
+      text: "无盘中分钟源 · 已停止自动补齐",
+      tone: "is-warning",
+      button: "立即刷新",
+      disabled: false,
+    };
+  }
   if (status === "submitting") {
     return { text: "正在提交补齐任务", tone: "", button: "提交中…", disabled: true };
   }
@@ -1932,19 +1941,39 @@ function renderPayload(payload) {
   const historyBackfillInProgress = ["pending", "queued", "running"]
     .includes(historyStatus);
   const historyBackfillDeferred = historyStatus === "deferred";
+  const historySourceUnavailable = Boolean(
+    payload.history_backfill?.source_unavailable
+    || historyStatus === "not_applicable",
+  );
+  const monitorRepairEnabled = Boolean(
+    payload.history_backfill?.monitor_repair_enabled,
+  );
+  const monitorPriorityRequested = Boolean(
+    payload.history_backfill?.monitor_priority_requested,
+  );
   const historyBackfillPartial = ["partial", "failed"].includes(historyStatus);
-  nodes.dataFootnote.textContent = payload.fast_preview
+  nodes.dataFootnote.textContent = historySourceUnavailable
+    ? `${payload.source || "本地监控"} · MiniQMT 标记为非活跃或非公开连续交易标的，暂无盘中分钟源，已停止自动补齐。`
+    : payload.fast_preview
     ? historyBackfillInProgress
       ? `${payload.source || "本地监控"} · 极速预览只读取本地监控和已有缓存；早盘历史分钟正在后台低频补齐，完成后将自动重绘。`
       : historyBackfillDeferred
-      ? `${payload.source || "本地监控"} · 维护窗口外暂不读取历史分钟；将在盘后自动补齐。`
+      ? monitorRepairEnabled
+        ? monitorPriorityRequested
+          ? `${payload.source || "本地监控"} · 当前标的已优先交给监控器盘中补齐，完成后将自动重绘。`
+          : `${payload.source || "本地监控"} · 监控器正在后台逐只补齐历史分钟，完成后将自动重绘。`
+        : `${payload.source || "本地监控"} · 维护窗口外暂不读取历史分钟；将在盘后自动补齐。`
       : historyBackfillPartial
       ? `${payload.source || "本地监控"} · 历史分钟当前部分可用，后台将在维护窗口内有限重试。`
       : `${payload.source || "本地监控"} · 极速预览已包含当前可用的完整分钟缓存。`
     : historyBackfillInProgress
     ? `${payload.source || "本地监控"} · 早盘历史分钟正在后台低频补齐；当前图已先展示可用数据，完成后将自动重绘。`
     : historyBackfillDeferred
-    ? `${payload.source || "本地监控"} · 当前不在历史分钟维护窗口；已有分时先行展示，盘后自动补齐。`
+    ? monitorRepairEnabled
+      ? monitorPriorityRequested
+        ? `${payload.source || "本地监控"} · 当前标的已优先交给监控器盘中补齐，完成后将自动重绘。`
+        : `${payload.source || "本地监控"} · 监控器正在后台逐只补齐历史分钟，完成后将自动重绘。`
+      : `${payload.source || "本地监控"} · 当前不在历史分钟维护窗口；已有分时先行展示，盘后自动补齐。`
     : historyBackfillPartial
     ? `${payload.source || "本地监控"} · 历史分钟部分可用；后台将在维护窗口内有限重试。`
     : autoRefreshPaused
@@ -1960,13 +1989,23 @@ function renderPayload(payload) {
 function statusText(payload) {
   const historyStatus = String(payload.history_backfill?.status || "")
     .toLowerCase();
+  if (
+    payload.history_backfill?.source_unavailable
+    || historyStatus === "not_applicable"
+  ) {
+    return "无盘中分钟源 · 已停止自动补齐";
+  }
   const historyBackfillInProgress = ["pending", "queued", "running"]
     .includes(historyStatus);
   if (payload.fast_preview) {
     return historyBackfillInProgress
       ? "极速预览 · 后台补齐中"
       : historyStatus === "deferred"
-      ? "极速预览 · 待盘后补齐"
+      ? payload.history_backfill?.monitor_repair_enabled
+        ? payload.history_backfill?.monitor_priority_requested
+          ? "极速预览 · 当前标的优先补齐中"
+          : "极速预览 · 后台逐只补齐中"
+        : "极速预览 · 待盘后补齐"
       : ["partial", "failed"].includes(historyStatus)
       ? "极速预览 · 历史分钟部分可用"
       : "极速预览 · 分时已补齐";
@@ -1975,7 +2014,11 @@ function statusText(payload) {
     return "历史分钟补齐中 · 已先展示本地分时";
   }
   if (historyStatus === "deferred") {
-    return "历史分钟待盘后补齐 · 已先展示本地分时";
+    return payload.history_backfill?.monitor_repair_enabled
+      ? payload.history_backfill?.monitor_priority_requested
+        ? "当前标的优先盘中补齐 · 已先展示本地分时"
+        : "后台逐只盘中补齐 · 已先展示本地分时"
+      : "历史分钟待盘后补齐 · 已先展示本地分时";
   }
   if (historyStatus === "partial") {
     return "历史分钟部分补齐 · 后台有限重试";

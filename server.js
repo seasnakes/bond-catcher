@@ -11,10 +11,24 @@ const BOARD_STATE_PATH = path.join(ROOT, "data", "board-state.json");
 const BOND_TAGS_PATH = path.join(ROOT, "data", "convertible-bond-tags.json");
 const BOND_TAG_OVERRIDES_PATH = path.join(ROOT, "data", "convertible-bond-tag-overrides.json");
 const AUCTION_CACHE_PATH = path.join(ROOT, "runtime", "auction-series.json");
+const NEW_BOND_SECOND_DAY_TARGET_SECTOR =
+  process.env.NEW_BOND_SECOND_DAY_TARGET_SECTOR || "小热次";
+const NEW_BOND_AUTO_SCAN_START = process.env.NEW_BOND_AUTO_SCAN_START || "08:30:00";
+const NEW_BOND_AUTO_SCAN_END = process.env.NEW_BOND_AUTO_SCAN_END || "09:29:30";
+const NEW_BOND_AUTO_SCAN_INTERVAL_MS = Number(
+  process.env.NEW_BOND_AUTO_SCAN_INTERVAL_MS || 60_000,
+);
 const AUCTION_SAMPLE_INTERVAL_MS = 3000;
 const AUCTION_PERSIST_INTERVAL_MS = 30000;
 const AUCTION_MAX_SAMPLES = 210;
 const AUCTION_RESPONSE_SAMPLES = 64;
+const AUCTION_SIGNAL_RESPONSE_LIMIT = 80;
+const AUCTION_SIGNAL_STOCK_CHANGE_MIN = 1.2;
+const AUCTION_SIGNAL_BOND_CHANGE_MIN = 0.8;
+const AUCTION_SIGNAL_STOCK_AMOUNT_PERCENTILE_MIN = 0.6;
+const AUCTION_SIGNAL_BOND_AMOUNT_PERCENTILE_MIN = 0.75;
+const AUCTION_SIGNAL_LEAD_GAP_MIN = 15;
+const AUCTION_SIGNAL_AMOUNT_COVERAGE_MIN = 0.6;
 const EASTMONEY_SEARCH_TOKEN = "D43BF722C8E33BD69D955A7E7361F5D9";
 const EASTMONEY_TRENDS_TOKEN = "fa5fd1943c7b386f172d6893dbfba10b";
 const EASTMONEY_SEARCH_TIMEOUT_MS = 2500;
@@ -26,17 +40,29 @@ const TDX_OPEN_TIMEOUT_MS = Number(process.env.TDX_OPEN_TIMEOUT_MS || 5000);
 const MINIQMT_API_HOST = process.env.MINIQMT_API_HOST || "127.0.0.1";
 const MINIQMT_API_PORT = Number(process.env.MINIQMT_API_PORT || 18890);
 const MINIQMT_API_AUTOSTART = process.env.MINIQMT_API_AUTOSTART !== "0";
+const MINIQMT_API_RESTART_BASE_MS = 1000;
+const MINIQMT_API_RESTART_MAX_MS = 30_000;
 const MINIQMT_PYTHON =
   process.env.MINIQMT_PYTHON || "/Users/seasnake/miniconda3/bin/python3";
 const MINIQMT_API_SCRIPT = path.join(ROOT, "scripts", "miniqmt-dashboard-api.py");
 let miniqmtApiProcess = null;
+let miniqmtApiRestartTimer = null;
+let miniqmtApiRestartAttempts = 0;
+let shuttingDown = false;
 let auctionSamplerTimer = null;
 let auctionSamplerRunning = false;
 let auctionCacheDate = "";
 let auctionCacheDirty = false;
 let auctionLastPersistedAt = 0;
+let auctionLastRejectedLogAt = 0;
 let auctionBoardStateMtime = 0;
+let auctionBondTagsMtime = 0;
 let auctionBoardSecids = [];
+let auctionBondPairs = [];
+let newBondScanTimer = null;
+let newBondScanInFlight = null;
+let newBondLastResult = null;
+let boardStateMutationChain = Promise.resolve();
 const auctionSeries = new Map();
 const DOMESTIC_INDEXES = [
   { key: "sh000001", name: "上证指数", symbol: "sh000001", secid: "1.000001" },
@@ -82,6 +108,11 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (url.pathname === "/api/auction/signals") {
+      await handleAuctionSignals(url, response);
+      return;
+    }
+
     if (url.pathname === "/api/auction/series") {
       await handleAuctionSeries(url, response);
       return;
@@ -97,9 +128,40 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (url.pathname === "/api/miniqmt/intraday-backfill") {
+      if (request.method === "POST") {
+        try {
+          const body = await readJsonBody(request, 16 * 1024);
+          const payload = await fetchLocalJsonPost(
+            "/intraday-backfill",
+            body,
+            12_000,
+          );
+          sendJson(response, 202, payload);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "MiniQMT backfill unavailable";
+          const status = Number(error?.statusCode) || Number(message.match(/HTTP (\d+)/)?.[1]) || 503;
+          sendJson(response, status, { error: message.replace(/^HTTP \d+:\s*/, ""), service: "miniqmt-dashboard" });
+        }
+        return;
+      }
+      if (request.method !== "GET") {
+        response.writeHead(405, { Allow: "GET, POST" });
+        response.end("Method not allowed");
+        return;
+      }
+      const query = new URLSearchParams();
+      for (const key of ["job_id", "code", "date", "trading_date"]) {
+        const value = url.searchParams.get(key);
+        if (value) query.set(key, value);
+      }
+      await handleMiniQmtApi(`/intraday-backfill?${query}`, response);
+      return;
+    }
+
     if (url.pathname === "/api/miniqmt/bond") {
       const query = new URLSearchParams();
-      for (const key of ["code", "date"]) {
+      for (const key of ["code", "date", "fast"]) {
         const value = url.searchParams.get(key);
         if (value) query.set(key, value);
       }
@@ -117,7 +179,7 @@ const server = http.createServer(async (request, response) => {
 
     if (url.pathname === "/api/miniqmt/daily") {
       const query = new URLSearchParams();
-      for (const key of ["code", "count"]) {
+      for (const key of ["code", "count", "reference"]) {
         const value = url.searchParams.get(key);
         if (value) query.set(key, value);
       }
@@ -135,6 +197,7 @@ const server = http.createServer(async (request, response) => {
         "types",
         "min_daily_amount",
         "min_daily_amplitude",
+        "trading_date",
       ]) {
         const value = url.searchParams.get(key);
         if (value) query.set(key, value);
@@ -220,6 +283,11 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (url.pathname === "/api/new-bond-second-day") {
+      await handleNewBondSecondDay(request, response, url);
+      return;
+    }
+
     await serveStatic(url.pathname, response);
   } catch (error) {
     console.error(
@@ -233,23 +301,33 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`Finance board running at http://localhost:${PORT}`);
-  void ensureMiniQmtApi().finally(async () => {
-    await loadAuctionCache();
-    scheduleAuctionSampler(1000);
-  });
-});
-
-for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.once(signal, async () => {
-    if (auctionSamplerTimer) clearTimeout(auctionSamplerTimer);
-    await persistAuctionCache(true).catch((error) => {
-      console.warn(`Auction cache final persist failed: ${error.message}`);
+function startServer() {
+  server.listen(PORT, () => {
+    console.log(`Finance board running at http://localhost:${PORT}`);
+    void ensureMiniQmtApi().finally(async () => {
+      await loadAuctionCache();
+      scheduleAuctionSampler(1000);
+      scheduleNewBondSecondDayScan(2500);
     });
-    stopMiniQmtApi();
-    server.close(() => process.exit(0));
   });
+
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.once(signal, async () => {
+      shuttingDown = true;
+      if (miniqmtApiRestartTimer) clearTimeout(miniqmtApiRestartTimer);
+      if (auctionSamplerTimer) clearTimeout(auctionSamplerTimer);
+      if (newBondScanTimer) clearTimeout(newBondScanTimer);
+      await persistAuctionCache(true).catch((error) => {
+        console.warn(`Auction cache final persist failed: ${error.message}`);
+      });
+      stopMiniQmtApi();
+      server.close(() => process.exit(0));
+    });
+  }
+}
+
+if (require.main === module) {
+  startServer();
 }
 
 async function handleQuotes(url, response) {
@@ -289,10 +367,32 @@ async function handleQuotes(url, response) {
 }
 
 async function handleIndices(response) {
-  const indices = await fetchSinaGlobalIndices();
+  let miniQmtIndices = [];
+  try {
+    miniQmtIndices = await fetchMiniQmtIndexQuotes();
+  } catch (error) {
+    console.warn(
+      `MiniQMT index request failed, using Sina fallback: ${
+        error instanceof Error ? error.message : "unknown error"
+      }`,
+    );
+  }
+
+  const sinaIndices = await fetchSinaGlobalIndices({
+    includeDomestic: miniQmtIndices.length < 3,
+  });
+  const miniQmtByKey = new Map(miniQmtIndices.map((item) => [item.key, item]));
+  const sinaByKey = new Map(sinaIndices.map((item) => [item.key, item]));
+  const orderedKeys = [
+    ...DOMESTIC_INDEXES.map((item) => item.key),
+    ...sinaIndices.map((item) => item.key),
+  ];
+  const indices = [...new Set(orderedKeys)]
+    .map((key) => miniQmtByKey.get(key) || sinaByKey.get(key))
+    .filter(Boolean);
 
   sendJson(response, 200, {
-    source: "新浪实时",
+    source: miniQmtIndices.length === 3 ? "MiniQMT full_tick + 新浪实时" : "新浪实时（MiniQMT优先）",
     time: new Date().toISOString(),
     indices,
   });
@@ -393,6 +493,216 @@ async function handleAuctionSeries(url, response) {
   });
 }
 
+async function handleAuctionSignals(url, response) {
+  const current = currentChinaDateTimeParts();
+  const tradingDate = current.date.replaceAll("-", "");
+  const secidFilter = new Set(
+    (url.searchParams.get("secids") || "")
+      .split(",")
+      .map((value) => normalizeSecidInput(value))
+      .filter((secid) => /^[01]\.\d{6}$/.test(secid)),
+  );
+
+  await loadAuctionBoardSecids();
+  const pairs = secidFilter.size
+    ? auctionBondPairs.filter((pair) => secidFilter.has(pair.bondSecid))
+    : auctionBondPairs;
+  const result = buildAuctionSignalRows(pairs, auctionSeries, auctionCacheDate || tradingDate);
+
+  sendJson(response, 200, {
+    source: "MiniQMT竞价采样",
+    mode: "read_only",
+    date: auctionCacheDate || tradingDate,
+    phase: auctionClockPhase(current.time),
+    sampleIntervalMs: AUCTION_SAMPLE_INTERVAL_MS,
+    requestedPairs: result.coverage.requested,
+    sampledPairs: result.sampledPairs,
+    returned: result.signals.length,
+    coverage: result.coverage,
+    amountCoverage: result.amountCoverage,
+    amountReady: result.amountReady,
+    signals: result.signals.slice(0, AUCTION_SIGNAL_RESPONSE_LIMIT),
+  });
+}
+
+function buildAuctionSignalRows(pairs, seriesBySecid, tradingDate) {
+  const uniquePairs = [];
+  const seenPairKeys = new Set();
+  for (const pair of Array.isArray(pairs) ? pairs : []) {
+    const pairKey = `${pair?.bondSecid || ""}:${pair?.stockSecid || ""}`;
+    if (!pair?.bondSecid || !pair?.stockSecid || seenPairKeys.has(pairKey)) continue;
+    seenPairKeys.add(pairKey);
+    uniquePairs.push(pair);
+  }
+
+  const summaries = [];
+  let sampledPairs = 0;
+  for (const pair of uniquePairs) {
+    const bondSummary = summarizeAuctionSeries(seriesBySecid.get(pair.bondSecid), tradingDate);
+    const stockSummary = summarizeAuctionSeries(seriesBySecid.get(pair.stockSecid), tradingDate);
+    if (!bondSummary || !stockSummary) continue;
+    sampledPairs += 1;
+    summaries.push({ pair, bond: bondSummary, stock: stockSummary });
+  }
+
+  const stockAmounts = summaries
+    .map((item) => item.stock.recentAmount)
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const bondAmounts = summaries
+    .map((item) => item.bond.recentAmount)
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const stockAmountCoverage = sampledPairs > 0 ? stockAmounts.length / sampledPairs : 0;
+  const bondAmountCoverage = sampledPairs > 0 ? bondAmounts.length / sampledPairs : 0;
+  const amountReady = sampledPairs > 0
+    && stockAmountCoverage >= AUCTION_SIGNAL_AMOUNT_COVERAGE_MIN
+    && bondAmountCoverage >= AUCTION_SIGNAL_AMOUNT_COVERAGE_MIN;
+  const signals = [];
+
+  for (const item of summaries) {
+    const stockAmountPercentile = amountReady && item.stock.recentAmount > 0
+      ? percentileRank(stockAmounts, item.stock.recentAmount)
+      : null;
+    const bondAmountPercentile = amountReady && item.bond.recentAmount > 0
+      ? percentileRank(bondAmounts, item.bond.recentAmount)
+      : null;
+    const stockStrength = auctionStrengthScore(item.stock.change, stockAmountPercentile);
+    const bondStrength = auctionStrengthScore(item.bond.change, bondAmountPercentile);
+    const leadGap = stockStrength - bondStrength;
+    const stockAnomaly = Number.isFinite(stockAmountPercentile)
+      && item.stock.change >= AUCTION_SIGNAL_STOCK_CHANGE_MIN
+      && stockAmountPercentile >= AUCTION_SIGNAL_STOCK_AMOUNT_PERCENTILE_MIN;
+    const bondAnomaly = Number.isFinite(bondAmountPercentile)
+      && item.bond.change >= AUCTION_SIGNAL_BOND_CHANGE_MIN
+      && bondAmountPercentile >= AUCTION_SIGNAL_BOND_AMOUNT_PERCENTILE_MIN;
+
+    let signalType = "";
+    let priority = 0;
+    if (stockAnomaly && bondAnomaly && item.bond.change >= 1.0) {
+      signalType = "paired_confirmed";
+      priority = 4;
+    } else if (stockAnomaly && leadGap >= AUCTION_SIGNAL_LEAD_GAP_MIN) {
+      signalType = "stock_lead";
+      priority = 3;
+    } else if (stockAnomaly) {
+      signalType = "stock_watch";
+      priority = 2;
+    } else if (bondAnomaly) {
+      signalType = "bond_spike";
+      priority = 1;
+    }
+    if (!signalType) continue;
+
+    const latestTimestamp = Math.max(item.stock.timestamp, item.bond.timestamp);
+    const capturedAt = Math.max(item.stock.capturedAt, item.bond.capturedAt);
+    signals.push({
+      id: `${tradingDate}:${item.pair.bondSecid}:${latestTimestamp}:${signalType}`,
+      tradingDate,
+      eventTime: item.stock.time >= item.bond.time ? item.stock.time : item.bond.time,
+      capturedAt,
+      signalType,
+      priority,
+      status: signalType === "stock_lead" || signalType === "stock_watch"
+        ? "stock_lead"
+        : signalType === "paired_confirmed"
+          ? "confirmed"
+          : "bond_spike",
+      bondSecid: item.pair.bondSecid,
+      bondCode: item.pair.bondCode,
+      bondName: item.pair.bondName,
+      stockSecid: item.pair.stockSecid,
+      stockCode: item.pair.stockCode,
+      stockName: item.pair.stockName,
+      stock: {
+        time: item.stock.time,
+        timestamp: item.stock.timestamp,
+        price: item.stock.price,
+        change: item.stock.change,
+        amount: item.stock.amount,
+        recentAmount: item.stock.recentAmount,
+        amountPercentile: stockAmountPercentile,
+        strength: stockStrength,
+      },
+      bond: {
+        time: item.bond.time,
+        timestamp: item.bond.timestamp,
+        price: item.bond.price,
+        change: item.bond.change,
+        amount: item.bond.amount,
+        recentAmount: item.bond.recentAmount,
+        amountPercentile: bondAmountPercentile,
+        strength: bondStrength,
+      },
+      leadGap,
+      reason: signalReason(signalType),
+      source: "MiniQMT full_tick L1近似",
+    });
+  }
+
+  signals.sort((left, right) => {
+    return right.priority - left.priority
+      || Number(right.leadGap || 0) - Number(left.leadGap || 0)
+      || Number(right.stock?.strength || 0) - Number(left.stock?.strength || 0);
+  });
+  return {
+    sampledPairs,
+    coverage: {
+      requested: uniquePairs.length,
+      sampled: sampledPairs,
+      ratio: uniquePairs.length > 0 ? sampledPairs / uniquePairs.length : 0,
+    },
+    amountCoverage: {
+      stock: stockAmountCoverage,
+      bond: bondAmountCoverage,
+    },
+    amountReady,
+    signals,
+  };
+}
+
+function summarizeAuctionSeries(series, tradingDate) {
+  if (!series || series.date !== tradingDate || !Array.isArray(series.samples)) return null;
+  const samples = series.samples.filter((sample) => sample && sample.date === tradingDate);
+  const latest = samples.at(-1);
+  if (!latest || !Number.isFinite(Number(latest.price)) || !Number.isFinite(Number(latest.timestamp))) {
+    return null;
+  }
+  const recentSamples = samples.slice(-5);
+  const recentAmount = recentSamples.reduce(
+    (total, sample) => total + Math.max(0, Number(sample.deltaAmount) || 0),
+    0,
+  );
+  return {
+    time: String(latest.time || ""),
+    timestamp: Number(latest.timestamp),
+    capturedAt: Number(latest.capturedAt) || Number(latest.timestamp),
+    price: Number(latest.price),
+    change: Number(latest.change) || 0,
+    amount: Number(latest.amount) || 0,
+    recentAmount,
+  };
+}
+
+function percentileRank(values, value) {
+  const numbers = values.filter(Number.isFinite).sort((left, right) => left - right);
+  if (!numbers.length || !Number.isFinite(value)) return 0;
+  if (numbers.length === 1) return 1;
+  const rank = numbers.reduce((count, item) => count + (item <= value ? 1 : 0), 0);
+  return Math.max(0, Math.min(1, (rank - 1) / (numbers.length - 1)));
+}
+
+function auctionStrengthScore(change, amountPercentile) {
+  const priceScore = Math.max(0, Math.min(1, Number(change || 0) / 4));
+  const amountScore = Math.max(0, Math.min(1, Number(amountPercentile || 0)));
+  return Math.round((priceScore * 0.45 + amountScore * 0.55) * 100);
+}
+
+function signalReason(signalType) {
+  if (signalType === "stock_lead") return "正股竞价强、转债金额和涨幅暂未同步";
+  if (signalType === "stock_watch") return "正股竞价放量，等待转债响应";
+  if (signalType === "paired_confirmed") return "正股与转债竞价同步放量";
+  return "转债竞价自身出现放量异动";
+}
+
 async function handleOpenTdx(request, response) {
   if (request.method !== "POST") {
     response.writeHead(405, {
@@ -427,8 +737,10 @@ async function handleOpenTdx(request, response) {
 async function handleMiniQmtApi(pathname, response, timeout = 12_000) {
   try {
     const payload = await fetchLocalJson(pathname, timeout);
+    miniqmtApiRestartAttempts = 0;
     sendJson(response, 200, payload);
   } catch (error) {
+    void ensureMiniQmtApi();
     const message = error instanceof Error ? error.message : "MiniQMT API unavailable";
     const status = /\bHTTP 4\d\d\b/.test(message) ? Number(message.match(/HTTP (\d+)/)?.[1]) : 503;
     sendJson(response, status, {
@@ -688,16 +1000,17 @@ async function writeJsonAtomic(filePath, payload) {
 }
 
 async function ensureMiniQmtApi() {
-  if (!MINIQMT_API_AUTOSTART) return;
+  if (!MINIQMT_API_AUTOSTART || shuttingDown) return;
   try {
     await fetchLocalJson("/health", 1200);
+    miniqmtApiRestartAttempts = 0;
     console.log(`MiniQMT dashboard API already available on ${MINIQMT_API_HOST}:${MINIQMT_API_PORT}`);
     return;
   } catch {
     // The read-only helper is started below.
   }
-  if (miniqmtApiProcess || !fs.existsSync(MINIQMT_API_SCRIPT)) return;
-  miniqmtApiProcess = spawn(
+  if (miniqmtApiProcess || miniqmtApiRestartTimer || !fs.existsSync(MINIQMT_API_SCRIPT)) return;
+  const child = spawn(
     MINIQMT_PYTHON,
     [MINIQMT_API_SCRIPT, "--host", MINIQMT_API_HOST, "--port", String(MINIQMT_API_PORT)],
     {
@@ -710,19 +1023,42 @@ async function ensureMiniQmtApi() {
       stdio: ["ignore", "inherit", "inherit"],
     },
   );
-  miniqmtApiProcess.once("error", (error) => {
+  miniqmtApiProcess = child;
+  child.once("error", (error) => {
     console.warn(`MiniQMT dashboard API failed to start: ${error.message}`);
-    miniqmtApiProcess = null;
+    handleMiniQmtApiExit(child);
   });
-  miniqmtApiProcess.once("exit", (code, signal) => {
+  child.once("exit", (code, signal) => {
     if (code && code !== 0) {
       console.warn(`MiniQMT dashboard API exited: code=${code} signal=${signal || ""}`);
     }
-    miniqmtApiProcess = null;
+    handleMiniQmtApiExit(child);
   });
 }
 
+function handleMiniQmtApiExit(child) {
+  if (miniqmtApiProcess !== child) return;
+  miniqmtApiProcess = null;
+  scheduleMiniQmtApiRestart();
+}
+
+function scheduleMiniQmtApiRestart() {
+  if (!MINIQMT_API_AUTOSTART || shuttingDown || miniqmtApiRestartTimer) return;
+  const delay = Math.min(
+    MINIQMT_API_RESTART_MAX_MS,
+    MINIQMT_API_RESTART_BASE_MS * (2 ** miniqmtApiRestartAttempts),
+  );
+  miniqmtApiRestartAttempts += 1;
+  console.warn(`MiniQMT dashboard API will restart in ${Math.ceil(delay / 1000)}s`);
+  miniqmtApiRestartTimer = setTimeout(() => {
+    miniqmtApiRestartTimer = null;
+    void ensureMiniQmtApi();
+  }, delay);
+}
+
 function stopMiniQmtApi() {
+  if (miniqmtApiRestartTimer) clearTimeout(miniqmtApiRestartTimer);
+  miniqmtApiRestartTimer = null;
   if (!miniqmtApiProcess || miniqmtApiProcess.killed) return;
   miniqmtApiProcess.kill("SIGTERM");
   miniqmtApiProcess = null;
@@ -834,19 +1170,34 @@ async function handleSparks(url, response) {
     return;
   }
 
-  const sparks = await mapWithConcurrency(secids, 8, async (secid) => {
-    try {
-      return await fetchSecuritySparkline(secid);
-    } catch {
-      return null;
-    }
-  });
+  const marketCodes = Array.from(
+    new Set(secids.map(secidToMiniQmtMarketCode).filter(Boolean)),
+  );
+  if (marketCodes.length === 0) {
+    sendJson(response, 200, {
+      source: "MiniQMT 1m缓存 + full_tick实时采样",
+      time: new Date().toISOString(),
+      sparks: [],
+    });
+    return;
+  }
 
-  sendJson(response, 200, {
-    source: "腾讯今日分时优先",
-    time: new Date().toISOString(),
-    sparks: sparks.filter(Boolean),
-  });
+  try {
+    const query = new URLSearchParams({ codes: marketCodes.join(",") });
+    const payload = await fetchLocalJson(`/sparks?${query}`, 20_000);
+    sendJson(response, 200, {
+      ...payload,
+      source: payload?.source || "MiniQMT 1m缓存 + full_tick实时采样",
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "MiniQMT分时不可用";
+    const status = Number(error?.statusCode) || Number(message.match(/HTTP (\d+)/)?.[1]) || 503;
+    sendJson(response, status, {
+      error: message.replace(/^HTTP \d+:\s*/, ""),
+      service: "miniqmt-dashboard",
+      source: "MiniQMT",
+    });
+  }
 }
 
 async function handleResolve(url, response) {
@@ -876,6 +1227,211 @@ async function handleSearch(url, response) {
   sendJson(response, 200, { results });
 }
 
+function clockSeconds(value) {
+  const match = String(value || "").match(/^(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const second = Number(match[3] || 0);
+  if (hour > 23 || minute > 59 || second > 59) return null;
+  return hour * 3600 + minute * 60 + second;
+}
+
+function isNewBondAutoScanWindow(clock) {
+  const nowSeconds = clockSeconds(clock);
+  const start = clockSeconds(NEW_BOND_AUTO_SCAN_START);
+  const end = clockSeconds(NEW_BOND_AUTO_SCAN_END);
+  if (nowSeconds === null || start === null || end === null) return false;
+  return nowSeconds >= start && nowSeconds <= end;
+}
+
+function candidateSecid(candidate) {
+  const value = String(candidate?.secid || candidate?.market_code || candidate?.code || "").trim();
+  const marketCode = value.match(/^(\d{6})\.(SH|SZ)$/i);
+  if (marketCode) return normalizeSecidInput(`${marketCode[2]}${marketCode[1]}`);
+  return normalizeSecidInput(value);
+}
+
+function mergeSecondDayBondsIntoState(rawState, candidates, targetSector) {
+  const state = normalizeBoardState(rawState);
+  const sector = state.sectors.find((item) => item.name === targetSector);
+  if (!sector) {
+    throw new Error(`目标板块不存在：${targetSector}`);
+  }
+
+  const existingCodes = new Set(
+    sector.stocks
+      .map((stock) => normalizeSecidInput(stock.secid))
+      .filter(Boolean),
+  );
+  const added = [];
+  const alreadyPresent = [];
+  for (const candidate of Array.isArray(candidates) ? candidates : []) {
+    const secid = candidateSecid(candidate);
+    if (!secid) continue;
+    if (existingCodes.has(secid)) {
+      alreadyPresent.push(String(candidate.code || secid.split(".")[1]));
+      continue;
+    }
+    const stock = {
+      name: String(candidate.name || candidate.code || "").trim(),
+      secid,
+    };
+    if (!stock.name) continue;
+    sector.stocks.push(stock);
+    existingCodes.add(secid);
+    added.push({
+      ...stock,
+      code: secid.split(".")[1],
+      listingDate: String(candidate.listing_date || ""),
+      discovery: String(candidate.discovery || ""),
+    });
+  }
+  return { state, added, alreadyPresent };
+}
+
+async function withBoardStateMutationLock(task) {
+  const previous = boardStateMutationChain;
+  let release;
+  boardStateMutationChain = new Promise((resolve) => {
+    release = resolve;
+  });
+  await previous.catch(() => {});
+  try {
+    return await task();
+  } finally {
+    release();
+  }
+}
+
+async function applySecondDayBonds(candidates, targetSector) {
+  return withBoardStateMutationLock(async () => {
+    const currentState = await readBoardStateFile();
+    const merged = mergeSecondDayBondsIntoState(
+      currentState,
+      candidates,
+      targetSector,
+    );
+    if (merged.added.length === 0) {
+      return {
+        ...merged,
+        updated: false,
+        boardUpdatedAt: currentState.updatedAt || "",
+      };
+    }
+    await fs.promises.mkdir(path.dirname(BOARD_STATE_PATH), { recursive: true });
+    await writeJsonAtomic(BOARD_STATE_PATH, merged.state);
+    return {
+      ...merged,
+      updated: true,
+      boardUpdatedAt: merged.state.updatedAt,
+    };
+  });
+}
+
+async function scanNewBondSecondDay({ targetSector, date = "", apply = false } = {}) {
+  if (newBondScanInFlight) return newBondScanInFlight;
+  newBondScanInFlight = (async () => {
+    const query = date ? `?date=${encodeURIComponent(date)}` : "";
+    const discovery = await fetchLocalJson(`/new-bond-candidates${query}`, 30_000);
+    const candidates = Array.isArray(discovery?.candidates) ? discovery.candidates : [];
+    let boardUpdatedAt = "";
+    let added = [];
+    let alreadyPresent = [];
+    let updated = false;
+    if (apply && candidates.length > 0) {
+      const result = await applySecondDayBonds(candidates, targetSector);
+      boardUpdatedAt = result.boardUpdatedAt;
+      added = result.added;
+      alreadyPresent = result.alreadyPresent;
+      updated = result.updated;
+    } else if (apply) {
+      const currentState = await readBoardStateFile().catch(() => ({}));
+      boardUpdatedAt = String(currentState.updatedAt || "");
+    } else {
+      const currentState = await readBoardStateFile().catch(() => ({}));
+      boardUpdatedAt = String(currentState.updatedAt || "");
+    }
+
+    const result = {
+      ...discovery,
+      targetSector,
+      applied: apply,
+      updated,
+      added,
+      alreadyPresent,
+      boardUpdatedAt,
+      lastAutoScan: newBondLastResult,
+    };
+    newBondLastResult = result;
+    return result;
+  })().finally(() => {
+    newBondScanInFlight = null;
+  });
+  return newBondScanInFlight;
+}
+
+async function handleNewBondSecondDay(request, response, url) {
+  if (request.method !== "GET" && request.method !== "POST") {
+    response.writeHead(405, { Allow: "GET, POST" });
+    response.end("Method not allowed");
+    return;
+  }
+  if (request.method === "POST" && !isLoopbackRequest(request)) {
+    sendJson(response, 403, { error: "新券自动归组仅允许在运行看板的本机执行" });
+    return;
+  }
+
+  const body = request.method === "POST"
+    ? await readJsonBody(request, 16 * 1024)
+    : {};
+  const targetSector = String(
+    body?.targetSector
+      || url.searchParams.get("sector")
+      || NEW_BOND_SECOND_DAY_TARGET_SECTOR,
+  ).trim();
+  const date = String(body?.date || url.searchParams.get("date") || "").trim();
+  const apply = request.method === "POST" && body?.dryRun !== true;
+  const payload = await scanNewBondSecondDay({ targetSector, date, apply });
+  sendJson(response, 200, payload);
+}
+
+function scheduleNewBondSecondDayScan(delay = NEW_BOND_AUTO_SCAN_INTERVAL_MS) {
+  if (shuttingDown || newBondScanTimer) return;
+  newBondScanTimer = setTimeout(async () => {
+    newBondScanTimer = null;
+    const clock = currentChinaDateTimeParts();
+    const date = clock.date.replaceAll("-", "");
+    const chinaWeekday = new Date(`${clock.date}T00:00:00+08:00`).getDay();
+    const alreadyScanned = newBondLastResult?.autoScanDate === date;
+    if (
+      clock
+      && chinaWeekday !== 0
+      && chinaWeekday !== 6
+      && isNewBondAutoScanWindow(clock.time)
+      && !alreadyScanned
+    ) {
+      try {
+        const result = await scanNewBondSecondDay({
+          targetSector: NEW_BOND_SECOND_DAY_TARGET_SECTOR,
+          date,
+          apply: true,
+        });
+        result.autoScanDate = date;
+        newBondLastResult = result;
+        console.log(
+          `New-bond second-day scan ${date}: ${result.added.length} added to ${result.targetSector}`,
+        );
+      } catch (error) {
+        console.warn(
+          `New-bond second-day scan failed: ${error instanceof Error ? error.message : error}`,
+        );
+      }
+    }
+    scheduleNewBondSecondDayScan(NEW_BOND_AUTO_SCAN_INTERVAL_MS);
+  }, Math.max(250, delay));
+}
+
 async function handleState(request, response) {
   if (request.method === "GET") {
     try {
@@ -893,23 +1449,36 @@ async function handleState(request, response) {
 
   if (request.method === "POST") {
     const body = await readJsonBody(request);
-    const currentState = await readBoardStateFile().catch(() => null);
-    if (
-      currentState?.updatedAt &&
-      (!body?.baseUpdatedAt || body.baseUpdatedAt !== currentState.updatedAt)
-    ) {
+    let persisted;
+    try {
+      persisted = await withBoardStateMutationLock(async () => {
+        const currentState = await readBoardStateFile().catch(() => null);
+        if (
+          currentState?.updatedAt &&
+          (!body?.baseUpdatedAt || body.baseUpdatedAt !== currentState.updatedAt)
+        ) {
+          return {
+            conflict: true,
+            updatedAt: currentState.updatedAt,
+          };
+        }
+
+        const state = normalizeBoardState(body);
+        await fs.promises.mkdir(path.dirname(BOARD_STATE_PATH), { recursive: true });
+        await writeJsonAtomic(BOARD_STATE_PATH, state);
+        return { state };
+      });
+    } catch (error) {
+      throw error;
+    }
+    if (persisted.conflict) {
       sendJson(response, 409, {
         error: "页面数据已过期，请刷新后再编辑",
-        updatedAt: currentState.updatedAt,
+        updatedAt: persisted.updatedAt,
       });
       return;
     }
-
-    const state = normalizeBoardState(body);
-    await fs.promises.mkdir(path.dirname(BOARD_STATE_PATH), { recursive: true });
-    const temporaryPath = `${BOARD_STATE_PATH}.tmp`;
-    await fs.promises.writeFile(temporaryPath, `${JSON.stringify(state, null, 2)}\n`);
-    await fs.promises.rename(temporaryPath, BOARD_STATE_PATH);
+    const state = persisted.state;
     sendJson(response, 200, {
       ok: true,
       updatedAt: state.updatedAt,
@@ -1010,8 +1579,87 @@ function parseSinaResponse(raw, secidBySymbol) {
   return quotes;
 }
 
-async function fetchSinaGlobalIndices() {
-  const sinaDomesticIndexes = DOMESTIC_INDEXES.filter((item) => item.source !== "tencent");
+async function fetchMiniQmtIndexQuotes() {
+  const configs = DOMESTIC_INDEXES.filter((item) => item.source !== "tencent");
+  const codes = configs.map((item) => item.secid.split(".")[1] + (item.secid.startsWith("1.") ? ".SH" : ".SZ"));
+  const payload = await fetchLocalJson(`/quotes?codes=${codes.join(",")}`, 5000);
+  const rows = Array.isArray(payload?.quotes) ? payload.quotes : [];
+  const bySecid = new Map(rows.map((row) => [String(row?.secid || ""), row]));
+  const quotes = [];
+
+  for (const config of configs) {
+    const row = bySecid.get(config.secid);
+    const price = Number(row?.price);
+    const previousClose = Number(row?.previousClose);
+    if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(previousClose) || previousClose <= 0) {
+      continue;
+    }
+    const change = price - previousClose;
+    const percent = Number.isFinite(Number(row?.change))
+      ? Number(row.change)
+      : (change / previousClose) * 100;
+    const date = String(row?.date || "");
+    const time = String(row?.time || "");
+    const timeText = /^\d{8}$/.test(date) ? `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)} ${time}`.trim() : time;
+    quotes.push({
+      key: config.key,
+      group: config.group || "A股",
+      name: config.name,
+      price,
+      change,
+      percent,
+      secid: config.secid,
+      date,
+      time: timeText,
+      timetag: row?.timetag || "",
+      quoteSource: "MiniQMT full_tick",
+    });
+  }
+
+  if (quotes.length !== configs.length) {
+    throw new Error(`MiniQMT指数返回不完整（${quotes.length}/${configs.length}）`);
+  }
+
+  return Promise.all(
+    quotes.map(async (quote) => {
+      const config = configs.find((item) => item.key === quote.key);
+      return withDomesticIndexSparkline(quote, config);
+    }),
+  );
+}
+
+async function withDomesticIndexSparkline(quote, config) {
+  try {
+    const spark = await withTimeout(fetchTencentMinuteSparkline(config.symbol, 90), 2500);
+    return {
+      ...quote,
+      points: spark.points,
+      sparkTimes: spark.times,
+      sparkChange: spark.change,
+      sparkTime: spark.time,
+      sparkSource: "腾讯分时",
+    };
+  } catch {
+    try {
+      const spark = await withTimeout(fetchSinaSparkline(config.secid, 90), 2500);
+      return {
+        ...quote,
+        points: spark.points,
+        sparkTimes: spark.times,
+        sparkChange: spark.change,
+        sparkTime: spark.time,
+        sparkSource: "新浪5分钟K线",
+      };
+    } catch {
+      return quote;
+    }
+  }
+}
+
+async function fetchSinaGlobalIndices({ includeDomestic = true } = {}) {
+  const sinaDomesticIndexes = includeDomestic
+    ? DOMESTIC_INDEXES.filter((item) => item.source !== "tencent")
+    : [];
   const tencentDomesticIndexes = DOMESTIC_INDEXES.filter((item) => item.source === "tencent");
   const raw = await fetchSinaRaw([
     ...sinaDomesticIndexes.map((item) => item.symbol),
@@ -1022,32 +1670,7 @@ async function fetchSinaGlobalIndices() {
     sinaDomesticIndexes.map(async (config) => {
       const quote = parseSinaDomesticIndex(rows.get(config.symbol), config);
       if (!quote) return null;
-
-      try {
-        const spark = await withTimeout(fetchTencentMinuteSparkline(config.symbol, 90), 2500);
-        return {
-          ...quote,
-          points: spark.points,
-          sparkTimes: spark.times,
-          sparkChange: spark.change,
-          sparkTime: spark.time,
-          sparkSource: "腾讯分时",
-        };
-      } catch {
-        try {
-          const spark = await withTimeout(fetchSinaSparkline(config.secid, 90), 2500);
-          return {
-            ...quote,
-            points: spark.points,
-            sparkTimes: spark.times,
-            sparkChange: spark.change,
-            sparkTime: spark.time,
-            sparkSource: "新浪5分钟K线",
-          };
-        } catch {
-          return quote;
-        }
-      }
+      return withDomesticIndexSparkline(quote, config);
     }),
   );
   const tencentDomestic = await Promise.all(
@@ -1739,7 +2362,9 @@ function secidToTdxStockCode(secid) {
   return `${code}.SZ`;
 }
 
-function currentChinaDateTimeParts() {
+function chinaDateTimeParts(value = Date.now()) {
+  const moment = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(moment.getTime())) return null;
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Shanghai",
     year: "numeric",
@@ -1749,12 +2374,135 @@ function currentChinaDateTimeParts() {
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
-  }).formatToParts(new Date());
+  }).formatToParts(moment);
   const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return {
     date: `${map.year}-${map.month}-${map.day}`,
     time: `${map.hour}:${map.minute}:${map.second}`,
   };
+}
+
+function currentChinaDateTimeParts() {
+  return chinaDateTimeParts(Date.now());
+}
+
+function normalizeAuctionDate(value) {
+  const digits = String(value || "").replace(/\D/g, "").slice(0, 8);
+  return /^\d{8}$/.test(digits) ? digits : "";
+}
+
+function normalizeAuctionTime(value) {
+  const match = String(value || "").match(/(?:^|\s)(\d{2}):?(\d{2}):?(\d{2})(?:\D|$)/);
+  if (!match) return "";
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const second = Number(match[3]);
+  if (hour > 23 || minute > 59 || second > 59) return "";
+  return `${match[1]}:${match[2]}:${match[3]}`;
+}
+
+function auctionTimeSeconds(value) {
+  const normalized = normalizeAuctionTime(value);
+  if (!normalized) return null;
+  const [hour, minute, second] = normalized.split(":").map(Number);
+  return hour * 3600 + minute * 60 + second;
+}
+
+function quoteTimestampParts(value) {
+  let timestamp = Number(value);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return null;
+  if (timestamp < 100_000_000_000) timestamp *= 1000;
+  const parts = chinaDateTimeParts(timestamp);
+  return parts ? { ...parts, timestamp } : null;
+}
+
+function validateAuctionQuote(quote, tradingDate, capturedAt = Date.now()) {
+  const expectedDate = normalizeAuctionDate(tradingDate);
+  const quoteDate = normalizeAuctionDate(quote?.date);
+  const quoteTime = normalizeAuctionTime(quote?.time);
+  if (!expectedDate || quoteDate !== expectedDate) {
+    return { ok: false, reason: "quote_date_mismatch" };
+  }
+  if (!quoteTime || auctionClockPhase(quoteTime) !== "collecting") {
+    return { ok: false, reason: "quote_time_outside_auction" };
+  }
+
+  const timetag = String(quote?.timetag || "").trim();
+  if (timetag) {
+    const timetagDate = normalizeAuctionDate(timetag);
+    const timetagTime = normalizeAuctionTime(timetag);
+    if (timetagDate !== expectedDate || timetagTime !== quoteTime) {
+      return { ok: false, reason: "quote_timetag_mismatch" };
+    }
+  }
+
+  const timestampParts = quoteTimestampParts(quote?.timestamp);
+  if (!timestampParts || normalizeAuctionDate(timestampParts.date) !== expectedDate) {
+    return { ok: false, reason: "quote_timestamp_date_mismatch" };
+  }
+  if (auctionClockPhase(timestampParts.time) !== "collecting") {
+    return { ok: false, reason: "quote_timestamp_outside_auction" };
+  }
+  const quoteSeconds = auctionTimeSeconds(quoteTime);
+  const timestampSeconds = auctionTimeSeconds(timestampParts.time);
+  if (
+    quoteSeconds === null
+    || timestampSeconds === null
+    || Math.abs(quoteSeconds - timestampSeconds) > 5
+  ) {
+    return { ok: false, reason: "quote_timestamp_time_mismatch" };
+  }
+
+  const capturedParts = quoteTimestampParts(capturedAt);
+  if (!capturedParts || normalizeAuctionDate(capturedParts.date) !== expectedDate) {
+    return { ok: false, reason: "capture_date_mismatch" };
+  }
+  if (timestampParts.timestamp > capturedParts.timestamp + 15_000) {
+    return { ok: false, reason: "quote_timestamp_in_future" };
+  }
+  return {
+    ok: true,
+    date: expectedDate,
+    time: quoteTime,
+    timetag: timetag || `${expectedDate} ${quoteTime}`,
+    timestamp: timestampParts.timestamp,
+  };
+}
+
+function validateAuctionSample(sample, tradingDate) {
+  const timestampParts = quoteTimestampParts(sample?.timestamp);
+  const fallbackDate = timestampParts ? normalizeAuctionDate(timestampParts.date) : "";
+  return validateAuctionQuote(
+    {
+      date: sample?.date || fallbackDate,
+      time: sample?.time,
+      timetag: sample?.timetag,
+      timestamp: sample?.timestamp,
+    },
+    tradingDate,
+    sample?.capturedAt,
+  );
+}
+
+function filterAuctionCacheSeries(items, tradingDate, maxSamples = AUCTION_MAX_SAMPLES) {
+  const series = [];
+  let filteredSampleCount = 0;
+  for (const item of Array.isArray(items) ? items : []) {
+    if (!/^[01]\.\d{6}$/.test(item?.secid) || !Array.isArray(item.samples)) continue;
+    const samples = item.samples.slice(-maxSamples).filter((sample) => {
+      const valid = validateAuctionSample(sample, tradingDate).ok;
+      if (!valid) filteredSampleCount += 1;
+      return valid;
+    });
+    if (samples.length === 0) continue;
+    series.push({
+      secid: item.secid,
+      date: normalizeAuctionDate(tradingDate),
+      previousClose: Number(item.previousClose) || null,
+      samples,
+    });
+  }
+  return { series, filteredSampleCount };
 }
 
 function auctionClockPhase(time) {
@@ -1811,6 +2559,7 @@ async function sampleAuctionQuotes(clock = currentChinaDateTimeParts()) {
   if (secids.length === 0) return;
 
   const capturedAt = Date.now();
+  const rejectedReasons = new Map();
   for (const secidGroup of chunk(secids, 100)) {
     const marketCodes = secidGroup.map(secidToTdxStockCode);
     let payload;
@@ -1827,6 +2576,14 @@ async function sampleAuctionQuotes(clock = currentChinaDateTimeParts()) {
       const price = Number(quote.price);
       const amount = Number(quote.amount);
       if (!/^[01]\.\d{6}$/.test(secid) || !Number.isFinite(price) || price <= 0) continue;
+      const validation = validateAuctionQuote(quote, tradingDate, capturedAt);
+      if (!validation.ok) {
+        rejectedReasons.set(
+          validation.reason,
+          Number(rejectedReasons.get(validation.reason) || 0) + 1,
+        );
+        continue;
+      }
 
       let cached = auctionSeries.get(secid);
       if (!cached || cached.date !== tradingDate) {
@@ -1839,13 +2596,15 @@ async function sampleAuctionQuotes(clock = currentChinaDateTimeParts()) {
         auctionSeries.set(secid, cached);
       }
       const previous = cached.samples.at(-1);
-      const timestamp = Number(quote.timestamp) || capturedAt;
+      const timestamp = validation.timestamp;
       if (previous && previous.timestamp === timestamp) continue;
       cached.previousClose ||= Number(quote.previousClose) || null;
       cached.samples.push({
         capturedAt,
+        date: validation.date,
         timestamp,
-        time: quote.time || clock.time,
+        time: validation.time,
+        timetag: validation.timetag,
         price,
         change: Number(quote.change) || 0,
         amount: Number.isFinite(amount) ? amount : 0,
@@ -1860,25 +2619,70 @@ async function sampleAuctionQuotes(clock = currentChinaDateTimeParts()) {
       auctionCacheDirty = true;
     }
   }
+  if (rejectedReasons.size > 0 && capturedAt - auctionLastRejectedLogAt >= 30_000) {
+    console.warn(
+      `MiniQMT auction rejected stale/invalid quotes: ${[...rejectedReasons]
+        .map(([reason, count]) => `${reason}=${count}`)
+        .join(",")}`,
+    );
+    auctionLastRejectedLogAt = capturedAt;
+  }
 }
 
 async function loadAuctionBoardSecids() {
   try {
-    const stat = await fs.promises.stat(BOARD_STATE_PATH);
-    if (stat.mtimeMs === auctionBoardStateMtime && auctionBoardSecids.length > 0) {
+    const [boardStat, tagsStat] = await Promise.all([
+      fs.promises.stat(BOARD_STATE_PATH),
+      fs.promises.stat(BOND_TAGS_PATH).catch(() => ({ mtimeMs: 0 })),
+    ]);
+    if (
+      boardStat.mtimeMs === auctionBoardStateMtime
+      && tagsStat.mtimeMs === auctionBondTagsMtime
+      && auctionBoardSecids.length > 0
+    ) {
       return auctionBoardSecids;
     }
     const boardState = await readBoardStateFile();
-    auctionBoardSecids = Array.from(
-      new Set(
-        (boardState.sectors || [])
-          .flatMap((sector) => sector.stocks || [])
-          .map((stock) => normalizeSecidInput(stock.secid))
-          .filter((secid) => /^[01]\.\d{6}$/.test(secid))
-          .filter((secid) => !/^[89]/.test(secid.split(".")[1])),
-      ),
+    const boardStocks = (boardState.sectors || [])
+      .flatMap((sector) => sector.stocks || [])
+      .map((stock) => ({
+        name: String(stock?.name || "").trim(),
+        secid: normalizeSecidInput(stock?.secid),
+      }))
+      .filter((stock) => /^[01]\.\d{6}$/.test(stock.secid))
+      .filter((stock) => !/^[89]/.test(stock.secid.split(".")[1]));
+    const boardNames = new Map(boardStocks.map((stock) => [stock.secid, stock.name]));
+    const boardSecidSet = new Set(boardStocks.map((stock) => stock.secid));
+    const tagPayload = await readJsonFile(BOND_TAGS_PATH).catch(() => ({ rows: [] }));
+    const tagRows = Array.isArray(tagPayload?.rows) ? tagPayload.rows : [];
+    const tagsByBondSecid = new Map(
+      tagRows
+        .map((row) => [normalizeTagSecid(row?.code), row])
+        .filter(([secid]) => /^[01]\.\d{6}$/.test(secid)),
     );
-    auctionBoardStateMtime = stat.mtimeMs;
+    auctionBondPairs = [];
+    const auctionPairKeys = new Set();
+    for (const bond of boardStocks) {
+      if (!isConvertibleBondCode(bond.secid.split(".")[1])) continue;
+      const row = tagsByBondSecid.get(bond.secid);
+      const stockSecid = normalizeTagSecid(row?.stockCode);
+      if (!/^[01]\.\d{6}$/.test(stockSecid) || /^[89]/.test(stockSecid.split(".")[1])) continue;
+      boardSecidSet.add(stockSecid);
+      const pairKey = `${bond.secid}:${stockSecid}`;
+      if (auctionPairKeys.has(pairKey)) continue;
+      auctionPairKeys.add(pairKey);
+      auctionBondPairs.push({
+        bondSecid: bond.secid,
+        bondCode: bond.secid.split(".")[1],
+        bondName: bond.name || String(row?.name || bond.secid),
+        stockSecid,
+        stockCode: stockSecid.split(".")[1],
+        stockName: boardNames.get(stockSecid) || String(row?.stockName || stockSecid),
+      });
+    }
+    auctionBoardSecids = [...boardSecidSet];
+    auctionBoardStateMtime = boardStat.mtimeMs;
+    auctionBondTagsMtime = tagsStat.mtimeMs;
   } catch (error) {
     console.warn(`Auction watchlist unavailable: ${error.message}`);
   }
@@ -1901,14 +2705,15 @@ async function loadAuctionCache() {
     const parsed = JSON.parse(await fs.promises.readFile(AUCTION_CACHE_PATH, "utf8"));
     if (parsed?.date !== today || !Array.isArray(parsed.series)) return;
     auctionCacheDate = today;
-    for (const item of parsed.series) {
-      if (!/^[01]\.\d{6}$/.test(item?.secid) || !Array.isArray(item.samples)) continue;
-      auctionSeries.set(item.secid, {
-        secid: item.secid,
-        date: today,
-        previousClose: Number(item.previousClose) || null,
-        samples: item.samples.slice(-AUCTION_MAX_SAMPLES),
-      });
+    const filtered = filterAuctionCacheSeries(parsed.series, today);
+    for (const item of filtered.series) {
+      auctionSeries.set(item.secid, item);
+    }
+    if (filtered.filteredSampleCount > 0) {
+      auctionCacheDirty = true;
+      console.warn(
+        `Auction cache filtered ${filtered.filteredSampleCount} stale/invalid samples`,
+      );
     }
   } catch (error) {
     if (error?.code !== "ENOENT") {
@@ -2368,6 +3173,22 @@ function normalizeSecidInput(value) {
   return prefixed;
 }
 
+function normalizeTagSecid(value) {
+  const text = String(value || "").trim();
+  const suffixMatch = text.match(/^(\d{6})\.(SH|SZ)$/i);
+  if (suffixMatch) {
+    return `${suffixMatch[2].toUpperCase() === "SH" ? "1" : "0"}.${suffixMatch[1]}`;
+  }
+  return normalizeSecidInput(text);
+}
+
+function secidToMiniQmtMarketCode(secid) {
+  const normalized = normalizeSecidInput(secid);
+  const match = normalized.match(/^([01])\.(\d{6})$/);
+  if (!match || /^[89]/.test(match[2])) return "";
+  return `${match[2]}.${match[1] === "1" ? "SH" : "SZ"}`;
+}
+
 function marketFromCode(code) {
   if (/^(5|6|110|111|113|118)/.test(code)) return "1";
   return "0";
@@ -2553,3 +3374,16 @@ function sendJson(response, status, payload) {
   });
   response.end(JSON.stringify(payload));
 }
+
+module.exports = {
+  buildAuctionSignalRows,
+  auctionClockPhase,
+  filterAuctionCacheSeries,
+  mergeSecondDayBondsIntoState,
+  isNewBondAutoScanWindow,
+  normalizeAuctionDate,
+  normalizeAuctionTime,
+  quoteTimestampParts,
+  validateAuctionQuote,
+  validateAuctionSample,
+};

@@ -17,6 +17,13 @@
   font-family: Arial, "Microsoft YaHei", "PingFang SC", sans-serif;
 }
 
+/* Auction-linked rows carry two comparable metrics instead of the intraday
+   signal row's single event metric. Keep the pair readable in the existing
+   resizable monitor panel. */
+.market-monitor-row .signal-detail.auction-signal-detail {
+  grid-template-columns: minmax(84px, 1fr) 84px minmax(100px, 1fr) minmax(100px, 1fr) 52px;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -297,9 +304,61 @@ select {
 }
 
 .bond-market-preview {
+  position: relative;
   height: calc(var(--market-panel-body-height, 176px) + 144px);
+  overflow: hidden;
   border-top: 1px solid #dfe6d8;
   background: #fff;
+}
+
+.bond-preview-loading {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 6px;
+  color: #35452f;
+  background:
+    linear-gradient(100deg, transparent 35%, rgb(255 255 255 / 70%) 50%, transparent 65%) 0 0 / 220% 100%,
+    #f4f8ef;
+  animation: bond-preview-loading-sheen 1.15s linear infinite;
+}
+
+.bond-preview-loading[hidden] {
+  display: none;
+}
+
+.bond-preview-loading small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.bond-preview-loading-mark {
+  width: 28px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #d7e4ca;
+}
+
+.bond-preview-loading-mark::after {
+  display: block;
+  width: 50%;
+  height: 100%;
+  border-radius: inherit;
+  background: #5f804c;
+  content: "";
+  animation: bond-preview-loading-bar 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes bond-preview-loading-sheen {
+  to { background-position: -220% 0, 0 0; }
+}
+
+@keyframes bond-preview-loading-bar {
+  to { transform: translateX(100%); }
 }
 
 .bond-market-preview iframe {
@@ -822,6 +881,10 @@ textarea:disabled {
   gap: 6px;
 }
 
+.signal-monitor-controls [hidden] {
+  display: none !important;
+}
+
 .signal-monitor-controls label {
   gap: 5px;
   color: var(--muted);
@@ -989,6 +1052,80 @@ textarea:disabled {
 
 .signal-row.is-new {
   animation: signal-arrive 1.2s ease-out;
+}
+
+.auction-signal-row.is-auction-stock_lead,
+.auction-signal-row.is-auction-watch {
+  border-left-color: #e6a21a;
+}
+
+.auction-signal-row.is-auction-confirmed {
+  border-left-color: var(--red);
+}
+
+.auction-signal-row.is-auction-bond_spike {
+  border-left-color: #9b7bd8;
+}
+
+.signal-bond.auction-signal-pair {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.auction-signal-pair .signal-bond-name,
+.auction-signal-pair .signal-code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auction-signal-pair-spark {
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  width: 78px;
+}
+
+.auction-signal-pair-spark i {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.auction-signal-stock-bar {
+  background: #d96852;
+}
+
+.auction-signal-bond-bar {
+  background: #7a9fcb;
+}
+
+.signal-detail.auction-signal-detail {
+  grid-template-columns: minmax(84px, 1fr) 84px minmax(100px, 1fr) minmax(100px, 1fr) 52px;
+  gap: 5px;
+}
+
+.auction-signal-stock-metric {
+  color: #a3432f;
+}
+
+.auction-signal-bond-metric {
+  color: #466b9a;
+}
+
+.auction-signal-gap {
+  font-size: 10px;
+  text-align: center;
+}
+
+.auction-signal-reason {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #66705e;
+  font-size: 10px;
 }
 
 .signal-time,
@@ -1283,6 +1420,31 @@ textarea:disabled {
   }
 
   .market-monitor-row .signal-tags small:nth-child(n + 2) {
+    display: none;
+  }
+}
+
+@container signal-monitor (max-width: 900px) {
+  .market-monitor-row .auction-signal-row {
+    grid-template-columns: 50px minmax(170px, 0.85fr) minmax(300px, 1.5fr) minmax(100px, 0.7fr);
+  }
+
+  .market-monitor-row .signal-detail.auction-signal-detail {
+    grid-template-columns: minmax(84px, 0.8fr) minmax(100px, 1fr) minmax(100px, 1fr);
+  }
+
+  .auction-signal-pair-spark,
+  .auction-signal-gap {
+    display: none;
+  }
+}
+
+@container signal-monitor (max-width: 650px) {
+  .market-monitor-row .auction-signal-row {
+    grid-template-columns: 46px minmax(145px, 0.8fr) minmax(260px, 1.4fr);
+  }
+
+  .market-monitor-row .auction-signal-reason {
     display: none;
   }
 }
@@ -2361,5 +2523,22 @@ textarea:disabled {
 
   .editor-actions {
     flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 1100px) {
+  .market-monitor-row .signal-detail.auction-signal-detail {
+    grid-template-columns: minmax(76px, 1fr) 70px minmax(88px, 1fr) minmax(88px, 1fr) 44px;
+  }
+}
+
+@media (max-width: 760px) {
+  .market-monitor-row .signal-detail.auction-signal-detail {
+    grid-template-columns: minmax(88px, 1fr) minmax(88px, 1fr);
+  }
+
+  .auction-signal-pair-spark,
+  .auction-signal-gap {
+    display: none;
   }
 }

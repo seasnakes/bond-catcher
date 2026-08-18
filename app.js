@@ -1,9 +1,12 @@
 const EASTMONEY_TOKEN = "fa5fd1943c7b386f172d6893dbfba10b";
 const EASTMONEY_FIELDS = "f1,f2,f3,f4,f6,f12,f13,f14,f152";
 const UPDATE_INTERVAL_MS = 15000;
+const INDEX_UPDATE_INTERVAL_MS = 5000;
 const AUCTION_UPDATE_INTERVAL_MS = 3000;
 const BOND_UPDATE_INTERVAL_MS = 5000;
+const NEW_BOND_STATUS_INTERVAL_MS = 60_000;
 const SIGNAL_UPDATE_INTERVAL_MS = 2000;
+const AUCTION_SIGNAL_UPDATE_INTERVAL_MS = 3000;
 const SIGNAL_EVENT_LIMIT = 80;
 const SIGNAL_SPARKLINE_LIMIT = 24;
 const STOCK_LIST_STORAGE_KEY = "finance-board-stock-list-v1";
@@ -21,8 +24,11 @@ const MARKET_HEIGHT_STORAGE_KEY = "finance-board-market-height-v1";
 const MARKET_HEIGHT_DEFAULT = 176;
 const MARKET_HEIGHT_MIN = 120;
 const MARKET_HEIGHT_MAX = 520;
-const SPARKLINE_BATCH_SIZE = 24;
-const SPARKLINE_REFRESH_MS = 2 * 60 * 1000;
+const SPARKLINE_BATCH_SIZE = 100;
+// MiniQMT full_tick is sampled by the existing quote refresh. A 30-second
+// sparkline refresh keeps the small charts responsive without multiplying the
+// Bridge request rate for every card.
+const SPARKLINE_REFRESH_MS = 30 * 1000;
 const AUCTION_SERIES_BATCH_SIZE = 120;
 const AUCTION_SERIES_MAX_POINTS = 80;
 const AUCTION_SPARK_WIDTH = 60;
@@ -70,6 +76,12 @@ const SIGNAL_EVENT_LABELS = {
   open_high: "高开",
   open_low: "低开",
   volume_surge: "分钟放量",
+};
+const AUCTION_SIGNAL_LABELS = {
+  stock_lead: "正股领先",
+  stock_watch: "正股放量",
+  paired_confirmed: "联动确认",
+  bond_spike: "转债放量",
 };
 // Kept as a broad starter-pool reference; the active default is rebuilt from the screenshot text below.
 const LEGACY_DEFAULT_SECTORS = [
@@ -821,19 +833,33 @@ const state = {
   range: "all",
   boardStateUpdatedAt: "",
   nextRefreshAt: Date.now() + UPDATE_INTERVAL_MS,
+  nextIndexRefreshAt: Date.now() + INDEX_UPDATE_INTERVAL_MS,
   mainRefreshTimer: 0,
+  indexRefreshTimer: 0,
   bondRefreshTimer: 0,
   signalEvents: [],
+  signalMode: "intraday",
+  auctionSignals: [],
+  auctionSignalDate: "",
+  auctionSignalPayload: null,
+  auctionSignalSignature: "",
+  auctionSignalNewIds: new Set(),
   signalSparklines: new Map(),
   signalSparkPending: new Set(),
   signalLatestId: 0,
+  signalTradingDate: "",
   signalScope: "focus",
   signalTypes: new Set(),
   signalMinDailyAmount: 0,
   signalMinDailyAmplitude: 0,
   signalPaused: false,
   signalLoading: false,
+  signalRequestGeneration: 0,
+  signalStatusPayload: null,
+  signalHealth: null,
   signalTimer: 0,
+  newBondStatus: null,
+  newBondStatusTimer: 0,
   signalFilterTimer: 0,
   signalCodeSignature: "",
   signalCodeCount: 0,
@@ -848,6 +874,8 @@ const state = {
   themeExpandedTags: new Set(),
   bondPreviewCode: "",
   bondPreviewUrl: "",
+  boardUpdatesPaused: false,
+  boardRenderPending: false,
 };
 let serverPersistTimer = 0;
 let temporaryStatusTimer = 0;
@@ -879,6 +907,9 @@ const marketPanelSubtitle = document.querySelector("#marketPanelSubtitle");
 const externalMarketGrid = document.querySelector("#externalMarketGrid");
 const bondMarketPreview = document.querySelector("#bondMarketPreview");
 const bondMarketPreviewFrame = document.querySelector("#bondMarketPreviewFrame");
+const bondPreviewLoading = document.querySelector("#bondPreviewLoading");
+const bondPreviewLoadingTitle = document.querySelector("#bondPreviewLoadingTitle");
+const bondPreviewLoadingHint = bondPreviewLoading.querySelector("small");
 const bondPreviewReset = document.querySelector("#bondPreviewReset");
 const searchInput = document.querySelector("#searchInput");
 const sortSelect = document.querySelector("#sortSelect");
@@ -886,7 +917,9 @@ const rangeSelect = document.querySelector("#rangeSelect");
 const sparkToggle = document.querySelector("#sparkToggle");
 const refreshButton = document.querySelector("#refreshButton");
 const signalMonitor = document.querySelector(".signal-monitor");
+const signalMonitorTitle = document.querySelector("#signalMonitorTitle");
 const signalMonitorStatus = document.querySelector("#signalMonitorStatus");
+const signalMode = document.querySelector("#signalMode");
 const signalScope = document.querySelector("#signalScope");
 const signalAmountFilter = document.querySelector("#signalAmountFilter");
 const signalAmplitudeFilter = document.querySelector("#signalAmplitudeFilter");
@@ -997,6 +1030,72 @@ function panelBondUrl(url) {
   return target.href;
 }
 
+function hasActiveBondDetail() {
+  return !bondMarketPreview.hidden || !bondOverlay.hidden;
+}
+
+function setBondPreviewActive(active) {
+  const frameWindow = bondMarketPreviewFrame.contentWindow;
+  if (!frameWindow) return;
+  frameWindow.postMessage(
+    { type: "finance:bond-panel-active", active: Boolean(active) },
+    window.location.origin,
+  );
+}
+
+function handleBondPreviewLoad() {
+  const loadedUrl = bondMarketPreviewFrame.getAttribute("src") || "";
+  if (!loadedUrl || loadedUrl !== bondMarketPreviewFrame.dataset.requestedUrl) return;
+  bondMarketPreviewFrame.dataset.loadedUrl = loadedUrl;
+  bondPreviewLoading.hidden = true;
+  setBondPreviewActive(!bondMarketPreview.hidden && !document.hidden);
+}
+
+function handleBondPreviewError() {
+  const failedUrl = bondMarketPreviewFrame.getAttribute("src") || "";
+  if (!failedUrl || failedUrl !== bondMarketPreviewFrame.dataset.requestedUrl) return;
+  delete bondMarketPreviewFrame.dataset.loadedUrl;
+  bondPreviewLoadingTitle.textContent = "转债分时暂时无法打开";
+  bondPreviewLoadingHint.textContent = "请再次点击该转债重试";
+  bondPreviewLoading.hidden = false;
+  setBondPreviewActive(false);
+}
+
+function pauseBoardUpdates() {
+  if (state.boardUpdatesPaused) return;
+  state.boardUpdatesPaused = true;
+  state.boardRenderPending = false;
+
+  // Invalidate requests that started before the detail panel opened. Their
+  // responses may still arrive, but must not rebuild the large board behind it.
+  state.quoteRequestId += 1;
+  state.bondQuoteRequestId += 1;
+  state.loading = false;
+  state.bondLoading = false;
+  refreshButton.disabled = false;
+  window.clearTimeout(state.mainRefreshTimer);
+  window.clearTimeout(state.bondRefreshTimer);
+  state.mainRefreshTimer = 0;
+  state.bondRefreshTimer = 0;
+  updateStatus();
+}
+
+function resumeBoardUpdatesIfIdle() {
+  if (hasActiveBondDetail() || !state.boardUpdatesPaused) return;
+  const hadPendingRender = state.boardRenderPending;
+  state.boardUpdatesPaused = false;
+  state.boardRenderPending = false;
+  scheduleMainRefresh();
+  scheduleBondRefresh();
+
+  // One fresh all-board request is enough: refreshQuotes already includes
+  // stocks and convertible bonds. A separate bond request would duplicate it.
+  void refreshQuotes({ force: true }).catch((error) => {
+    console.warn("Board refresh after closing bond detail failed.", error);
+    if (hadPendingRender) renderAfterBackgroundUpdate();
+  });
+}
+
 function showBondMarketPreview(url) {
   const target = new URL(url, window.location.href);
   target.searchParams.delete("embedded");
@@ -1014,9 +1113,26 @@ function showBondMarketPreview(url) {
   bondMarketPreview.hidden = false;
   bondPreviewReset.hidden = false;
   marketMonitorRow.classList.add("is-bond-preview");
+  pauseBoardUpdates();
   bondMarketPreviewFrame.title = `${name} ${code} 分时与指标预览`;
-  if (bondMarketPreviewFrame.src !== previewUrl) {
-    bondMarketPreviewFrame.src = previewUrl;
+  const loadedUrl = bondMarketPreviewFrame.dataset.loadedUrl || "";
+  const currentUrl = bondMarketPreviewFrame.getAttribute("src") || "";
+  const canReuse = currentUrl === previewUrl && loadedUrl === previewUrl;
+  bondPreviewLoadingTitle.textContent = `${name} ${code}`;
+  bondPreviewLoadingHint.textContent = "正在读取 MiniQMT，价格与图表马上显示";
+  bondPreviewLoading.hidden = canReuse;
+  bondMarketPreviewFrame.dataset.requestedUrl = previewUrl;
+  if (!canReuse) {
+    // Let the newly-visible shell paint before starting iframe parsing/charting.
+    window.requestAnimationFrame(() => {
+      if (
+        bondMarketPreview.hidden
+        || bondMarketPreviewFrame.dataset.requestedUrl !== previewUrl
+      ) return;
+      bondMarketPreviewFrame.setAttribute("src", previewUrl);
+    });
+  } else {
+    setBondPreviewActive(true);
   }
 }
 
@@ -1027,9 +1143,11 @@ function showExternalMarkets() {
   marketPanelSubtitle.textContent = "TradingView / Yahoo · 延迟行情";
   externalMarketGrid.hidden = false;
   bondMarketPreview.hidden = true;
+  bondPreviewLoading.hidden = true;
   bondPreviewReset.hidden = true;
   marketMonitorRow.classList.remove("is-bond-preview");
-  bondMarketPreviewFrame.removeAttribute("src");
+  setBondPreviewActive(false);
+  resumeBoardUpdatesIfIdle();
 }
 
 function showBondOverlay(url, updateHistory = true) {
@@ -1044,6 +1162,7 @@ function showBondOverlay(url, updateHistory = true) {
   }
   bondOverlay.hidden = false;
   document.body.classList.add("has-bond-overlay");
+  pauseBoardUpdates();
   if (updateHistory) {
     const currentState = window.history.state || {};
     const returnUrl = currentState.bondOverlay
@@ -1067,6 +1186,7 @@ function hideBondOverlay() {
   bondOverlay.hidden = true;
   document.body.classList.remove("has-bond-overlay");
   bondOverlayFrame.removeAttribute("src");
+  resumeBoardUpdatesIfIdle();
 }
 
 function closeBondOverlay() {
@@ -1088,6 +1208,7 @@ function saveBoardViewState() {
         query: state.query,
         sort: state.sort,
         range: state.range,
+        signalMode: state.signalMode,
         signalScope: state.signalScope,
         signalTypes: [...state.signalTypes],
         signalMinDailyAmount: state.signalMinDailyAmount,
@@ -1114,6 +1235,7 @@ function restoreBoardViewState() {
     state.query = String(saved.query || "");
     state.sort = ["hot", "change", "name"].includes(saved.sort) ? saved.sort : "hot";
     state.range = ["all", "up", "down"].includes(saved.range) ? saved.range : "all";
+    state.signalMode = saved.signalMode === "auction" ? "auction" : "intraday";
     state.signalScope = saved.signalScope === "all" ? "all" : "focus";
     state.signalTypes = new Set(
       Array.isArray(saved.signalTypes)
@@ -1138,11 +1260,11 @@ function restoreBoardViewState() {
     searchInput.value = state.query;
     sortSelect.value = state.sort;
     rangeSelect.value = state.range;
+    signalMode.value = state.signalMode;
     signalScope.value = state.signalScope;
     signalAmountFilter.value = String(state.signalMinDailyAmount);
     signalAmplitudeFilter.value = String(state.signalMinDailyAmplitude);
-    signalPauseButton.classList.toggle("is-paused", state.signalPaused);
-    signalPauseButton.textContent = state.signalPaused ? "继续滚动" : "暂停滚动";
+    syncSignalPauseButton();
     return {
       scrollY: Math.max(0, Number(saved.scrollY) || 0),
       signalScrollTop: Math.max(0, Number(saved.signalScrollTop) || 0),
@@ -1151,6 +1273,11 @@ function restoreBoardViewState() {
     console.warn("Failed to restore board view state.", error);
     return null;
   }
+}
+
+function syncSignalPauseButton() {
+  signalPauseButton.classList.toggle("is-paused", state.signalPaused);
+  signalPauseButton.textContent = state.signalPaused ? "恢复更新" : "暂停更新";
 }
 
 function restoreBoardViewport(viewState) {
@@ -1355,6 +1482,31 @@ async function loadServerBoardState() {
   } catch (error) {
     console.warn("Server board state unavailable, using browser/local defaults.", error);
     return false;
+  }
+}
+
+async function refreshNewBondSecondDayState() {
+  try {
+    const json = await fetchJson("/api/new-bond-second-day", 30000);
+    const boardChanged = Boolean(
+      json?.boardUpdatedAt
+      && state.boardStateUpdatedAt
+      && json.boardUpdatedAt !== state.boardStateUpdatedAt,
+    );
+    state.newBondStatus = json;
+    if (boardChanged && !state.editMode && !serverPersistTimer) {
+      const loaded = await loadServerBoardState();
+      if (loaded) {
+        const stocks = getAllStocks(state.sectors);
+        state.quotes = createDemoQuotes(stocks);
+        state.hydrated = hydrateSectors(state.quotes);
+        render();
+        await refreshQuotes({ force: true });
+      }
+    }
+    updateStatus();
+  } catch (error) {
+    console.warn("New-bond second-day scan unavailable.", error);
   }
 }
 
@@ -1566,6 +1718,10 @@ function isRenaming() {
 }
 
 function renderAfterBackgroundUpdate() {
+  if (state.boardUpdatesPaused) {
+    state.boardRenderPending = true;
+    return;
+  }
   if (isRenaming()) {
     state.needsRenderAfterRename = true;
     return;
@@ -2214,40 +2370,34 @@ async function fetchMiniQmtQuotes(stocks) {
 }
 
 async function fetchPreferredQuotes(stocks) {
-  const quotes = new Map();
-  let qmtRequested = 0;
-  let qmtReturned = 0;
-
-  try {
-    const miniQmt = await fetchMiniQmtQuotes(stocks);
-    qmtRequested = miniQmt.requested;
-    qmtReturned = miniQmt.quotes.size;
-    for (const [secid, quote] of miniQmt.quotes) quotes.set(secid, quote);
-  } catch (error) {
-    console.warn("MiniQMT quote request failed, using fallback.", error);
-    qmtRequested = stocks.filter((stock) => miniQmtMarketCode(stock.secid)).length;
-  }
-
-  const missing = stocks.filter((stock) => !quotes.has(stock.secid));
-  if (missing.length > 0) {
-    let fallback;
-    try {
-      fallback = await fetchLocalQuotes(missing);
-    } catch (localError) {
-      try {
-        fallback = await fetchEastmoneyQuotes(missing);
-      } catch (eastmoneyError) {
-        console.warn("Fallback quote request failed, using demo data.", localError, eastmoneyError);
-        fallback = createDemoQuotes(missing);
-      }
-    }
-    for (const [secid, quote] of fallback) quotes.set(secid, quote);
-  }
-
-  const source = qmtReturned > 0
-    ? `MiniQMT实时 ${qmtReturned}/${qmtRequested}`
-    : "行情源兜底";
-  return { quotes, source, qmtRequested, qmtReturned };
+  const miniQmt = await fetchMiniQmtQuotes(stocks);
+  const qmtRequested = miniQmt.requested;
+  const qmtReturned = miniQmt.quotes.size;
+  const unsupported = new Set(
+    stocks
+      .filter((stock) => !miniQmtMarketCode(stock.secid))
+      .map((stock) => stock.secid),
+  );
+  const unsupportedHongKong = [...unsupported].filter((secid) => /^116\./.test(secid)).length;
+  const unsupportedBeijing = [...unsupported].filter((secid) => /^[01]\.[89]\d{5}$/.test(secid)).length;
+  const unsupportedOther = Math.max(
+    0,
+    unsupported.size - unsupportedHongKong - unsupportedBeijing,
+  );
+  const unsupportedParts = [
+    unsupportedHongKong > 0 ? `港股${unsupportedHongKong}只` : "",
+    unsupportedBeijing > 0 ? `北交所${unsupportedBeijing}只` : "",
+    unsupportedOther > 0 ? `其他${unsupportedOther}只` : "",
+  ].filter(Boolean);
+  const unsupportedNote = unsupportedParts.length > 0
+    ? ` · ${unsupportedParts.join("/")}未接入`
+    : "";
+  return {
+    quotes: miniQmt.quotes,
+    source: `MiniQMT实时 ${qmtReturned}/${qmtRequested}${unsupportedNote}`,
+    qmtRequested,
+    qmtReturned,
+  };
 }
 
 async function fetchLocalSparklines(secids) {
@@ -2516,20 +2666,43 @@ function formatScheduleTime(date) {
 
 function scheduleMainRefresh() {
   window.clearTimeout(state.mainRefreshTimer);
+  if (state.boardUpdatesPaused) {
+    state.mainRefreshTimer = 0;
+    updateStatus();
+    return;
+  }
   const session = updateNextRefreshAt();
   const delay = Math.max(1000, state.nextRefreshAt - Date.now());
   state.mainRefreshTimer = window.setTimeout(async () => {
     if (!document.hidden && marketSession().canAutoRefresh) {
       await refreshQuotes();
-      await refreshIndices();
     }
     scheduleMainRefresh();
   }, delay);
   updateStatus();
 }
 
+function scheduleIndexRefresh() {
+  window.clearTimeout(state.indexRefreshTimer);
+  const session = marketSession();
+  state.nextIndexRefreshAt = session.canAutoRefresh
+    ? Date.now() + INDEX_UPDATE_INTERVAL_MS
+    : session.nextAt.getTime();
+  const delay = Math.max(1000, state.nextIndexRefreshAt - Date.now());
+  state.indexRefreshTimer = window.setTimeout(async () => {
+    if (!document.hidden && marketSession().canAutoRefresh) {
+      await refreshIndices();
+    }
+    scheduleIndexRefresh();
+  }, delay);
+}
+
 function scheduleBondRefresh() {
   window.clearTimeout(state.bondRefreshTimer);
+  if (state.boardUpdatesPaused) {
+    state.bondRefreshTimer = 0;
+    return;
+  }
   const session = marketSession();
   const canFastRefreshBonds = session.canAutoRefresh && session.phase !== "auction";
   const delay = canFastRefreshBonds
@@ -2547,7 +2720,10 @@ function scheduleBondRefresh() {
 function scheduleSignalRefresh(delayMs = null) {
   window.clearTimeout(state.signalTimer);
   const session = marketSession();
-  const delay = delayMs ?? (session.canAutoRefresh ? SIGNAL_UPDATE_INTERVAL_MS : 30000);
+  const activeInterval = state.signalMode === "auction"
+    ? AUCTION_SIGNAL_UPDATE_INTERVAL_MS
+    : SIGNAL_UPDATE_INTERVAL_MS;
+  const delay = delayMs ?? (session.canAutoRefresh ? activeInterval : 30000);
   state.signalTimer = window.setTimeout(async () => {
     if (!document.hidden && !state.signalPaused) {
       await refreshSignalFeed();
@@ -2557,12 +2733,16 @@ function scheduleSignalRefresh(delayMs = null) {
 }
 
 function signalMetric(event) {
-  const speed = Number(event.speed_1m);
+  const speed = event.speed_1m === null || event.speed_1m === undefined
+    ? Number.NaN
+    : Number(event.speed_1m);
   if (Number.isFinite(speed)) {
     const percent = speed * 100;
     return `1分钟 ${percent > 0 ? "+" : ""}${percent.toFixed(2)}%`;
   }
-  const amount = Number(event.amount_1m);
+  const amount = event.amount_1m === null || event.amount_1m === undefined
+    ? Number.NaN
+    : Number(event.amount_1m);
   if (!Number.isFinite(amount)) return `评分 ${Number(event.score || 0).toFixed(1)}`;
   if (Math.abs(amount) >= 1e8) return `${(amount / 1e8).toFixed(2)}亿`;
   if (Math.abs(amount) >= 1e4) return `${(amount / 1e4).toFixed(1)}万`;
@@ -2700,6 +2880,198 @@ function renderSignalSparkline(event) {
   return box;
 }
 
+function auctionSignalLabel(signalType) {
+  return AUCTION_SIGNAL_LABELS[signalType] || signalType || "竞价联动";
+}
+
+function auctionSignalPercentile(value) {
+  if (value === null || value === undefined || value === "") return "P--";
+  const percent = Number(value);
+  return Number.isFinite(percent) ? `P${Math.round(percent * 100)}` : "P--";
+}
+
+function auctionSignalMetric(snapshot) {
+  if (!snapshot) return "--";
+  return `${formatSignedPercent(Number(snapshot.change))} · ${auctionSignalPercentile(snapshot.amountPercentile)}`;
+}
+
+function renderAuctionSignalSparkline(signal) {
+  const box = document.createElement("span");
+  box.className = "auction-signal-pair-spark";
+  box.title = "正股与转债竞价强度对比";
+  const stockWidth = Math.max(3, Math.min(76, Number(signal.stock?.strength || 0) * 0.76));
+  const bondWidth = Math.max(3, Math.min(76, Number(signal.bond?.strength || 0) * 0.76));
+  const stockBar = document.createElement("i");
+  stockBar.className = "auction-signal-stock-bar";
+  stockBar.style.width = `${stockWidth}px`;
+  const bondBar = document.createElement("i");
+  bondBar.className = "auction-signal-bond-bar";
+  bondBar.style.width = `${bondWidth}px`;
+  box.append(stockBar, bondBar);
+  return box;
+}
+
+function renderAuctionSignalFeed() {
+  signalFeed.replaceChildren();
+  if (state.auctionSignals.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "signal-empty";
+    if (state.signalLoading) {
+      empty.textContent = "正在读取MiniQMT竞价联动…";
+    } else if (
+      state.auctionSignalPayload?.phase === "collecting"
+      && state.auctionSignalPayload?.amountReady === false
+    ) {
+      empty.textContent = "竞价价格采集中 · 量能等待最终撮合";
+    } else {
+      empty.textContent = "当前竞价阶段暂无联动异动";
+    }
+    signalFeed.append(empty);
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  for (const signal of state.auctionSignals) {
+    const query = new URLSearchParams({
+      code: signal.bondCode || String(signal.bondSecid || "").split(".")[1],
+      name: signal.bondName || "可转债",
+    });
+    const row = document.createElement("a");
+    row.className = `signal-row auction-signal-row is-auction-${signal.status || "watch"}${state.auctionSignalNewIds.has(signal.id) ? " is-new" : ""}`;
+    row.href = `./bond.html?${query}`;
+    row.title = `${signal.reason || "竞价联动"} · ${signal.source || "MiniQMT"}`;
+
+    const time = document.createElement("span");
+    time.className = "signal-time";
+    time.textContent = String(signal.eventTime || "").slice(0, 8) || "--:--:--";
+
+    const pair = document.createElement("span");
+    pair.className = "signal-bond auction-signal-pair";
+    const pairName = document.createElement("span");
+    pairName.className = "signal-bond-name";
+    pairName.textContent = `${signal.stockName || signal.stockCode} → ${signal.bondName || signal.bondCode}`;
+    pairName.title = `${signal.stockName || signal.stockCode} → ${signal.bondName || signal.bondCode}`;
+    const code = document.createElement("small");
+    code.className = "signal-code";
+    code.textContent = `${signal.stockCode || ""} → ${signal.bondCode || ""}`;
+    pair.append(pairName, code);
+
+    const detail = document.createElement("span");
+    detail.className = "signal-detail auction-signal-detail";
+    const type = document.createElement("span");
+    type.className = "signal-type";
+    type.textContent = auctionSignalLabel(signal.signalType);
+    const stockMetric = document.createElement("span");
+    stockMetric.className = "signal-metric auction-signal-stock-metric";
+    stockMetric.textContent = `正股 ${auctionSignalMetric(signal.stock)}`;
+    stockMetric.title = `正股竞价金额增量 ${formatCompactAmount(Number(signal.stock?.recentAmount))}`;
+    const bondMetric = document.createElement("span");
+    bondMetric.className = "signal-metric auction-signal-bond-metric";
+    bondMetric.textContent = `转债 ${auctionSignalMetric(signal.bond)}`;
+    bondMetric.title = `转债竞价金额增量 ${formatCompactAmount(Number(signal.bond?.recentAmount))}`;
+    const gap = document.createElement("span");
+    gap.className = "signal-price auction-signal-gap";
+    gap.textContent = `差 ${Number(signal.leadGap || 0) > 0 ? "+" : ""}${Number(signal.leadGap || 0).toFixed(0)}`;
+    detail.append(type, renderAuctionSignalSparkline(signal), stockMetric, bondMetric, gap);
+
+    const reason = document.createElement("span");
+    reason.className = "signal-support auction-signal-reason";
+    reason.textContent = signal.status === "confirmed" ? "已确认" : signal.reason || "竞价异动";
+    reason.title = signal.reason || "竞价异动";
+
+    row.append(time, pair, detail, reason);
+    fragment.append(row);
+  }
+  signalFeed.append(fragment);
+}
+
+function updateSignalModeView() {
+  const auction = state.signalMode === "auction";
+  signalMonitor.classList.toggle("is-auction-mode", auction);
+  if (signalMonitorTitle) {
+    signalMonitorTitle.textContent = auction ? "MiniQMT 竞价联动" : "MiniQMT 主力监控精灵";
+  }
+  const intradayControls = [
+    signalScope?.closest("label"),
+    signalAmountFilter?.closest("label"),
+    signalAmplitudeFilter?.closest("label"),
+    signalTypeFilter,
+  ];
+  intradayControls.forEach((node) => {
+    if (node) node.hidden = auction;
+  });
+}
+
+function updateAuctionMonitorStatus(payload = null, error = null) {
+  signalMonitor.classList.toggle("is-live", !error && Boolean(payload));
+  signalMonitor.classList.toggle("is-error", Boolean(error));
+  if (state.signalPaused) {
+    signalMonitorStatus.textContent = `已暂停自动更新 · 保留 ${state.auctionSignals.length} 条`;
+    return;
+  }
+  if (error) {
+    signalMonitorStatus.textContent = "竞价联动读取失败 · 将自动重试";
+    return;
+  }
+  if (!payload) {
+    signalMonitorStatus.textContent = "正在读取竞价联动";
+    return;
+  }
+  const phaseLabels = { collecting: "竞价采集中", frozen: "竞价已冻结", closed: "竞价已结束" };
+  const requested = Number(payload.requestedPairs) || 0;
+  const sampled = Number(payload.sampledPairs) || 0;
+  const coverage = requested ? `${sampled}/${requested} 对` : "暂无配对";
+  const amountNote = payload.amountReady
+    ? "量能已就绪"
+    : payload.phase === "collecting"
+      ? "量能待撮合"
+      : "量能不足";
+  signalMonitorStatus.textContent = `${phaseLabels[payload.phase] || "竞价状态未知"} · MiniQMT 3秒 · ${amountNote} · 覆盖 ${coverage} · ${state.auctionSignals.length} 条`;
+}
+
+async function refreshAuctionSignalFeed(options = {}) {
+  if (state.signalLoading && !options.reset) return;
+  if (options.reset) {
+    state.auctionSignals = [];
+    state.auctionSignalDate = "";
+    state.auctionSignalPayload = null;
+    state.auctionSignalNewIds = new Set();
+  }
+  state.signalLoading = true;
+  renderAuctionSignalFeed();
+  try {
+    const payload = await fetchJson("/api/auction/signals", 8000);
+    const previousKeys = new Set(
+      state.auctionSignals.map((signal) => `${signal.bondSecid}:${signal.signalType}`),
+    );
+    state.auctionSignals = Array.isArray(payload.signals) ? payload.signals : [];
+    state.auctionSignalNewIds = new Set(
+      state.auctionSignals
+        .filter((signal) => !previousKeys.has(`${signal.bondSecid}:${signal.signalType}`))
+        .map((signal) => signal.id),
+    );
+    state.auctionSignalDate = String(payload.date || "");
+    state.auctionSignalPayload = payload;
+    if (!options.reset && state.auctionSignalNewIds.size > 0) {
+      const top = state.auctionSignals.find((signal) => state.auctionSignalNewIds.has(signal.id));
+      if (top) {
+        flashStatus(
+          `竞价联动：${top.stockName || top.stockCode} → ${top.bondName || top.bondCode} · ${auctionSignalLabel(top.signalType)}`,
+          3500,
+        );
+      }
+    }
+    renderAuctionSignalFeed();
+    updateAuctionMonitorStatus(payload);
+  } catch (error) {
+    console.warn("Auction signal request failed.", error);
+    updateAuctionMonitorStatus(null, error);
+  } finally {
+    state.signalLoading = false;
+    if (state.signalMode === "auction") renderAuctionSignalFeed();
+  }
+}
+
 async function ensureSignalSparklines() {
   resetSparklinesIfNewDay();
   const secids = Array.from(
@@ -2747,6 +3119,10 @@ async function ensureSignalSparklines() {
 }
 
 function renderSignalFeed(newIds = new Set()) {
+  if (state.signalMode === "auction") {
+    renderAuctionSignalFeed();
+    return;
+  }
   signalFeed.replaceChildren();
   if (state.signalEvents.length === 0) {
     const empty = document.createElement("div");
@@ -2829,30 +3205,126 @@ function renderSignalFeed(newIds = new Set()) {
   signalFeed.append(fragment);
 }
 
-function updateSignalMonitorStatus(payload = null, error = null) {
-  signalMonitor.classList.toggle("is-live", Boolean(payload?.monitor_alive) && !state.signalPaused);
-  signalMonitor.classList.toggle("is-error", Boolean(error));
+function signalHealthState(payload, health) {
+  const status = health?.status && typeof health.status === "object" ? health.status : {};
+  const updatedAt = Date.parse(String(status.updated_at || health?.status_updated_at || health?.database_updated_at || ""));
+  const ageMs = Number.isFinite(updatedAt) ? Math.max(0, Date.now() - updatedAt) : Number.POSITIVE_INFINITY;
+  const statusAgeSeconds = Number(health?.status_age_seconds);
+  const statusMaxAgeSeconds = Number(health?.status_max_age_seconds);
+  const returnedCodes = Math.max(
+    0,
+    Number(health?.last_returned_codes ?? status.last_returned_codes) || 0,
+  );
+  const requestedCodes = Math.max(
+    0,
+    Number(status.indicator_warmup?.requested_codes)
+      || Number(payload?.active_monitor_code_count)
+      || 0,
+  );
+  const tradingDate = String(status.trading_date || health?.latest_trading_date || payload?.trading_date || "");
+  const calendarDate = String(health?.calendar_date || "");
+  const processAlive = Boolean(health?.monitor_alive);
+  const statusFresh = Number.isFinite(statusAgeSeconds) && Number.isFinite(statusMaxAgeSeconds)
+    ? statusAgeSeconds <= statusMaxAgeSeconds
+    : ageMs <= 30_000;
+  const currentTradingDate = !calendarDate || !tradingDate || tradingDate === calendarDate;
+  return {
+    processAlive,
+    statusFresh,
+    currentTradingDate,
+    returnedCodes,
+    requestedCodes,
+    tradingDate,
+    reason: String(health?.reason || ""),
+    updatedTime: Number.isFinite(updatedAt)
+      ? new Date(updatedAt).toLocaleTimeString("zh-CN", { hour12: false })
+      : "--:--:--",
+  };
+}
+
+function signalHealthReasonLabel(reason) {
+  const labels = {
+    database_missing: "MiniQMT数据库缺失",
+    monitor_process_not_running: "监控进程已停止",
+    monitor_status_missing: "监控状态缺失",
+    monitor_status_timestamp_missing: "监控时间缺失",
+    monitor_status_stale: "监控状态已过期",
+    today_database_missing: "今日数据库缺失",
+    monitor_trading_date_mismatch: "监控数据日不一致",
+    miniqmt_returned_zero_quotes: "MiniQMT未返回有效行情",
+    quote_timestamp_missing: "行情时间缺失",
+    quote_data_stale: "MiniQMT行情已过期",
+  };
+  if (labels[reason]) return labels[reason];
+  if (reason.startsWith("monitor_status_")) return "监控状态异常";
+  return reason;
+}
+
+function updateSignalMonitorStatus(
+  payload = state.signalStatusPayload,
+  health = state.signalHealth,
+  error = null,
+) {
+  if (state.signalMode === "auction") {
+    updateAuctionMonitorStatus(state.auctionSignalPayload, error);
+    return;
+  }
+  const healthState = signalHealthState(payload, health);
+  const hasHealthVerdict = typeof health?.ok === "boolean"
+    || typeof health?.degraded === "boolean";
+  const healthFailed = Boolean(health) && (
+    hasHealthVerdict
+      ? health.degraded === true || health.ok === false
+      : !healthState.processAlive || !healthState.statusFresh
+  );
+  const isLive = healthState.processAlive
+    && !healthFailed
+    && healthState.statusFresh
+    && healthState.currentTradingDate
+    && healthState.returnedCodes > 0;
+  signalMonitor.classList.toggle("is-live", isLive && !state.signalPaused);
+  signalMonitor.classList.toggle("is-error", Boolean(error) || healthFailed);
   if (state.signalPaused) {
-    signalMonitorStatus.textContent = `已暂停 · 保留 ${state.signalEvents.length} 条`;
+    signalMonitorStatus.textContent = `已暂停自动更新 · 保留 ${state.signalEvents.length} 条`;
     return;
   }
   if (error) {
     signalMonitorStatus.textContent = "连接失败 · 将自动重试";
     return;
   }
-  if (!payload) {
+  if (!payload || !health) {
     signalMonitorStatus.textContent = "正在连接";
     return;
   }
-  const time = String(payload.generated_at || "").slice(11, 19);
   const dateNote = payload.data_is_stale ? ` · 数据日 ${payload.trading_date}` : "";
-  const activeCount = Number(payload.active_monitor_code_count || 0);
-  const sourceNote = activeCount
-    ? `全市场监控 ${activeCount} 只`
-    : "全市场监控";
-  signalMonitorStatus.textContent = payload.monitor_alive
-    ? `实时 · ${time} · ${sourceNote} · 展示 ${state.signalEvents.length} 条${dateNote}`
-    : `监控已停止 · ${sourceNote} · 展示 ${state.signalEvents.length} 条${dateNote}`;
+  const coverage = healthState.requestedCodes
+    ? `${healthState.returnedCodes}/${healthState.requestedCodes} 只`
+    : `${healthState.returnedCodes} 只`;
+  if (healthFailed && healthState.reason) {
+    signalMonitorStatus.textContent = `${signalHealthReasonLabel(healthState.reason)} · 最近返回 ${coverage} · 展示 ${state.signalEvents.length} 条${dateNote}`;
+    return;
+  }
+  if (healthState.reason === "healthy_outside_market_session") {
+    signalMonitorStatus.textContent = `非交易时段 · 最近有效 ${coverage} · 展示 ${state.signalEvents.length} 条${dateNote}`;
+    return;
+  }
+  if (!healthState.processAlive) {
+    signalMonitorStatus.textContent = `监控进程已停止 · 最近返回 ${coverage} · 展示 ${state.signalEvents.length} 条${dateNote}`;
+    return;
+  }
+  if (!healthState.statusFresh) {
+    signalMonitorStatus.textContent = `监控状态已过期 · ${healthState.updatedTime} · 最近返回 ${coverage} · 展示 ${state.signalEvents.length} 条${dateNote}`;
+    return;
+  }
+  if (!healthState.currentTradingDate) {
+    signalMonitorStatus.textContent = `等待今日行情 · 数据日 ${healthState.tradingDate} · 最近返回 ${coverage} · 展示 ${state.signalEvents.length} 条`;
+    return;
+  }
+  if (healthState.returnedCodes === 0) {
+    signalMonitorStatus.textContent = `等待MiniQMT有效行情 · 实际返回 ${coverage} · 展示 ${state.signalEvents.length} 条${dateNote}`;
+    return;
+  }
+  signalMonitorStatus.textContent = `实时 · ${healthState.updatedTime} · MiniQMT有效 ${coverage} · 展示 ${state.signalEvents.length} 条${dateNote}`;
 }
 
 function monitoredSignalCodes() {
@@ -2860,18 +3332,25 @@ function monitoredSignalCodes() {
 }
 
 async function refreshSignalFeed(options = {}) {
-  if (state.signalLoading) return;
+  if (state.signalMode === "auction") {
+    await refreshAuctionSignalFeed(options);
+    return;
+  }
   const monitoredCodes = monitoredSignalCodes();
   const signature = monitoredCodes.length ? monitoredCodes.join(",") : "*";
   const sourcesChanged = signature !== state.signalCodeSignature;
   state.signalCodeSignature = signature;
   state.signalCodeCount = monitoredCodes.length;
-  if (options.reset || sourcesChanged) {
+  const resetRequested = Boolean(options.reset || sourcesChanged);
+  if (state.signalLoading && !resetRequested) return;
+  if (resetRequested) {
+    state.signalRequestGeneration += 1;
     state.signalLatestId = 0;
     state.signalEvents = [];
-    renderSignalFeed();
   }
+  const requestGeneration = state.signalRequestGeneration;
   state.signalLoading = true;
+  if (resetRequested) renderSignalFeed();
   try {
     const query = new URLSearchParams({
       scope: state.signalScope,
@@ -2890,7 +3369,30 @@ async function refreshSignalFeed(options = {}) {
     if (state.signalLatestId > 0) {
       query.set("after_id", String(state.signalLatestId));
     }
-    const payload = await fetchJson(`/api/miniqmt/events?${query}`, 8000);
+    if (state.signalTradingDate) {
+      query.set("trading_date", state.signalTradingDate);
+    }
+    const [payload, health] = await Promise.all([
+      fetchJson(`/api/miniqmt/events?${query}`, 8000),
+      fetchJson("/api/miniqmt/health", 8000),
+    ]);
+    if (requestGeneration !== state.signalRequestGeneration) return;
+    const responseTradingDate = String(payload.trading_date || "");
+    const cursorReset = Boolean(payload.cursor_reset);
+    if (
+      !cursorReset
+      && responseTradingDate
+      && state.signalTradingDate
+      && responseTradingDate !== state.signalTradingDate
+    ) {
+      state.signalTradingDate = responseTradingDate;
+      return refreshSignalFeed({ reset: true });
+    }
+    if (cursorReset) {
+      state.signalEvents = [];
+      state.signalLatestId = 0;
+    }
+    if (responseTradingDate) state.signalTradingDate = responseTradingDate;
     const incoming = Array.isArray(payload.events) ? payload.events : [];
     const existingIds = new Set(state.signalEvents.map((event) => event.id));
     const additions = incoming.filter((event) => !existingIds.has(event.id));
@@ -2909,12 +3411,18 @@ async function refreshSignalFeed(options = {}) {
     );
     renderSignalFeed(newIds);
     void ensureSignalSparklines();
-    updateSignalMonitorStatus(payload);
+    state.signalStatusPayload = payload;
+    state.signalHealth = health;
+    updateSignalMonitorStatus(payload, health);
   } catch (error) {
+    if (requestGeneration !== state.signalRequestGeneration) return;
     console.warn("MiniQMT signal monitor failed.", error);
-    updateSignalMonitorStatus(null, error);
+    updateSignalMonitorStatus(null, null, error);
   } finally {
-    state.signalLoading = false;
+    if (requestGeneration === state.signalRequestGeneration) {
+      state.signalLoading = false;
+      if (!state.signalEvents.length) renderSignalFeed();
+    }
   }
 }
 
@@ -2956,12 +3464,11 @@ function clamp(value, min, max) {
 
 function hydrateSectors(quoteMap) {
   return state.sectors.map((sector) => {
-    const stocks = sector.stocks
-      .map((stock) => ({
-        ...stock,
-        ...(quoteMap.get(stock.secid) ?? null),
-      }))
-      .filter((stock) => stock.price !== undefined);
+    const stocks = sector.stocks.map((stock) => ({
+      ...stock,
+      ...(quoteMap.get(stock.secid) ?? null),
+      quoteUnavailable: !quoteMap.has(stock.secid),
+    }));
 
     const changes = stocks.map((stock) => stock.change).filter(Number.isFinite);
     const change =
@@ -4173,13 +4680,11 @@ function renderSparkline(stock) {
   const source = spark?.source || "今日分时";
   box.title = spark?.time ? `${source}：${spark.time}` : source;
 
-  let points = spark?.points || [];
+  const points = spark?.points || [];
   if (points.length < 2 && !pending) {
-    const price = Number(stock.price);
-    if (Number.isFinite(price) && price > 0) {
-      points = flatSparklinePoints(price);
-      box.title = "暂无分时数据，按当前价占位";
-    }
+    box.title = spark?.data_is_stale
+      ? "最近交易日MiniQMT分时数据不足"
+      : "暂无MiniQMT分时数据";
   }
 
   if (!points.length || points.length < 2) {
@@ -4282,10 +4787,6 @@ function formatAuctionAmount(value, compact = true) {
   return compact ? `竞${text}` : text;
 }
 
-function flatSparklinePoints(value) {
-  return Array.from({ length: 12 }, () => value);
-}
-
 function sparklinePath(points, width, height) {
   const values = points.map(Number).filter(Number.isFinite);
   const min = Math.min(...values);
@@ -4306,19 +4807,36 @@ function sparklinePath(points, width, height) {
 function updateStatus() {
   const session = marketSession();
   const seconds = Math.max(0, Math.ceil((state.nextRefreshAt - Date.now()) / 1000));
+  const indexSeconds = Math.max(0, Math.ceil((state.nextIndexRefreshAt - Date.now()) / 1000));
   const time = state.lastUpdated
     ? state.lastUpdated.toLocaleTimeString("zh-CN", { hour12: false })
     : "--:--:--";
-  const loadingText = state.loading
+  const loadingText = state.boardUpdatesPaused
+    ? "转债详情打开 · 主看板暂停刷新"
+    : state.loading
     ? "刷新中"
     : session.canAutoRefresh
-      ? `${seconds}s 后刷新`
+      ? `板块${seconds}s 后刷新 · 分时30s · 指数${indexSeconds}s`
       : `停止自动刷新 · 下次 ${formatScheduleTime(session.nextAt)}`;
+  const secondDayRows = Array.isArray(state.newBondStatus?.candidates)
+    ? state.newBondStatus.candidates
+    : [];
+  const secondDayNames = secondDayRows
+    .map((row) => String(row?.name || row?.code || "").trim())
+    .filter(Boolean);
+  const secondDayHint = secondDayNames.length > 0
+    ? ` · 上市第二日候选 ${secondDayNames.join("、")}`
+    : "";
   grid.classList.toggle("is-auction", isAuctionDisplaySession());
-  statusNode.textContent = `${state.source} · ${time} · ${session.label} · ${loadingText}`;
+  statusNode.textContent = `${state.source} · ${time} · ${session.label} · ${loadingText}${secondDayHint}`;
 }
 
 async function refreshQuotes(options = {}) {
+  if (state.boardUpdatesPaused) {
+    state.boardRenderPending = true;
+    updateStatus();
+    return;
+  }
   if (!options.force && !marketSession().canAutoRefresh) {
     updateNextRefreshAt();
     updateStatus();
@@ -4349,13 +4867,19 @@ async function refreshQuotes(options = {}) {
     const quotes = preferred.quotes;
     const source = preferred.source;
 
-    if (requestId === state.quoteRequestId) {
+    if (requestId === state.quoteRequestId && !state.boardUpdatesPaused) {
       state.quotes = quotes;
       state.hydrated = hydrateSectors(quotes);
       state.source = source;
       state.lastUpdated = new Date();
       updateNextRefreshAt();
       renderAfterBackgroundUpdate();
+    }
+  } catch (error) {
+    console.warn("MiniQMT board quote request failed; external fallback disabled.", error);
+    if (requestId === state.quoteRequestId) {
+      state.source = "MiniQMT行情不可用";
+      updateStatus();
     }
   } finally {
     if (requestId === state.quoteRequestId) {
@@ -4367,6 +4891,10 @@ async function refreshQuotes(options = {}) {
 }
 
 async function refreshBondQuotes(options = {}) {
+  if (state.boardUpdatesPaused) {
+    state.boardRenderPending = true;
+    return;
+  }
   if (!options.force && !marketSession().canAutoRefresh) return;
   if (state.loading || (state.bondLoading && !options.force)) return;
 
@@ -4379,12 +4907,13 @@ async function refreshBondQuotes(options = {}) {
   try {
     const preferred = await fetchPreferredQuotes(bonds);
     const quotes = preferred.quotes;
-    if (requestId !== state.bondQuoteRequestId) return;
+    if (requestId !== state.bondQuoteRequestId || state.boardUpdatesPaused) return;
 
     for (const [secid, quote] of quotes) {
       state.quotes.set(secid, quote);
     }
     state.hydrated = hydrateSectors(state.quotes);
+    state.source = preferred.source;
     state.lastUpdated = new Date();
     renderAfterBackgroundUpdate();
     updateStatus();
@@ -4420,6 +4949,10 @@ async function boot() {
   restoreMarketPanelHeight();
   await loadServerBoardState();
   const restoredView = restoreBoardViewState();
+  if (!restoredView && marketSession().phase === "auction") {
+    state.signalMode = "auction";
+  }
+  syncSignalPauseButton();
   const stocks = getAllStocks(state.sectors);
   sparkToggle.checked = state.showSparklines;
   state.quotes = createDemoQuotes(stocks);
@@ -4432,8 +4965,12 @@ async function boot() {
   render();
   await refreshQuotes({ force: true });
   await refreshIndices({ force: true });
+  await refreshNewBondSecondDayState();
   scheduleMainRefresh();
+  scheduleIndexRefresh();
   scheduleBondRefresh();
+  signalMode.value = state.signalMode;
+  updateSignalModeView();
   signalScope.value = state.signalScope;
   renderSignalTypeOptions();
   await refreshSignalFeed({ reset: true });
@@ -4441,14 +4978,26 @@ async function boot() {
   restoreBoardViewport(restoredView);
 
   window.setInterval(updateStatus, 1000);
+  state.newBondStatusTimer = window.setInterval(
+    refreshNewBondSecondDayState,
+    NEW_BOND_STATUS_INTERVAL_MS,
+  );
 
   document.addEventListener("visibilitychange", () => {
+    setBondPreviewActive(!document.hidden && !bondMarketPreview.hidden);
     scheduleMainRefresh();
+    scheduleIndexRefresh();
     scheduleBondRefresh();
     scheduleSignalRefresh();
-    if (!document.hidden && marketSession().canAutoRefresh && Date.now() > state.nextRefreshAt) {
+    if (!document.hidden) refreshNewBondSecondDayState();
+    if (
+      !document.hidden
+      && !state.boardUpdatesPaused
+      && marketSession().canAutoRefresh
+      && Date.now() > state.nextRefreshAt
+    ) {
       refreshQuotes();
-      refreshIndices();
+      refreshIndices({ force: true });
       refreshBondQuotes({ force: true });
       refreshSignalFeed();
     }
@@ -4459,13 +5008,16 @@ window.addEventListener("pagehide", saveBoardViewState);
 window.addEventListener("pageshow", (event) => {
   if (!event.persisted) return;
   scheduleMainRefresh();
+  scheduleIndexRefresh();
   scheduleBondRefresh();
   scheduleSignalRefresh();
   updateStatus();
   if (marketSession().canAutoRefresh) {
-    refreshQuotes();
-    refreshIndices();
-    refreshBondQuotes({ force: true });
+    refreshIndices({ force: true });
+    if (!state.boardUpdatesPaused) {
+      refreshQuotes();
+      refreshBondQuotes({ force: true });
+    }
     if (!state.signalPaused) refreshSignalFeed();
   }
 });
@@ -4494,6 +5046,8 @@ window.addEventListener("message", (event) => {
     showBondOverlay(event.data.url || state.bondPreviewUrl);
   }
 });
+bondMarketPreviewFrame.addEventListener("load", handleBondPreviewLoad);
+bondMarketPreviewFrame.addEventListener("error", handleBondPreviewError);
 bondPreviewReset.addEventListener("click", (event) => {
   event.preventDefault();
   event.stopPropagation();
@@ -4577,6 +5131,7 @@ document.addEventListener(
     event.preventDefault();
     event.stopPropagation();
     showBondOverlay(link.href);
+    if (!bondMarketPreview.hidden) showExternalMarkets();
   },
   true,
 );
@@ -4612,6 +5167,7 @@ refreshButton.addEventListener("click", () => {
   refreshBondQuotes({ force: true });
   refreshSignalFeed();
   scheduleMainRefresh();
+  scheduleIndexRefresh();
   scheduleBondRefresh();
   scheduleSignalRefresh();
 });
@@ -4628,6 +5184,14 @@ signalScope.addEventListener("change", async (event) => {
   saveBoardViewState();
   await refreshSignalFeed({ reset: true });
   scheduleSignalRefresh();
+});
+
+signalMode.addEventListener("change", async (event) => {
+  state.signalMode = event.target.value === "auction" ? "auction" : "intraday";
+  updateSignalModeView();
+  saveBoardViewState();
+  await refreshSignalFeed({ reset: true });
+  scheduleSignalRefresh(state.signalMode === "auction" ? AUCTION_SIGNAL_UPDATE_INTERVAL_MS : SIGNAL_UPDATE_INTERVAL_MS);
 });
 
 signalAmountFilter.addEventListener("change", async (event) => {
@@ -4682,8 +5246,7 @@ document.addEventListener("keydown", (event) => {
 
 signalPauseButton.addEventListener("click", () => {
   state.signalPaused = !state.signalPaused;
-  signalPauseButton.classList.toggle("is-paused", state.signalPaused);
-  signalPauseButton.textContent = state.signalPaused ? "继续滚动" : "暂停滚动";
+  syncSignalPauseButton();
   updateSignalMonitorStatus();
   if (state.signalPaused) {
     window.clearTimeout(state.signalTimer);

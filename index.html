@@ -99,6 +99,11 @@
           </article>
         </div>
         <div id="bondMarketPreview" class="bond-market-preview" hidden>
+          <div id="bondPreviewLoading" class="bond-preview-loading" role="status">
+            <span class="bond-preview-loading-mark" aria-hidden="true"></span>
+            <strong id="bondPreviewLoadingTitle">正在打开转债分时</strong>
+            <small>正在读取 MiniQMT，价格与图表马上显示</small>
+          </div>
           <iframe
             id="bondMarketPreviewFrame"
             title="转债分时与指标预览"
@@ -129,10 +134,17 @@
         <header class="signal-monitor-head">
           <div class="signal-monitor-title">
             <span class="signal-live-dot" aria-hidden="true"></span>
-            <strong>MiniQMT 主力监控精灵</strong>
+            <strong id="signalMonitorTitle">MiniQMT 主力监控精灵</strong>
             <span id="signalMonitorStatus">正在连接</span>
           </div>
           <div class="signal-monitor-controls">
+            <label>
+              <span>模式</span>
+              <select id="signalMode">
+                <option value="intraday">盘中信号</option>
+                <option value="auction">竞价联动</option>
+              </select>
+            </label>
             <label>
               <span>显示</span>
               <select id="signalScope">

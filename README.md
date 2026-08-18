@@ -96,13 +96,16 @@ ETF|科创50ETF|588000
 
 前端只访问本地 Node 服务，由后端统一代理外部行情接口：
 
-- `/api/miniqmt/quotes`：A 股、ETF、可转债优先使用 MiniQMT `full_tick` 实时行情；单只缺失或 Bridge 暂时不可用时回退到 `/api/quotes`。
+- `/api/miniqmt/quotes`：主看板板块内的 A 股、ETF、可转债价格和涨跌幅统一使用 MiniQMT `full_tick` 实时行情；单只缺失时显示 `--`，不混入外部行情。
 - `/api/miniqmt/daily`：通过 QMT Bridge 补齐并读取指定转债的日线行情，支持60/120/250日视图；服务内五分钟缓存避免重复下载。
+- `/api/miniqmt/intraday-backfill`：分时“立即刷新”和盘后自动修复使用的单标的维护队列。盘中只排队，工作日 15:12～18:00 且 Monitor 确认停止后才串行下载并复验；人工任务优先，连续 Bridge 故障会自动冷却，不修改历史信号库。
 - `/api/auction/series`：服务端在 09:15–09:25:30 每 3 秒采集当前看板沪深标的的 MiniQMT 竞价快照，保存竞价价格、累计金额与增量金额；网页首次读取历史，后续按 cursor 增量更新。
+- `/api/auction/signals`：在上述竞价快照上按转债—正股配对计算“正股领先、转债放量、联动确认”等只读异动信号，并返回覆盖率与采样状态。
 - `/api/quotes`：新浪行情兜底，并继续负责 MiniQMT 不覆盖的港股等标的。
 - `/api/indices`：国内和外围指数报价；上证、创业板、科创综指来自新浪报价，中证转债来自腾讯报价，韩国 KOSPI / 日经 225 / 恒生科技使用对应外围指数源。
 - “外围分时”通过 TradingView Mini Chart 嵌入 `CAPITALCOM:NAS100` 与 `BBG:BSK200`。前者是纳指100 CFD（CME NQ 方向代理），后者是 Bloomberg 韩国200指数（KOSPI 方向代理）；TradingView 网页组件不允许嵌入 `CME_MINI:NQ1!`、`TVC:KOSPI` 或 `KRX:KOSPI`，因此不把代理行情标成对应交易所原始指数。
-- `/api/sparks`：今日分时缩略走势，腾讯分时 `ifzq.gtimg.cn` 优先；港股额外使用 Yahoo 港股分时兜底；东方财富分时和新浪 5 分钟 K 线作为后续兜底。
+- `/api/sparks`：主看板板块内的今日分时缩略走势使用 MiniQMT 1 分钟缓存与现有 `full_tick` 实时采样合并；盘后维护队列会把看板内缺失的沪深股票按单代码、单交易日串行补齐到持久化分钟缓存，不再为板块标的请求腾讯、东方财富或新浪分时。
+- `/api/new-bond-second-day`：读取“上市第二交易日”候选，并在开盘前自动把候选幂等加入 `小热次` 板块。上市资料来自动态可转债列表，交易日来自 QMT Bridge 日历，实时价格仍只来自 MiniQMT；因此 MiniQMT 债券列表短暂滞后时，仍能发现新上市沪市转债。目标板块可通过 `NEW_BOND_SECOND_DAY_TARGET_SECTOR` 修改，POST 仅允许本机调用。
 
 集合竞价期间，卡片缩略图会切换为 MiniQMT 竞价价格线和金额柱；09:25:30 后冻结到 09:30，随后恢复普通盘中分时缩略图。竞价采样缓存写入 `runtime/auction-series.json`，不纳入 Git。
 - `/api/search`：添加标的联想，本地沪深名单优先，东方财富远程搜索兜底。
@@ -116,6 +119,10 @@ ETF|科创50ETF|588000
 - 韩国 KOSPI / 日经 225：Yahoo 分时 -> 东方财富分时。
 - 纳指100 / 韩国市场 TradingView 图：Capital.com NAS100 CFD / Bloomberg South Korea 200，只用于观察外围方向。
 - 指数没有真实分时数据时不画假线；个股没有分时数据时会按当前价画平线占位，并在提示里标明。
+
+## 运行与维护
+
+- [2026-08-12 MiniQMT 信号与分时修复记录](docs/2026-08-12-miniqmt-signal-repair.md)：根因、影响窗口、跨仓库修改、启动/健康检查、测试证据、遗留风险与回滚排障。
 
 ## 项目结构
 

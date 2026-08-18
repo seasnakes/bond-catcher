@@ -40,6 +40,9 @@ RUNTIME_ROOT = Path(
 DATA_ROOT = RUNTIME_ROOT / "data"
 STATUS_PATH = RUNTIME_ROOT / "status.json"
 SERVICE_PATH = RUNTIME_ROOT / "service.json"
+MONITOR_HISTORY_REPAIR_PRIORITY_PATH = (
+    RUNTIME_ROOT / "history-repair-priority.json"
+)
 CODE_PATTERN = re.compile(r"^(110|111|113|118|123|127|128)\d{3}$")
 MARKET_CODE_PATTERN = re.compile(r"^\d{6}\.(SH|SZ)$")
 QMT_BRIDGE_HOST = os.environ.get("QMT_BRIDGE_HOST", "10.211.55.3")
@@ -85,6 +88,20 @@ INTRADAY_CURRENT_CACHE_TTL_SECONDS = 60
 INTRADAY_BACKFILL_RETRIES = 3
 INTRADAY_BACKFILL_WAIT_SECONDS = 0.4
 INTRADAY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+# Board sparklines reuse the same full_tick requests as the quote refresh.  The
+# dashboard API keeps a small in-memory sample buffer instead of starting a
+# second Bridge poller or asking an external data vendor for another series.
+LIVE_INTRADAY_MAX_POINTS = 480
+LIVE_INTRADAY_SAMPLE_MIN_GAP_MS = 10_000
+LIVE_INTRADAY_SAMPLES: dict[str, list[dict[str, Any]]] = {}
+LIVE_INTRADAY_LOCK = threading.RLock()
+LIVE_INTRADAY_DATABASE_PATH = Path(
+    os.environ.get(
+        "MINIQMT_BOARD_SPARK_DATABASE_PATH",
+        RUNTIME_ROOT / "board-spark-samples.sqlite3",
+    )
+).expanduser()
+LIVE_INTRADAY_PERSIST_LOCK = threading.Lock()
 INTRADAY_DOWNLOAD_BACKOFF_INITIAL_SECONDS = 30
 INTRADAY_DOWNLOAD_BACKOFF_MAX_SECONDS = 300
 INTRADAY_DOWNLOAD_BACKOFF: dict[str, dict[str, Any]] = {}
@@ -126,6 +143,7 @@ INTRADAY_BACKFILL_POSTCLOSE_UNIVERSE_CODES: set[str] = set()
 INTRADAY_BACKFILL_STATE_LOADED = False
 INTRADAY_BACKFILL_PERSIST_LOCK = threading.Lock()
 INTRADAY_BACKFILL_CACHE_PERSIST_LOCK = threading.Lock()
+MONITOR_HISTORY_REPAIR_PRIORITY_LOCK = threading.Lock()
 DETAIL_TICK_TIMEOUT_SECONDS = float(
     os.environ.get("MINIQMT_DETAIL_TICK_TIMEOUT_SECONDS", "0.75")
 )
@@ -141,6 +159,12 @@ HISTORICAL_VOLUME_CACHE: dict[
     tuple[float, tuple[float | None, float | None]],
 ] = {}
 FINANCE_ROOT = Path(__file__).resolve().parents[1]
+BOARD_STATE_PATH = Path(
+    os.environ.get(
+        "FINANCE_BOARD_STATE_PATH",
+        FINANCE_ROOT / "data" / "board-state.json",
+    )
+).expanduser()
 INTRADAY_BACKFILL_STATE_PATH = Path(
     os.environ.get(
         "MINIQMT_BACKFILL_STATE_PATH",
@@ -178,6 +202,8 @@ REDEEM_NOTICE_CACHE_TTL_SECONDS = 21_600
 REDEEM_NOTICE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 BOND_REFERENCE_CACHE_TTL_SECONDS = 21_600
 BOND_REFERENCE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+NEW_BOND_REFERENCE_CACHE_TTL_SECONDS = 300
+NEW_BOND_REFERENCE_LIST_CACHE: tuple[float, list[dict[str, Any]]] | None = None
 PURPLE_BREAK_TOLERANCE = 0.001
 PURPLE_BREAK_CONFIRM_BARS = 2
 BRIDGE_CONFIG_CACHE: dict[str, str] = {}
@@ -237,6 +263,42 @@ def read_json(path: Path) -> dict[str, Any]:
         return value if isinstance(value, dict) else {}
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {}
+
+
+def request_monitor_history_repair_priority(
+    stored_code: str,
+    trading_date: str,
+    *,
+    reason: str = "dashboard_visible_gap",
+) -> bool:
+    """Give the live monitor the currently viewed code's next repair slot."""
+    now = time.time()
+    payload = {
+        "version": 1,
+        "code": str(stored_code).upper(),
+        "trading_date": str(trading_date),
+        "reason": str(reason),
+        "requested_at_epoch": now,
+        "expires_at_epoch": now + 45.0,
+    }
+    try:
+        with MONITOR_HISTORY_REPAIR_PRIORITY_LOCK:
+            MONITOR_HISTORY_REPAIR_PRIORITY_PATH.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+            temporary = MONITOR_HISTORY_REPAIR_PRIORITY_PATH.with_name(
+                f"{MONITOR_HISTORY_REPAIR_PRIORITY_PATH.name}.{os.getpid()}"
+                f".{threading.get_ident()}.{time.time_ns()}.tmp"
+            )
+            temporary.write_text(
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                encoding="utf-8",
+            )
+            temporary.replace(MONITOR_HISTORY_REPAIR_PRIORITY_PATH)
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
 
 
 def load_bond_tags() -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
@@ -390,6 +452,10 @@ def normalize_market_code(value: str) -> str:
     return code
 
 
+def market_code_to_secid(code: str) -> str:
+    return f"{'1' if code.endswith('.SH') else '0'}.{code[:6]}"
+
+
 def finite_or_none(value: Any) -> float | None:
     try:
         number = float(value)
@@ -406,6 +472,215 @@ def clean_json(value: Any) -> Any:
     if isinstance(value, float) and not math.isfinite(value):
         return None
     return value
+
+
+def live_quote_timestamp(quote: dict[str, Any]) -> int:
+    timestamp = int(quote.get("timestamp") or 0)
+    if timestamp > 0:
+        return timestamp
+    digits = re.sub(r"\D", "", str(quote.get("timetag") or ""))
+    if len(digits) < 14:
+        return 0
+    try:
+        moment = datetime.strptime(digits[:14], "%Y%m%d%H%M%S")
+    except ValueError:
+        return 0
+    return int(china_now(moment).timestamp() * 1000)
+
+
+def record_live_intraday_sample(
+    market_code: str,
+    quote: dict[str, Any],
+) -> dict[str, Any] | None:
+    price = finite_or_none(quote.get("price"))
+    timestamp = live_quote_timestamp(quote)
+    trading_date = compact_date(quote.get("date") or quote.get("timetag"))
+    if (
+        not MARKET_CODE_PATTERN.fullmatch(market_code)
+        or price is None
+        or price <= 0
+        or timestamp <= 0
+        or len(trading_date) != 8
+        or trading_date != china_now().strftime("%Y%m%d")
+    ):
+        return None
+
+    sample = {
+        "time": timestamp,
+        "price": price,
+        "date": trading_date,
+    }
+    should_persist = True
+    with LIVE_INTRADAY_LOCK:
+        points = LIVE_INTRADAY_SAMPLES.setdefault(market_code, [])
+        if points and points[-1].get("date") != trading_date:
+            points.clear()
+        if (
+            points
+            and timestamp - int(points[-1].get("time") or 0)
+            < LIVE_INTRADAY_SAMPLE_MIN_GAP_MS
+        ):
+            # Keep the bucket's original timestamp. Moving it on every fast
+            # refresh would prevent a new bucket from ever opening.
+            sample["time"] = int(points[-1].get("time") or timestamp)
+            points[-1] = sample
+            should_persist = False
+        else:
+            points.append(sample)
+        if len(points) > LIVE_INTRADAY_MAX_POINTS:
+            del points[:-LIVE_INTRADAY_MAX_POINTS]
+    return {**sample, "should_persist": should_persist}
+
+
+def persist_live_intraday_samples(samples: list[dict[str, Any]]) -> None:
+    rows: list[tuple[str, str, int, float]] = []
+    for sample in samples:
+        code = str(sample.get("code") or "")
+        trading_date = compact_date(sample.get("date"))
+        timestamp = int(sample.get("time") or 0)
+        price = finite_or_none(sample.get("price"))
+        if (
+            MARKET_CODE_PATTERN.fullmatch(code)
+            and len(trading_date) == 8
+            and timestamp > 0
+            and price is not None
+            and price > 0
+        ):
+            rows.append((trading_date, code, timestamp, price))
+    if not rows:
+        return
+
+    try:
+        with LIVE_INTRADAY_PERSIST_LOCK:
+            LIVE_INTRADAY_DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with closing(sqlite3.connect(LIVE_INTRADAY_DATABASE_PATH)) as connection:
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS board_spark_samples(
+                      trading_date TEXT NOT NULL,
+                      code TEXT NOT NULL,
+                      timestamp INTEGER NOT NULL,
+                      price REAL NOT NULL,
+                      PRIMARY KEY(trading_date,code,timestamp)
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_board_spark_samples_date_code
+                    ON board_spark_samples(trading_date,code,timestamp)
+                    """
+                )
+                connection.executemany(
+                    """
+                    INSERT OR REPLACE INTO board_spark_samples(
+                      trading_date,code,timestamp,price
+                    ) VALUES(?,?,?,?)
+                    """,
+                    rows,
+                )
+                connection.execute(
+                    """
+                    DELETE FROM board_spark_samples
+                    WHERE trading_date NOT IN (
+                      SELECT trading_date
+                      FROM board_spark_samples
+                      GROUP BY trading_date
+                      ORDER BY trading_date DESC
+                      LIMIT 5
+                    )
+                    """
+                )
+                connection.commit()
+    except (OSError, sqlite3.Error):
+        # Persistence must never break the primary full_tick quote path.
+        return
+
+
+def load_persisted_live_intraday_samples(
+    codes: list[str],
+    trading_date: str,
+) -> dict[str, list[dict[str, Any]]]:
+    result = {code: [] for code in codes}
+    if not codes or not LIVE_INTRADAY_DATABASE_PATH.exists():
+        return result
+    try:
+        with closing(sqlite3.connect(LIVE_INTRADAY_DATABASE_PATH)) as connection:
+            connection.row_factory = sqlite3.Row
+            for index in range(0, len(codes), 400):
+                batch = codes[index : index + 400]
+                placeholders = ",".join("?" for _ in batch)
+                rows = connection.execute(
+                    f"""
+                    SELECT code,timestamp,price
+                    FROM board_spark_samples
+                    WHERE trading_date=? AND code IN ({placeholders})
+                    ORDER BY code,timestamp
+                    """,
+                    (trading_date, *batch),
+                ).fetchall()
+                for row in rows:
+                    code = str(row["code"])
+                    result.setdefault(code, []).append(
+                        {
+                            "time": int(row["timestamp"]),
+                            "price": float(row["price"]),
+                            "date": trading_date,
+                        }
+                    )
+    except (OSError, sqlite3.Error):
+        return {code: [] for code in codes}
+    return result
+
+
+def available_live_intraday_dates() -> list[str]:
+    if not LIVE_INTRADAY_DATABASE_PATH.exists():
+        return []
+    try:
+        with closing(sqlite3.connect(LIVE_INTRADAY_DATABASE_PATH)) as connection:
+            return [
+                str(row[0])
+                for row in connection.execute(
+                    """
+                    SELECT trading_date
+                    FROM board_spark_samples
+                    GROUP BY trading_date
+                    ORDER BY trading_date DESC
+                    LIMIT 10
+                    """
+                ).fetchall()
+            ]
+    except (OSError, sqlite3.Error):
+        return []
+
+
+def load_live_intraday_samples(
+    codes: list[str],
+    trading_date: str,
+) -> dict[str, list[dict[str, Any]]]:
+    persisted = load_persisted_live_intraday_samples(codes, trading_date)
+    with LIVE_INTRADAY_LOCK:
+        memory = {
+            code: [
+                dict(point)
+                for point in LIVE_INTRADAY_SAMPLES.get(code, [])
+                if point.get("date") == trading_date
+            ]
+            for code in codes
+        }
+    output: dict[str, list[dict[str, Any]]] = {}
+    for code in codes:
+        by_time = {
+            int(point.get("time") or 0): point
+            for point in persisted.get(code, [])
+            if int(point.get("time") or 0) > 0
+        }
+        for point in memory.get(code, []):
+            timestamp = int(point.get("time") or 0)
+            if timestamp > 0:
+                by_time[timestamp] = point
+        output[code] = [by_time[timestamp] for timestamp in sorted(by_time)]
+    return output
 
 
 def process_alive(pid: int) -> bool:
@@ -584,6 +859,7 @@ def quotes_payload(codes_input: str) -> dict[str, Any]:
         ticks.update(bridge.full_tick(codes[index : index + 100]))
 
     quotes: list[dict[str, Any]] = []
+    persisted_samples: list[dict[str, Any]] = []
     for code in codes:
         tick = ticks.get(code)
         if not isinstance(tick, dict):
@@ -618,6 +894,11 @@ def quotes_payload(codes_input: str) -> dict[str, Any]:
                 "source": "MiniQMT full_tick",
             }
         )
+        sample = record_live_intraday_sample(code, quotes[-1])
+        if sample and sample.pop("should_persist", False):
+            persisted_samples.append({"code": code, **sample})
+
+    persist_live_intraday_samples(persisted_samples)
 
     return clean_json(
         {
@@ -1263,6 +1544,233 @@ def load_local_minute_bars(
     return result
 
 
+def downsample_spark_points(
+    points: list[dict[str, Any]],
+    limit: int = 120,
+) -> list[dict[str, Any]]:
+    if len(points) <= limit:
+        return points
+    if limit <= 1:
+        return points[-1:]
+    indexes = [
+        round(index * (len(points) - 1) / (limit - 1))
+        for index in range(limit)
+    ]
+    return [points[index] for index in dict.fromkeys(indexes)]
+
+
+def available_intraday_cache_dates() -> list[str]:
+    if not INTRADAY_BACKFILL_CACHE_ROOT.exists():
+        return []
+    try:
+        return sorted(
+            {
+                path.name
+                for path in INTRADAY_BACKFILL_CACHE_ROOT.iterdir()
+                if path.is_dir() and re.fullmatch(r"\d{8}", path.name)
+            },
+            reverse=True,
+        )[:10]
+    except OSError:
+        return []
+
+
+def load_backfill_minute_bars(
+    codes: list[str],
+    trading_date: str,
+) -> dict[str, list[dict[str, Any]]]:
+    result: dict[str, list[dict[str, Any]]] = {code: [] for code in codes}
+    if not (INTRADAY_BACKFILL_CACHE_ROOT / trading_date).is_dir():
+        return result
+    for code in codes:
+        snapshot = intraday_cache_snapshot(code, trading_date)
+        points: list[dict[str, Any]] = []
+        for row in snapshot.get("rows") or []:
+            timestamp = int(row.get("minute_ms") or row.get("time") or 0)
+            price = finite_or_none(row.get("close"))
+            if timestamp > 0 and price is not None and price > 0:
+                points.append({"time": timestamp, "close": price})
+        result[code] = points
+    return result
+
+
+def latest_available_spark_points(
+    codes: list[str],
+    calendar_date: str,
+) -> tuple[
+    str,
+    dict[str, list[dict[str, Any]]],
+    dict[str, list[dict[str, Any]]],
+    dict[str, list[dict[str, Any]]],
+]:
+    """Find the newest local minute snapshot without crossing into the future."""
+    database_dates = [database.stem for database in available_databases()[:10]]
+    with LIVE_INTRADAY_LOCK:
+        memory_dates = {
+            str(point.get("date") or "")
+            for points in LIVE_INTRADAY_SAMPLES.values()
+            for point in points
+        }
+    candidate_dates = sorted(
+        set(database_dates)
+        | set(available_intraday_cache_dates())
+        | set(available_live_intraday_dates())
+        | memory_dates,
+        reverse=True,
+    )
+    for trading_date in candidate_dates:
+        if len(trading_date) != 8:
+            continue
+        if trading_date > calendar_date:
+            continue
+        local_points = load_local_minute_bars(codes, trading_date)
+        backfill_points = load_backfill_minute_bars(codes, trading_date)
+        live_points = load_live_intraday_samples(codes, trading_date)
+        if any(
+            local_points.get(code)
+            or backfill_points.get(code)
+            or live_points.get(code)
+            for code in codes
+        ):
+            return trading_date, local_points, backfill_points, live_points
+    empty = {code: [] for code in codes}
+    return (
+        calendar_date,
+        empty,
+        {code: [] for code in codes},
+        {code: [] for code in codes},
+    )
+
+
+def sparks_payload(codes_input: str) -> dict[str, Any]:
+    codes: list[str] = []
+    for value in str(codes_input or "").split(","):
+        if not value.strip():
+            continue
+        try:
+            code = normalize_market_code(value)
+        except ValueError:
+            continue
+        if code not in codes:
+            codes.append(code)
+    if not codes:
+        raise ValueError("缺少有效的MiniQMT分时代码")
+    if len(codes) > 500:
+        raise ValueError("单次最多查询500个分时代码")
+
+    current = china_now()
+    calendar_date = current.strftime("%Y%m%d")
+    trading_date = calendar_date
+    local_points = load_local_minute_bars(codes, trading_date)
+    backfill_points = load_backfill_minute_bars(codes, trading_date)
+    live_points = load_live_intraday_samples(codes, trading_date)
+    phase, _market_data_expected = market_phase(current)
+    if (
+        phase == "closed"
+        and not any(
+            local_points.get(code)
+            or backfill_points.get(code)
+            or live_points.get(code)
+            for code in codes
+        )
+    ):
+        (
+            trading_date,
+            local_points,
+            backfill_points,
+            live_points,
+        ) = latest_available_spark_points(
+            codes,
+            calendar_date,
+        )
+    data_is_stale = trading_date != calendar_date
+    sparks: list[dict[str, Any]] = []
+
+    for code in codes:
+        by_time: dict[int, dict[str, Any]] = {}
+        for row in backfill_points.get(code, []):
+            timestamp = int(row.get("time") or 0)
+            price = finite_or_none(row.get("close"))
+            if timestamp > 0 and price is not None and price > 0:
+                by_time[timestamp] = {"time": timestamp, "price": price}
+        # The monitor SQLite remains authoritative for convertible bonds and
+        # therefore wins over the downloaded maintenance cache.
+        for row in local_points.get(code, []):
+            timestamp = int(row.get("time") or 0)
+            price = finite_or_none(row.get("close"))
+            if timestamp > 0 and price is not None and price > 0:
+                by_time[timestamp] = {"time": timestamp, "price": price}
+        # The live full_tick sample is newer than the monitor's persisted
+        # minute row and therefore wins when both represent the same instant.
+        for row in live_points.get(code, []):
+            timestamp = int(row.get("time") or 0)
+            price = finite_or_none(row.get("price"))
+            if timestamp > 0 and price is not None and price > 0:
+                by_time[timestamp] = {"time": timestamp, "price": price}
+
+        ordered = [
+            by_time[timestamp]
+            for timestamp in sorted(by_time)
+        ]
+        if not ordered:
+            continue
+        sampled = downsample_spark_points(ordered)
+        last_timestamp = int(sampled[-1]["time"])
+        last_moment = datetime.fromtimestamp(last_timestamp / 1000, CHINA_TIME_ZONE)
+        has_local = bool(local_points.get(code))
+        has_backfill = bool(backfill_points.get(code))
+        has_live = bool(live_points.get(code))
+        if data_is_stale and (has_local or has_backfill) and has_live:
+            source = "MiniQMT最近交易日1m缓存 + full_tick采样"
+        elif data_is_stale and (has_local or has_backfill):
+            source = "MiniQMT最近交易日1m缓存"
+        elif data_is_stale and has_live:
+            source = "MiniQMT最近交易日full_tick采样"
+        elif (has_local or has_backfill) and has_live:
+            source = "MiniQMT 1m缓存 + full_tick实时"
+        elif has_local or has_backfill:
+            source = "MiniQMT 1m缓存"
+        else:
+            source = "MiniQMT full_tick实时采样"
+        sparks.append(
+            {
+                "secid": market_code_to_secid(code),
+                "points": [float(row["price"]) for row in sampled],
+                "times": [
+                    datetime.fromtimestamp(
+                        int(row["time"]) / 1000,
+                        CHINA_TIME_ZONE,
+                    ).strftime("%H%M")
+                    for row in sampled
+                ],
+                "date": trading_date,
+                "time": last_moment.strftime("%H%M"),
+                "source": source,
+                "data_is_stale": data_is_stale,
+            }
+        )
+
+    return clean_json(
+        {
+            "ok": True,
+            "mode": "read_only",
+            "source": (
+                "MiniQMT最近交易日分时缓存"
+                if data_is_stale
+                else "MiniQMT 1m缓存 + full_tick实时采样"
+            ),
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "calendar_date": calendar_date,
+            "trading_date": trading_date,
+            "data_is_stale": data_is_stale,
+            "market_phase": phase,
+            "requested": len(codes),
+            "returned": len(sparks),
+            "sparks": sparks,
+        }
+    )
+
+
 def tick_minute_timestamp(tick: dict[str, Any]) -> int:
     digits = re.sub(r"\D", "", str(tick.get("timetag") or ""))
     if len(digits) < 12:
@@ -1566,6 +2074,161 @@ def latest_bond_reference(code: str) -> dict[str, Any]:
         result = {}
     BOND_REFERENCE_CACHE[bare_code] = (time.monotonic(), result)
     return result
+
+
+def latest_bond_reference_list() -> list[dict[str, Any]]:
+    """Read the current convertible-bond reference table.
+
+    MiniQMT's convertible-bond universe can lag the first trading session of
+    a new Shanghai bond.  The reference table is therefore used only for
+    discovery and listing dates; realtime prices still come from MiniQMT.
+    """
+    global NEW_BOND_REFERENCE_LIST_CACHE
+    if (
+        NEW_BOND_REFERENCE_LIST_CACHE
+        and time.monotonic() - NEW_BOND_REFERENCE_LIST_CACHE[0]
+        < NEW_BOND_REFERENCE_CACHE_TTL_SECONDS
+    ):
+        return NEW_BOND_REFERENCE_LIST_CACHE[1]
+
+    url = "https://datacenter-web.eastmoney.com/api/data/v1/get?" + urllib.parse.urlencode(
+        {
+            "reportName": "RPT_BOND_CB_LIST",
+            "columns": (
+                "SECURITY_CODE,SECURITY_NAME_ABBR,CONVERT_STOCK_CODE,"
+                "SECURITY_SHORT_NAME,LISTING_DATE,ACTUAL_ISSUE_SCALE,RATING"
+            ),
+            "pageNumber": "1",
+            "pageSize": "500",
+            "sortColumns": "LISTING_DATE",
+            "sortTypes": "-1",
+        }
+    )
+    rows = list((fetch_external_json(url, timeout=15).get("result") or {}).get("data") or [])
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        code = re.sub(r"\D", "", str(row.get("SECURITY_CODE") or ""))[:6]
+        listed_date = compact_date(row.get("LISTING_DATE"))
+        if not CODE_PATTERN.fullmatch(code) or len(listed_date) != 8 or code in seen:
+            continue
+        seen.add(code)
+        market_code = monitor_code(code)
+        normalized.append(
+            {
+                "code": code,
+                "market_code": market_code,
+                "secid": market_code_to_secid(market_code),
+                "name": str(row.get("SECURITY_NAME_ABBR") or "").strip(),
+                "stock_code": stock_market_code(row.get("CONVERT_STOCK_CODE")),
+                "stock_name": str(row.get("SECURITY_SHORT_NAME") or "").strip(),
+                "listing_date": listed_date,
+                "issue_scale_billion": finite_or_none(row.get("ACTUAL_ISSUE_SCALE")),
+                "rating": str(row.get("RATING") or "").strip(),
+                "source": "东方财富可转债资料动态列表",
+            }
+        )
+    NEW_BOND_REFERENCE_LIST_CACHE = (time.monotonic(), normalized)
+    return normalized
+
+
+def bridge_calendar_date(
+    bridge: Any,
+    endpoint: str,
+    date_value: str,
+    market: str = "SH",
+) -> str:
+    payload = bridge.get(
+        endpoint,
+        {"date": date_value, "market": market},
+        timeout=10.0,
+    )
+    key = endpoint.rsplit("/", 1)[-1]
+    raw = payload.get(key)
+    if raw is None:
+        return ""
+    if isinstance(raw, (int, float)):
+        return china_now(datetime.fromtimestamp(float(raw) / 1000, CHINA_TIME_ZONE)).strftime(
+            "%Y%m%d"
+        )
+    return compact_date(raw)
+
+
+def new_bond_candidates_payload(date_input: str = "") -> dict[str, Any]:
+    """Return bonds whose next exchange session is their second trading day."""
+    target_date = compact_date(date_input) or china_now().strftime("%Y%m%d")
+    if not re.fullmatch(r"\d{8}", target_date):
+        raise ValueError("交易日必须为YYYYMMDD")
+
+    bridge = MONITOR.BridgeClient(
+        f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}",
+        timeout=15.0,
+    )
+    calendar_source = "QMT Bridge交易日历"
+    try:
+        trading_payload = bridge.get(
+            "/api/calendar/is_trading_date",
+            {"date": target_date, "market": "SH"},
+            timeout=10.0,
+        )
+        is_trading = bool(trading_payload.get("is_trading"))
+        previous_date = (
+            bridge_calendar_date(
+                bridge,
+                "/api/calendar/prev_trading_date",
+                target_date,
+            )
+            if is_trading
+            else ""
+        )
+    except Exception as error:
+        raise LookupError(f"QMT交易日历不可用：{error}") from error
+
+    try:
+        qmt_codes = {
+            str(code)
+            for code in bridge.convertible_bonds()
+            if MARKET_CODE_PATTERN.fullmatch(str(code))
+        }
+    except Exception:
+        qmt_codes = set()
+    rows = latest_bond_reference_list()
+    candidates: list[dict[str, Any]] = []
+    if is_trading and previous_date:
+        for row in rows:
+            if row["listing_date"] != previous_date:
+                continue
+            candidates.append(
+                {
+                    **row,
+                    "in_miniqmt_list": row["market_code"] in qmt_codes,
+                    "discovery": (
+                        "动态上市资料 + MiniQMT列表"
+                        if row["market_code"] in qmt_codes
+                        else "动态上市资料（MiniQMT列表尚未更新）"
+                    ),
+                }
+            )
+
+    missing_from_qmt = [
+        row["code"] for row in candidates if not row["in_miniqmt_list"]
+    ]
+    return clean_json(
+        {
+            "ok": True,
+            "mode": "read_only",
+            "target_date": target_date,
+            "is_trading_date": is_trading,
+            "previous_trading_date": previous_date,
+            "calendar_source": calendar_source,
+            "reference_source": "东方财富可转债资料动态列表",
+            "miniqmt_list_count": len(qmt_codes),
+            "miniqmt_missing_candidate_codes": missing_from_qmt,
+            "returned": len(candidates),
+            "candidates": candidates,
+            "generated_at": china_now().isoformat(timespec="seconds"),
+        }
+    )
 
 
 def chinese_date_to_compact(value: str) -> str:
@@ -3964,6 +4627,46 @@ def request_intraday_backfill(body: dict[str, Any]) -> dict[str, Any]:
     if not trading_date:
         trading_date = database_for_date().stem
     database_for_date(trading_date)
+    health = api_health()
+    warmup = (health.get("status") or {}).get("indicator_warmup") or {}
+    excluded_codes = {
+        str(item).upper()
+        for item in warmup.get("history_repair_excluded_code_sample") or []
+        if isinstance(item, str)
+    }
+    if (
+        trading_date == str(health.get("calendar_date") or "")
+        and stored_code in excluded_codes
+    ):
+        reason = str(
+            (warmup.get("history_repair_exclusion_reasons") or {}).get(
+                stored_code
+            )
+            or "qmt_non_trading"
+        )
+        state = {
+            "status": "not_applicable",
+            "phase": "not_applicable",
+            "active": False,
+            "queued": False,
+            "job_id": "",
+            "code": stored_code.split(".")[0],
+            "monitor_code": stored_code,
+            "date": trading_date,
+            "trading_date": trading_date,
+            "wait_reason": reason,
+            "error": "MiniQMT 标记为非交易标的，无盘中分钟源",
+            "poll_after_seconds": 0,
+        }
+        return clean_json(
+            {
+                "ok": True,
+                "accepted": False,
+                "mode": "non_trading_source_unavailable",
+                **state,
+                "job": state,
+            }
+        )
     state = enqueue_intraday_backfill(
         stored_code,
         trading_date,
@@ -4047,6 +4750,29 @@ def intraday_backfill_status_payload(
     )
 
 
+def board_market_codes() -> set[str]:
+    payload = read_json(BOARD_STATE_PATH)
+    codes: set[str] = set()
+    for sector in payload.get("sectors") or []:
+        if not isinstance(sector, dict):
+            continue
+        for stock in sector.get("stocks") or []:
+            if not isinstance(stock, dict):
+                continue
+            secid = str(stock.get("secid") or "").strip()
+            match = re.fullmatch(r"([01])\.(\d{6})", secid)
+            if not match:
+                continue
+            market, code = match.groups()
+            # Eastmoney uses market=0 for both Shenzhen and Beijing symbols.
+            # QMT needs .BJ for the latter, so keep this maintenance path to
+            # unambiguous Shanghai/Shenzhen codes only.
+            if code.startswith(("8", "9")):
+                continue
+            codes.add(f"{code}.{'SH' if market == '1' else 'SZ'}")
+    return codes
+
+
 def postclose_intraday_universe(
     database: Path,
     trading_date: str,
@@ -4098,8 +4824,14 @@ def postclose_intraday_universe(
                 for code in raw_codes
                 if MARKET_CODE_PATTERN.fullmatch(str(code))
             }
+    board_codes = board_market_codes()
     if monitor_codes:
-        return sqlite_codes | monitor_codes, "sqlite_meta_codes"
+        source = (
+            "sqlite_meta_codes+board_state"
+            if board_codes
+            else "sqlite_meta_codes"
+        )
+        return sqlite_codes | monitor_codes | board_codes, source
 
     with INTRADAY_ASYNC_REFRESH_LOCK:
         if INTRADAY_BACKFILL_POSTCLOSE_UNIVERSE_DATE == trading_date:
@@ -4107,7 +4839,12 @@ def postclose_intraday_universe(
         else:
             persisted_codes = set()
     if persisted_codes:
-        return sqlite_codes | persisted_codes, "persisted_universe"
+        source = (
+            "persisted_universe+board_state"
+            if board_codes
+            else "persisted_universe"
+        )
+        return sqlite_codes | persisted_codes | board_codes, source
 
     allowed, reason = intraday_download_permission(trading_date)
     if not allowed:
@@ -4125,7 +4862,12 @@ def postclose_intraday_universe(
     }
     if not bridge_codes:
         raise LookupError("postclose_universe_bridge_returned_empty")
-    return sqlite_codes | bridge_codes, "bridge_convertible_bonds"
+    source = (
+        "bridge_convertible_bonds+board_state"
+        if board_codes
+        else "bridge_convertible_bonds"
+    )
+    return sqlite_codes | bridge_codes | board_codes, source
 
 
 def scan_postclose_intraday_gaps(
@@ -4187,11 +4929,15 @@ def scan_postclose_intraday_gaps(
             stored_code = str(row["code"])
             if MARKET_CODE_PATTERN.fullmatch(stored_code):
                 grouped.setdefault(stored_code, []).append(row)
-    missing_codes = [
-        code
-        for code, rows in grouped.items()
-        if minute_rows_need_backfill(rows, calendar_date)
-    ]
+    missing_codes: list[str] = []
+    for code, rows in grouped.items():
+        cached_rows = intraday_cache_snapshot(code, calendar_date)["rows"]
+        combined_rows = merge_minute_rows(
+            [dict(row) for row in rows],
+            list(cached_rows),
+        )
+        if minute_rows_need_backfill(combined_rows, calendar_date):
+            missing_codes.append(code)
     scheduled_codes: list[str] = []
     preserved_codes: list[str] = []
     for stored_code in missing_codes:
@@ -4640,7 +5386,138 @@ def bond_payload(
         source_parts.append("实时快照")
     if source_parts:
         minute_source = " + ".join(source_parts)
+
+    # Read the monitor's exclusion state before the no-row guard.  A stopped
+    # or non-public instrument can legitimately have no current-day rows; it
+    # should produce a stable explanatory payload instead of a 404 that makes
+    # the panel retry and flash forever.
+    health = api_health()
+    monitor_history_repair = (
+        (health.get("status") or {})
+        .get("indicator_warmup", {})
+        .get("history_repair", {})
+    )
+    monitor_warmup = (health.get("status") or {}).get("indicator_warmup", {})
+    monitor_excluded_codes = {
+        str(item).upper()
+        for item in (
+            list(monitor_warmup.get("history_repair_excluded_code_sample") or [])
+            + list((monitor_warmup.get("history_repair_exclusion_reasons") or {}).keys())
+        )
+        if isinstance(item, str)
+    }
+    current_day_source_unavailable = bool(
+        not date_input and stored_code in monitor_excluded_codes
+    )
+    exclusion_reasons = monitor_warmup.get(
+        "history_repair_exclusion_reasons"
+    ) or {}
+    source_unavailable_reason = str(
+        exclusion_reasons.get(stored_code) or "qmt_non_trading"
+    )
+    monitor_repair_enabled = bool(
+        not date_input
+        and monitor_history_repair.get("cache_refresh_enabled")
+        and monitor_history_repair.get("download_enabled")
+    )
+    history_gap_remaining = minute_rows_need_backfill(minute_rows, trading_date)
+    history_required = bool(
+        history_gap_remaining and not current_day_source_unavailable
+    )
+    monitor_priority_requested = bool(
+        monitor_repair_enabled
+        and history_required
+        and request_monitor_history_repair_priority(
+            stored_code,
+            trading_date,
+        )
+    )
     if not minute_rows:
+        if current_day_source_unavailable:
+            database_updated_at = (
+                datetime.fromtimestamp(database.stat().st_mtime).isoformat(
+                    timespec="seconds"
+                )
+                if database is not None
+                else datetime.now().isoformat(timespec="seconds")
+            )
+            available_dates = [path.stem for path in available_databases()]
+            if trading_date not in available_dates:
+                available_dates.insert(0, trading_date)
+            return clean_json(
+                {
+                    "ok": True,
+                    "mode": "read_only",
+                    "fast_preview": fast_mode,
+                    "formula_source": str(MONITOR_ROOT / "shortline_monitor.py"),
+                    "generated_at": datetime.now().isoformat(timespec="seconds"),
+                    "database_updated_at": database_updated_at,
+                    "code": code,
+                    "monitor_code": stored_code,
+                    "name": name or code,
+                    "tags": bond_tags(stored_code),
+                    "source": "MiniQMT 无分钟源",
+                    "history_backfill": {
+                        "status": "not_applicable",
+                        "asynchronous": True,
+                        "required": False,
+                        "local_gap_detected": True,
+                        "source_unavailable": True,
+                        "source_unavailable_reason": source_unavailable_reason,
+                        "cached_bar_count": 0,
+                        "cache_age_seconds": None,
+                        "retry_in_seconds": None,
+                        "wait_reason": source_unavailable_reason,
+                        "retry_count": 0,
+                        "error": "MiniQMT 当前未提供该标的盘中分钟数据",
+                        "monitor_priority_requested": False,
+                        "monitor_repair_enabled": monitor_repair_enabled,
+                    },
+                    "trading_date": trading_date,
+                    "available_dates": available_dates,
+                    "bar_count": 0,
+                    "complete_session": False,
+                    "full_session": False,
+                    "intraday_average_quality": "unavailable_without_minute_source",
+                    "volume_ratio_quality": "unavailable_without_live_qmt_baseline",
+                    "first_price": None,
+                    "previous_close": None,
+                    "previous_close_date": None,
+                    "latest_price": None,
+                    "daily_return": None,
+                    "volume_ratio": None,
+                    "support_counts": {
+                        "purple": 0,
+                        "purple_break": 0,
+                        "intraday_average": 0,
+                        "total": 0,
+                    },
+                    "purple_break_definition": {
+                        "close_below_tolerance_pct": 0.1,
+                        "confirm_bars": 2,
+                        "last_break_minute_ms": None,
+                        "quality": "暂无分钟数据，无法计算指标",
+                    },
+                    "change_from_first": None,
+                    "total_amount": 0,
+                    "latest_minute": None,
+                    "realtime": {
+                        "monitor_alive": bool(health.get("monitor_alive")),
+                        "is_latest_trading_date": (
+                            trading_date == health.get("latest_trading_date")
+                        ),
+                        "calendar_date": health.get("calendar_date"),
+                        "is_today": trading_date == health.get("calendar_date"),
+                        "data_is_stale": trading_date != health.get("calendar_date"),
+                        "auto_follow_latest": True,
+                        "refresh_interval_seconds": 2,
+                        "live_tick_error": "该标的无可用盘中分钟源",
+                        "live_tick_skipped": True,
+                    },
+                    "rows": [],
+                    "events": [],
+                }
+            )
         raise LookupError(f"{code} 在 {trading_date} 没有分钟数据")
 
     minutes = [
@@ -4813,16 +5690,29 @@ def bond_payload(
         if previous_close and previous_close > 0
         else None
     )
-    health = api_health()
-    history_gap_remaining = minute_rows_need_backfill(minute_rows, trading_date)
     if fast_mode:
         history_backfill_status = {
-            "status": "deferred" if history_gap_remaining else "ready"
+            "status": (
+                "not_applicable"
+                if current_day_source_unavailable
+                else "deferred" if history_gap_remaining else "ready"
+            )
         }
     elif not date_input:
-        if not local_needs_backfill or not history_gap_remaining:
+        if current_day_source_unavailable:
+            history_backfill_status = {
+                "status": "not_applicable",
+                "wait_reason": source_unavailable_reason,
+            }
+        elif not local_needs_backfill or not history_gap_remaining:
             history_backfill_status = {
                 "status": "not_needed" if not local_needs_backfill else "ready"
+            }
+        elif monitor_repair_enabled:
+            history_backfill_status = {
+                "status": "deferred",
+                "wait_reason": "monitor_targeted_repair",
+                "retry_in_seconds": 5,
             }
         else:
             history_backfill_status = schedule_current_intraday_refresh(
@@ -4840,8 +5730,12 @@ def bond_payload(
     history_backfill = {
         "status": str(history_backfill_status.get("status") or "idle"),
         "asynchronous": not bool(date_input),
-        "required": bool(history_gap_remaining),
+        "required": history_required,
         "local_gap_detected": bool(local_needs_backfill),
+        "source_unavailable": current_day_source_unavailable,
+        "source_unavailable_reason": (
+            source_unavailable_reason if current_day_source_unavailable else ""
+        ),
         "cached_bar_count": len(downloaded_rows),
         "cache_age_seconds": history_cache_age_seconds,
         "retry_in_seconds": finite_or_none(
@@ -4850,6 +5744,11 @@ def bond_payload(
         "wait_reason": str(history_backfill_status.get("wait_reason") or ""),
         "retry_count": int(history_backfill_status.get("retry_count") or 0),
         "error": str(history_backfill_status.get("error") or ""),
+        "monitor_priority_requested": monitor_priority_requested,
+        # The live monitor owns the serialized Bridge repair worker.  Expose
+        # its capability so the panel can describe an active intraday repair
+        # without creating a second dashboard-side queue.
+        "monitor_repair_enabled": monitor_repair_enabled,
     }
     database_updated_at = (
         datetime.fromtimestamp(database.stat().st_mtime).isoformat(timespec="seconds")
@@ -5255,6 +6154,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/quotes":
                 payload = quotes_payload(
+                    (query.get("codes") or [""])[0],
+                )
+                self.send_payload(200, payload)
+                return
+            if parsed.path == "/new-bond-candidates":
+                self.send_payload(
+                    200,
+                    new_bond_candidates_payload(
+                        (query.get("date") or query.get("trading_date") or [""])[0]
+                    ),
+                )
+                return
+            if parsed.path == "/sparks":
+                payload = sparks_payload(
                     (query.get("codes") or [""])[0],
                 )
                 self.send_payload(200, payload)

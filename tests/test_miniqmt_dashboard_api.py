@@ -36,6 +36,7 @@ def load_dashboard_module(runtime_root: Path):
             "MINIQMT_BACKFILL_STATE_PATH": str(
                 runtime_root / "intraday-backfill-jobs.json"
             ),
+            "FINANCE_BOARD_STATE_PATH": str(runtime_root / "board-state.json"),
         },
     ):
         spec = importlib.util.spec_from_file_location(module_name, SCRIPT_PATH)
@@ -171,6 +172,181 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
                 }
             ),
             encoding="utf-8",
+        )
+
+    def append_minute_row(self, minute_offset: int = 1) -> None:
+        database = self.runtime / "data" / f"{self.trading_date}.sqlite3"
+        timestamp = int(
+            datetime.strptime(
+                f"{self.trading_date}100500", "%Y%m%d%H%M%S"
+            ).replace(tzinfo=ZoneInfo("Asia/Shanghai")).timestamp()
+            * 1000
+        ) + minute_offset * 60_000
+        connection = sqlite3.connect(database)
+        connection.execute(
+            "INSERT INTO minute_observations VALUES(?,?,?,?,?,?,?,?,?)",
+            (
+                self.trading_date,
+                "123273.SZ",
+                timestamp,
+                f"{self.trading_date[:4]}-{self.trading_date[4:6]}-"
+                f"{self.trading_date[6:]} 10:{5 + minute_offset:02d}:00",
+                100,
+                102,
+                99,
+                101,
+                1_200_000,
+            ),
+        )
+        connection.commit()
+        connection.close()
+
+    def test_sparks_falls_back_to_latest_local_date_outside_market(self):
+        self.append_minute_row()
+        current = datetime(
+            2026, 8, 13, 0, 30, tzinfo=ZoneInfo("Asia/Shanghai")
+        )
+        with mock.patch.object(self.module, "china_now", return_value=current):
+            payload = self.module.sparks_payload("123273.SZ")
+
+        self.assertEqual(payload["calendar_date"], "20260813")
+        self.assertEqual(payload["trading_date"], self.trading_date)
+        self.assertTrue(payload["data_is_stale"])
+        self.assertEqual(payload["returned"], 1)
+        self.assertEqual(len(payload["sparks"][0]["points"]), 2)
+        self.assertEqual(
+            payload["sparks"][0]["source"],
+            "MiniQMT最近交易日1m缓存",
+        )
+
+    def test_sparks_never_falls_back_to_old_date_during_live_session(self):
+        current = datetime(
+            2026, 8, 13, 10, 5, tzinfo=ZoneInfo("Asia/Shanghai")
+        )
+        with mock.patch.object(self.module, "china_now", return_value=current):
+            payload = self.module.sparks_payload("123273.SZ")
+
+        self.assertEqual(payload["calendar_date"], "20260813")
+        self.assertEqual(payload["trading_date"], "20260813")
+        self.assertFalse(payload["data_is_stale"])
+        self.assertEqual(payload["returned"], 0)
+
+    def test_live_spark_samples_survive_fast_refresh_and_restart(self):
+        current = datetime(
+            2026, 8, 12, 10, 5, tzinfo=ZoneInfo("Asia/Shanghai")
+        )
+        first_timestamp = int(current.timestamp() * 1000)
+        with mock.patch.object(self.module, "china_now", return_value=current):
+            first = self.module.record_live_intraday_sample(
+                "301127.SZ",
+                {
+                    "price": 25.1,
+                    "date": self.trading_date,
+                    "timestamp": first_timestamp,
+                },
+            )
+            refreshed = self.module.record_live_intraday_sample(
+                "301127.SZ",
+                {
+                    "price": 25.2,
+                    "date": self.trading_date,
+                    "timestamp": first_timestamp + 2_000,
+                },
+            )
+            second = self.module.record_live_intraday_sample(
+                "301127.SZ",
+                {
+                    "price": 25.4,
+                    "date": self.trading_date,
+                    "timestamp": first_timestamp + 11_000,
+                },
+            )
+
+        self.assertEqual(first["time"], refreshed["time"])
+        self.assertNotEqual(refreshed["time"], second["time"])
+        self.module.persist_live_intraday_samples(
+            [
+                {"code": "301127.SZ", **refreshed},
+                {"code": "301127.SZ", **second},
+            ]
+        )
+
+        reloaded = load_dashboard_module(self.runtime)
+        points = reloaded.load_live_intraday_samples(
+            ["301127.SZ"], self.trading_date
+        )["301127.SZ"]
+        self.assertEqual([point["price"] for point in points], [25.2, 25.4])
+
+    def test_stock_spark_uses_persisted_postclose_minute_cache(self):
+        base_timestamp = int(
+            datetime(
+                2026, 8, 12, 10, 5, tzinfo=ZoneInfo("Asia/Shanghai")
+            ).timestamp()
+            * 1000
+        )
+        rows = [
+            {
+                "minute_ms": base_timestamp,
+                "minute_time": "2026-08-12 10:05:00",
+                "open": 25.1,
+                "high": 25.2,
+                "low": 25.0,
+                "close": 25.1,
+                "volume": 1_000,
+                "amount": 25_100,
+            },
+            {
+                "minute_ms": base_timestamp + 60_000,
+                "minute_time": "2026-08-12 10:06:00",
+                "open": 25.1,
+                "high": 25.5,
+                "low": 25.1,
+                "close": 25.4,
+                "volume": 2_000,
+                "amount": 50_800,
+            },
+        ]
+        self.module.merge_intraday_backfill_cache(
+            "301127.SZ", self.trading_date, rows, 24.8
+        )
+        reloaded = load_dashboard_module(self.runtime)
+        current = datetime(
+            2026, 8, 13, 0, 30, tzinfo=ZoneInfo("Asia/Shanghai")
+        )
+        with mock.patch.object(reloaded, "china_now", return_value=current):
+            payload = reloaded.sparks_payload("301127.SZ")
+
+        self.assertEqual(payload["trading_date"], self.trading_date)
+        self.assertEqual(payload["returned"], 1)
+        self.assertEqual(payload["sparks"][0]["points"], [25.1, 25.4])
+        self.assertEqual(
+            payload["sparks"][0]["source"],
+            "MiniQMT最近交易日1m缓存",
+        )
+
+    def test_board_market_codes_keeps_only_unambiguous_shanghai_shenzhen(self):
+        (self.runtime / "board-state.json").write_text(
+            json.dumps(
+                {
+                    "sectors": [
+                        {
+                            "name": "测试",
+                            "stocks": [
+                                {"name": "天源", "secid": "0.301127"},
+                                {"name": "天准", "secid": "1.688003"},
+                                {"name": "北交", "secid": "0.920190"},
+                                {"name": "港股", "secid": "116.00992"},
+                            ],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        self.assertEqual(
+            self.module.board_market_codes(),
+            {"301127.SZ", "688003.SH"},
         )
 
     def test_health_degrades_when_live_quotes_drop_to_zero(self):
@@ -511,6 +687,26 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
         self.assertIn("本地监控", payload["source"])
         self.assertIn("实时快照", payload["source"])
 
+    def test_dashboard_gap_requests_live_monitor_priority(self):
+        module = self.module
+        module.MONITOR_HISTORY_REPAIR_PRIORITY_PATH = (
+            self.runtime / "history-repair-priority.json"
+        )
+        self.assertTrue(
+            module.request_monitor_history_repair_priority(
+                "123273.SZ",
+                self.trading_date,
+            )
+        )
+        payload = json.loads(
+            module.MONITOR_HISTORY_REPAIR_PRIORITY_PATH.read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(payload["code"], "123273.SZ")
+        self.assertEqual(payload["trading_date"], self.trading_date)
+        self.assertGreater(payload["expires_at_epoch"], payload["requested_at_epoch"])
+
     def test_live_tick_keeps_cumulative_amount_out_of_minute_row(self):
         module = self.module
         module.ACTIVE_INDEX_TICK_MINUTES.clear()
@@ -726,6 +922,51 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
         self.assertEqual(payload["bar_count"], 1)
         self.assertTrue(payload["realtime"]["live_tick_skipped"])
         self.assertEqual(payload["source"], "本地监控")
+
+    def test_fast_preview_stops_retry_for_non_trading_monitor_code(self):
+        module = self.module
+        module.MONITOR_HISTORY_REPAIR_PRIORITY_PATH = (
+            self.runtime / "history-repair-priority.json"
+        )
+        with (
+            mock.patch.object(
+                module,
+                "minute_rows_need_backfill",
+                return_value=True,
+            ),
+            mock.patch.object(
+                module,
+                "api_health",
+                return_value={
+                    "monitor_alive": True,
+                    "latest_trading_date": self.trading_date,
+                    "calendar_date": self.trading_date,
+                    "status": {
+                        "indicator_warmup": {
+                            "history_repair_excluded_code_sample": [
+                                "123273.SZ"
+                            ],
+                            "history_repair_exclusion_reasons": {
+                                "123273.SZ": "qmt_is_trading_false"
+                            },
+                            "history_repair": {
+                                "cache_refresh_enabled": True,
+                                "download_enabled": True,
+                            },
+                        }
+                    },
+                },
+            ),
+        ):
+            payload = module.bond_payload("123273", fast=True)
+
+        history = payload["history_backfill"]
+        self.assertEqual(history["status"], "not_applicable")
+        self.assertFalse(history["required"])
+        self.assertTrue(history["source_unavailable"])
+        self.assertFalse(
+            module.MONITOR_HISTORY_REPAIR_PRIORITY_PATH.exists()
+        )
 
     def test_fast_preview_is_not_blocked_by_large_quotes_bridge_request(self):
         module = self.module
@@ -1569,6 +1810,72 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
             enqueued[0][2]["priority"],
             module.INTRADAY_BACKFILL_AUTOMATIC_PRIORITY,
         )
+
+    def test_postclose_scan_includes_board_stock_and_reuses_ready_cache(self):
+        module = self.module
+        (self.runtime / "board-state.json").write_text(
+            json.dumps(
+                {
+                    "sectors": [
+                        {
+                            "name": "测试",
+                            "stocks": [
+                                {"name": "天源", "secid": "0.301127"},
+                                {"name": "天准", "secid": "1.688003"},
+                            ],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        ready_rows = []
+        start = datetime(
+            2026, 8, 12, 9, 30, tzinfo=ZoneInfo("Asia/Shanghai")
+        )
+        for minute in range(241):
+            moment = start.timestamp() * 1000 + minute * 60_000
+            ready_rows.append(
+                {
+                    "minute_ms": int(moment),
+                    "minute_time": "2026-08-12 09:30:00",
+                    "open": 10,
+                    "high": 10,
+                    "low": 10,
+                    "close": 10,
+                    "volume": 1,
+                    "amount": 10,
+                }
+            )
+        module.merge_intraday_backfill_cache(
+            "301127.SZ", self.trading_date, ready_rows, 9.9
+        )
+        enqueued = []
+        now = datetime(2026, 8, 12, 15, 20, tzinfo=ZoneInfo("Asia/Shanghai"))
+        with (
+            mock.patch.object(module, "intraday_monitor_active", return_value=False),
+            mock.patch.object(
+                module,
+                "minute_rows_need_backfill",
+                side_effect=lambda values, _date: len(values) < 240,
+            ),
+            mock.patch.object(
+                module,
+                "enqueue_intraday_backfill",
+                side_effect=lambda code, date, **kwargs: (
+                    enqueued.append((code, date, kwargs))
+                    or {"deduplicated": False}
+                ),
+            ),
+        ):
+            result = module.scan_postclose_intraday_gaps(now)
+
+        self.assertTrue(result["scheduled"])
+        self.assertEqual(
+            result["universe_source"], "sqlite_meta_codes+board_state"
+        )
+        self.assertNotIn("301127.SZ", [row[0] for row in enqueued])
+        self.assertIn("688003.SH", [row[0] for row in enqueued])
 
     def test_postclose_scan_repairs_old_marker_zero_row_code_without_repeating_ready(self):
         module = self.module
