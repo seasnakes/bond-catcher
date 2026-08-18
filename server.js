@@ -1335,6 +1335,19 @@ async function applySecondDayBonds(candidates, targetSector) {
   });
 }
 
+function summarizeNewBondAutoScan(result) {
+  if (!result) return null;
+  return {
+    autoScanDate: String(result.autoScanDate || ""),
+    targetDate: String(result.target_date || ""),
+    targetSector: String(result.targetSector || ""),
+    updated: Boolean(result.updated),
+    added: Array.isArray(result.added) ? result.added : [],
+    alreadyPresent: Array.isArray(result.alreadyPresent) ? result.alreadyPresent : [],
+    generatedAt: String(result.generated_at || ""),
+  };
+}
+
 async function scanNewBondSecondDay({ targetSector, date = "", apply = false } = {}) {
   if (newBondScanInFlight) return newBondScanInFlight;
   newBondScanInFlight = (async () => {
@@ -1367,9 +1380,8 @@ async function scanNewBondSecondDay({ targetSector, date = "", apply = false } =
       added,
       alreadyPresent,
       boardUpdatedAt,
-      lastAutoScan: newBondLastResult,
+      lastAutoScan: summarizeNewBondAutoScan(newBondLastResult),
     };
-    newBondLastResult = result;
     return result;
   })().finally(() => {
     newBondScanInFlight = null;

@@ -176,6 +176,36 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def test_new_bond_calendar_falls_back_when_qmt_has_not_rolled_forward(self):
+        is_trading, previous_date, source, latest_date = (
+            self.module.resolve_target_trading_session(
+                "20260819",
+                False,
+                "",
+                ["20260817", "20260818", "20260819", "20260820"],
+            )
+        )
+
+        self.assertTrue(is_trading)
+        self.assertEqual(previous_date, "20260818")
+        self.assertIn("校正QMT", source)
+        self.assertEqual(latest_date, "20260820")
+
+    def test_new_bond_calendar_keeps_exchange_holidays_closed(self):
+        is_trading, previous_date, source, latest_date = (
+            self.module.resolve_target_trading_session(
+                "20260822",
+                False,
+                "",
+                ["20260820", "20260821", "20260824"],
+            )
+        )
+
+        self.assertFalse(is_trading)
+        self.assertEqual(previous_date, "")
+        self.assertIn("新浪交易日历", source)
+        self.assertEqual(latest_date, "20260824")
+
     def append_minute_row(self, minute_offset: int = 1) -> None:
         database = self.runtime / "data" / f"{self.trading_date}.sqlite3"
         timestamp = int(

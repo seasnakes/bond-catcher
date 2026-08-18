@@ -34,6 +34,11 @@ function statusText(status) {
   return ({ complete: "已完成", running: "运行中", failed: "失败", partial: "部分完成", pending: "等待中" })[status] || "未运行";
 }
 
+function bondDetailUrl(row) {
+  const code = String(row?.code || "").split(".")[0];
+  return `./bond.html?${new URLSearchParams({ code, name: row?.name || code })}`;
+}
+
 function render() {
   if (!snapshot?.exists) {
     runSummary.textContent = "还没有公式选股快照，请先运行一次数据更新。";
@@ -46,7 +51,7 @@ function render() {
   runSummary.textContent = `${statusText(snapshot.status)} · 数据更新于 ${formatDateTime(snapshot.updatedAt)}`;
   runMeta.innerHTML = [
     ["数据来源", snapshot.source?.system || "通达信 TQ"],
-    ["选股范围", `${snapshot.universe?.label || "可转债"} ${snapshot.universe?.count || 0} 只`],
+    ["选股范围", `${snapshot.universe?.scope || snapshot.universe?.label || "可转债"} ${snapshot.universe?.count || 0} 只`],
     ["K线口径", `${snapshot.settings?.period || "1d"} · 前复权 · ${snapshot.settings?.historyCount || "-"} 根`],
     ["运行状态", statusText(snapshot.status)],
   ].map(([label, value]) => `<article class="meta-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`).join("");
@@ -57,10 +62,10 @@ function render() {
       || String(row.code || "").toLowerCase().includes(query));
     const rows = selected.length
       ? selected.map((row) => `
-          <div class="stock-row">
+          <a class="stock-row" href="${escapeHtml(bondDetailUrl(row))}" title="在主看板转债详情中打开">
             <div class="stock-name"><strong>${escapeHtml(row.name)}</strong><span>${escapeHtml(row.code)}</span></div>
             <span class="stock-date">${escapeHtml(row.date || formula.asOf || "")}</span>
-          </div>`).join("")
+          </a>`).join("")
       : `<div class="card-empty">${query ? "没有匹配转债" : "本次没有命中"}</div>`;
     return `
       <article class="formula-card">

@@ -204,6 +204,8 @@ BOND_REFERENCE_CACHE_TTL_SECONDS = 21_600
 BOND_REFERENCE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 NEW_BOND_REFERENCE_CACHE_TTL_SECONDS = 300
 NEW_BOND_REFERENCE_LIST_CACHE: tuple[float, list[dict[str, Any]]] | None = None
+EXCHANGE_TRADE_DATE_CACHE_TTL_SECONDS = 21_600
+EXCHANGE_TRADE_DATE_CACHE: tuple[float, list[str]] | None = None
 PURPLE_BREAK_TOLERANCE = 0.001
 PURPLE_BREAK_CONFIRM_BARS = 2
 BRIDGE_CONFIG_CACHE: dict[str, str] = {}
@@ -2154,6 +2156,74 @@ def bridge_calendar_date(
     return compact_date(raw)
 
 
+def latest_exchange_trade_dates() -> list[str]:
+    """Load an exchange calendar that includes announced future sessions."""
+    global EXCHANGE_TRADE_DATE_CACHE
+    if (
+        EXCHANGE_TRADE_DATE_CACHE
+        and time.monotonic() - EXCHANGE_TRADE_DATE_CACHE[0]
+        < EXCHANGE_TRADE_DATE_CACHE_TTL_SECONDS
+    ):
+        return EXCHANGE_TRADE_DATE_CACHE[1]
+
+    try:
+        import akshare as ak  # Lazy: only needed when QMT has not rolled forward.
+
+        frame = ak.tool_trade_date_hist_sina()
+        raw_dates = frame["trade_date"].tolist()
+    except Exception as error:
+        raise LookupError(f"备用交易日历不可用：{error}") from error
+
+    dates = sorted(
+        {
+            normalized
+            for value in raw_dates
+            if len(normalized := compact_date(value)) == 8
+        }
+    )
+    if not dates:
+        raise LookupError("备用交易日历为空")
+    EXCHANGE_TRADE_DATE_CACHE = (time.monotonic(), dates)
+    return dates
+
+
+def resolve_target_trading_session(
+    target_date: str,
+    bridge_is_trading: bool,
+    bridge_previous_date: str,
+    fallback_dates: list[str] | None = None,
+) -> tuple[bool, str, str, str]:
+    """Resolve target/previous sessions without trusting a stale QMT false."""
+    if (
+        bridge_is_trading
+        and len(bridge_previous_date) == 8
+        and bridge_previous_date < target_date
+    ):
+        return True, bridge_previous_date, "QMT Bridge交易日历", ""
+
+    dates = sorted(
+        {
+            normalized
+            for value in (fallback_dates or [])
+            if len(normalized := compact_date(value)) == 8
+        }
+    )
+    if not dates or target_date > dates[-1]:
+        raise LookupError(f"交易日历尚未覆盖目标日期 {target_date}")
+    try:
+        target_index = dates.index(target_date)
+    except ValueError:
+        return False, "", "新浪交易日历（校正QMT未覆盖日期）", dates[-1]
+    if target_index == 0:
+        raise LookupError(f"交易日历缺少 {target_date} 的上一交易日")
+    return (
+        True,
+        dates[target_index - 1],
+        "新浪交易日历（校正QMT未覆盖日期）",
+        dates[-1],
+    )
+
+
 def new_bond_candidates_payload(date_input: str = "") -> dict[str, Any]:
     """Return bonds whose next exchange session is their second trading day."""
     target_date = compact_date(date_input) or china_now().strftime("%Y%m%d")
@@ -2164,25 +2234,39 @@ def new_bond_candidates_payload(date_input: str = "") -> dict[str, Any]:
         f"http://{QMT_BRIDGE_HOST}:{QMT_BRIDGE_PORT}",
         timeout=15.0,
     )
-    calendar_source = "QMT Bridge交易日历"
+    bridge_is_trading = False
+    bridge_previous_date = ""
+    bridge_calendar_error = ""
     try:
         trading_payload = bridge.get(
             "/api/calendar/is_trading_date",
             {"date": target_date, "market": "SH"},
             timeout=10.0,
         )
-        is_trading = bool(trading_payload.get("is_trading"))
-        previous_date = (
+        bridge_is_trading = bool(trading_payload.get("is_trading"))
+        bridge_previous_date = (
             bridge_calendar_date(
                 bridge,
                 "/api/calendar/prev_trading_date",
                 target_date,
             )
-            if is_trading
+            if bridge_is_trading
             else ""
         )
     except Exception as error:
-        raise LookupError(f"QMT交易日历不可用：{error}") from error
+        bridge_calendar_error = str(error)
+
+    fallback_dates: list[str] | None = None
+    if not bridge_is_trading or not bridge_previous_date:
+        fallback_dates = latest_exchange_trade_dates()
+    is_trading, previous_date, calendar_source, calendar_latest_date = (
+        resolve_target_trading_session(
+            target_date,
+            bridge_is_trading,
+            bridge_previous_date,
+            fallback_dates,
+        )
+    )
 
     try:
         qmt_codes = {
@@ -2221,6 +2305,10 @@ def new_bond_candidates_payload(date_input: str = "") -> dict[str, Any]:
             "is_trading_date": is_trading,
             "previous_trading_date": previous_date,
             "calendar_source": calendar_source,
+            "calendar_latest_date": calendar_latest_date,
+            "qmt_calendar_is_trading": bridge_is_trading,
+            "qmt_calendar_previous_date": bridge_previous_date,
+            "qmt_calendar_error": bridge_calendar_error,
             "reference_source": "东方财富可转债资料动态列表",
             "miniqmt_list_count": len(qmt_codes),
             "miniqmt_missing_candidate_codes": missing_from_qmt,

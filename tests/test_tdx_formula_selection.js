@@ -9,6 +9,7 @@ const {
   mergeSelectedRows,
   normalizeFormulaBatchResult,
   normalizeTdxUniverse,
+  partitionOrdinaryConvertibleBonds,
 } = require("../src/domain/tdx-formula-selection");
 const {
   canResume,
@@ -52,6 +53,24 @@ test("extracts the latest 0/1 values from condition formula batches", () => {
     date: "20260818",
     value: "1",
   }]);
+});
+
+test("excludes directed convertible bonds from the ordinary bond universe", () => {
+  const universe = normalizeTdxUniverse([
+    { Code: "123064.SZ", Name: "万孚转债" },
+    { Code: "124025.SZ", Name: "富乐定转" },
+    { Code: "110815.SH", Name: "九丰定01" },
+    { Code: "118500.SH", Name: "思瑞定转" },
+    { Code: "810011.BJ", Name: "优机定转" },
+  ]);
+  const partitioned = partitionOrdinaryConvertibleBonds(universe);
+  assert.deepEqual(partitioned.included.map((row) => row.code), ["123064.SZ"]);
+  assert.deepEqual(partitioned.excluded.map((row) => row.code), [
+    "124025.SZ",
+    "110815.SH",
+    "118500.SH",
+    "810011.BJ",
+  ]);
 });
 
 test("reports missing formula rows and rejects TQ errors", () => {
@@ -118,5 +137,6 @@ test("uses the TDX convertible-bond category by default", async () => {
   assert.equal(calls.find((call) => call.method === "get_stock_list").params.market, "32");
   assert.equal(snapshot.universe.label, "可转债");
   assert.equal(snapshot.universe.count, 1);
+  assert.equal(snapshot.universe.scope, "沪深公开发行可转债");
   assert.equal(snapshot.formulas[0].selectedCount, 1);
 });

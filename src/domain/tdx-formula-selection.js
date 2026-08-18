@@ -5,6 +5,26 @@ const { normalizeMarketCode } = require("./market-code");
 
 const DEFAULT_TDX_FORMULAS = Object.freeze(["单针", "异动", "ZX"]);
 
+function ordinaryConvertibleBondExclusion(row) {
+  const code = String(row?.code ?? row?.Code ?? "").trim().toUpperCase();
+  const name = String(row?.name ?? row?.Name ?? "").trim();
+  if (code.endsWith(".BJ") || code.startsWith("810")) return "北交所定向可转债";
+  if (code.startsWith("124")) return "定向可转债";
+  if (/定(?:转|\d{2})/.test(name)) return "定向可转债";
+  return "";
+}
+
+function partitionOrdinaryConvertibleBonds(rows) {
+  const included = [];
+  const excluded = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const reason = ordinaryConvertibleBondExclusion(row);
+    if (reason) excluded.push({ ...row, reason });
+    else included.push(row);
+  }
+  return { included, excluded };
+}
+
 function normalizeTdxUniverse(rows) {
   const seen = new Set();
   const universe = [];
@@ -122,4 +142,6 @@ module.exports = {
   mergeSelectedRows,
   normalizeFormulaBatchResult,
   normalizeTdxUniverse,
+  ordinaryConvertibleBondExclusion,
+  partitionOrdinaryConvertibleBonds,
 };

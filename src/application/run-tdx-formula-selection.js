@@ -7,6 +7,7 @@ const {
   mergeSelectedRows,
   normalizeFormulaBatchResult,
   normalizeTdxUniverse,
+  partitionOrdinaryConvertibleBonds,
 } = require("../domain/tdx-formula-selection");
 const { callTq } = require("../infrastructure/tdx-tq-client");
 const {
@@ -75,6 +76,10 @@ function initialSnapshot(options) {
       market: options.market,
       label: marketLabel(options.market),
       count: options.universe.length,
+      rawCount: options.rawUniverseCount,
+      excludedCount: options.excludedUniverse.length,
+      excluded: options.excludedUniverse,
+      scope: options.market === "32" ? "沪深公开发行可转债" : "通达信市场原始范围",
       signature: options.signature,
     },
     settings: {
@@ -142,9 +147,13 @@ async function runTdxFormulaSelections(rawOptions = {}) {
     }
   }
 
-  let universe = normalizeTdxUniverse(
+  const rawUniverse = normalizeTdxUniverse(
     await invoke(tqOptions, "get_stock_list", { market, list_type: 1 }),
   );
+  const partitionedUniverse = market === "32"
+    ? partitionOrdinaryConvertibleBonds(rawUniverse)
+    : { included: rawUniverse, excluded: [] };
+  let universe = partitionedUniverse.included;
   const limit = Number(rawOptions.limit || 0);
   if (limit > 0) universe = universe.slice(0, limit);
   if (universe.length === 0) throw new Error("TDX A-share universe is empty");
@@ -161,6 +170,8 @@ async function runTdxFormulaSelections(rawOptions = {}) {
     ...tqOptions,
     formulas,
     universe,
+    rawUniverseCount: rawUniverse.length,
+    excludedUniverse: partitionedUniverse.excluded,
     formulaInfo,
     market,
     period,

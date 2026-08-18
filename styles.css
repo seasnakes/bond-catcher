@@ -918,6 +918,10 @@ textarea:disabled {
 
 .signal-type-filter {
   position: relative;
+  z-index: auto;
+}
+
+.signal-type-filter[open] {
   z-index: 8;
 }
 
