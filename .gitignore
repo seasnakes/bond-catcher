@@ -8,3 +8,6 @@ __pycache__/
 data/.DS_Store
 data/recovered/
 runtime/
+.playwright-mcp/
+outputs/
+tmp/

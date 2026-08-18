@@ -1,13 +1,18 @@
 {
   "scripts": {
     "start": "node server.js",
-    "miniqmt:api": "/Users/seasnake/miniconda3/bin/python3 scripts/miniqmt-dashboard-api.py",
+    "miniqmt:api": "python3 scripts/miniqmt-dashboard-api.py",
     "build:active-bond-index": "node scripts/build-active-cb-index.js",
     "build:bond-tags": "node scripts/build-convertible-bond-tags.js && npm run build:bond-search-aliases",
     "apply:energy-tags": "node scripts/apply-energy-theme-tags.js",
     "build:bond-search-aliases": "swift scripts/build-convertible-bond-search-aliases.swift",
     "update:stocks": "node scripts/update-a-share-list.js",
     "sync:tdx-sectors": "node scripts/sync-tdx-sectors.js",
-    "test:trading": "/Users/seasnake/miniconda3/bin/python3 -m unittest discover -s tests -p 'test_*.py' -v"
+    "import:tdx-selection": "node scripts/import-tdx-selection.js",
+    "test": "node --test tests/*.js && python3 -m unittest discover -s tests -p 'test_*.py' -v",
+    "verify": "bash scripts/verify.sh",
+    "test:auction": "node --test tests/test_auction_cache.js",
+    "test:miniqmt": "python3 -m unittest discover -s tests -p 'test_miniqmt_dashboard_api.py' -v",
+    "test:trading": "python3 -m unittest discover -s tests -p 'test_*.py' -v"
   }
 }

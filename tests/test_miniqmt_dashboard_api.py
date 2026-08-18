@@ -20,8 +20,10 @@ SCRIPT_PATH = ROOT / "scripts" / "miniqmt-dashboard-api.py"
 if str(SCRIPT_PATH.parent) not in sys.path:
     sys.path.insert(0, str(SCRIPT_PATH.parent))
 MONITOR_ROOT = Path(
-    "/Users/seasnake/Documents/Codex/2026-07-27/miniqmt/"
-    "outputs/miniqmt_cb_shortline_monitor"
+    os.environ.get(
+        "MINIQMT_TEST_MONITOR_ROOT",
+        ROOT / "tests" / "fixtures" / "miniqmt_monitor",
+    )
 )
 
 
