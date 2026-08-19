@@ -25,10 +25,9 @@ const MARKET_HEIGHT_DEFAULT = 176;
 const MARKET_HEIGHT_MIN = 120;
 const MARKET_HEIGHT_MAX = 520;
 const SPARKLINE_BATCH_SIZE = 100;
-// MiniQMT full_tick is sampled by the existing quote refresh. A 30-second
-// sparkline refresh keeps the small charts responsive without multiplying the
-// Bridge request rate for every card.
-const SPARKLINE_REFRESH_MS = 30 * 1000;
+// MiniQMT full_tick is sampled by the existing quote refresh. Ten seconds
+// matches the live-sample bucket while keeping the spark endpoint read-only.
+const SPARKLINE_REFRESH_MS = 10 * 1000;
 const AUCTION_SERIES_BATCH_SIZE = 120;
 const AUCTION_SERIES_MAX_POINTS = 80;
 const AUCTION_SPARK_WIDTH = 60;
@@ -1031,8 +1030,8 @@ function panelBondUrl(url) {
   return target.href;
 }
 
-function hasActiveBondDetail() {
-  return !bondMarketPreview.hidden || !bondOverlay.hidden;
+function hasActiveBoardPause() {
+  return !bondOverlay.hidden;
 }
 
 function setBondPreviewActive(active) {
@@ -1082,7 +1081,7 @@ function pauseBoardUpdates() {
 }
 
 function resumeBoardUpdatesIfIdle() {
-  if (hasActiveBondDetail() || !state.boardUpdatesPaused) return;
+  if (hasActiveBoardPause() || !state.boardUpdatesPaused) return;
   const hadPendingRender = state.boardRenderPending;
   state.boardUpdatesPaused = false;
   state.boardRenderPending = false;
@@ -1114,7 +1113,6 @@ function showBondMarketPreview(url) {
   bondMarketPreview.hidden = false;
   bondPreviewReset.hidden = false;
   marketMonitorRow.classList.add("is-bond-preview");
-  pauseBoardUpdates();
   bondMarketPreviewFrame.title = `${name} ${code} 分时与指标预览`;
   const loadedUrl = bondMarketPreviewFrame.dataset.loadedUrl || "";
   const currentUrl = bondMarketPreviewFrame.getAttribute("src") || "";
@@ -2681,6 +2679,20 @@ function scheduleMainRefresh() {
     scheduleMainRefresh();
   }, delay);
   updateStatus();
+}
+
+function refreshVisibleDataImmediately() {
+  if (
+    document.hidden
+    || state.boardUpdatesPaused
+    || !marketSession().canAutoRefresh
+  ) {
+    return false;
+  }
+  void refreshQuotes({ force: true });
+  void refreshIndices({ force: true });
+  if (!state.signalPaused) void refreshSignalFeed();
+  return true;
 }
 
 function scheduleIndexRefresh() {
@@ -4832,7 +4844,7 @@ function updateStatus() {
     : state.loading
     ? "刷新中"
     : session.canAutoRefresh
-      ? `板块${seconds}s 后刷新 · 分时30s · 指数${indexSeconds}s`
+      ? `板块${seconds}s 后刷新 · 分时${SPARKLINE_REFRESH_MS / 1000}s · 指数${indexSeconds}s`
       : `停止自动刷新 · 下次 ${formatScheduleTime(session.nextAt)}`;
   const secondDayRows = Array.isArray(state.newBondStatus?.candidates)
     ? state.newBondStatus.candidates
@@ -5002,22 +5014,14 @@ async function boot() {
   document.addEventListener("visibilitychange", () => {
     setBondPreviewActive(!document.hidden && !bondMarketPreview.hidden);
     updateStatus();
+    if (!document.hidden) {
+      refreshNewBondSecondDayState();
+      refreshVisibleDataImmediately();
+    }
     scheduleMainRefresh();
     scheduleIndexRefresh();
     scheduleBondRefresh();
     scheduleSignalRefresh();
-    if (!document.hidden) refreshNewBondSecondDayState();
-    if (
-      !document.hidden
-      && !state.boardUpdatesPaused
-      && marketSession().canAutoRefresh
-      && Date.now() > state.nextRefreshAt
-    ) {
-      refreshQuotes();
-      refreshIndices({ force: true });
-      refreshBondQuotes({ force: true });
-      refreshSignalFeed();
-    }
   });
 }
 

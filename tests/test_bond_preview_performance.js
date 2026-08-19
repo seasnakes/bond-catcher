@@ -120,7 +120,7 @@ function previewContext() {
     restoreBoardViewState() { return null; },
   });
   vm.runInContext(
-    sourceBetween("function hasActiveBondDetail()", "\nfunction saveBoardViewState()"),
+    sourceBetween("function hasActiveBoardPause()", "\nfunction saveBoardViewState()"),
     context,
   );
   return {
@@ -136,15 +136,15 @@ function previewContext() {
   };
 }
 
-test("preview paints a loading shell immediately and pauses the large board", () => {
+test("preview paints a loading shell immediately and keeps the board live", () => {
   const fixture = previewContext();
   fixture.context.showBondMarketPreview("./bond.html?code=123065&name=宝莱转债");
 
   assert.equal(fixture.bondMarketPreview.hidden, false);
   assert.equal(fixture.bondPreviewLoading.hidden, false);
-  assert.equal(fixture.state.boardUpdatesPaused, true);
-  assert.equal(fixture.state.quoteRequestId, 5);
-  assert.equal(fixture.state.bondQuoteRequestId, 8);
+  assert.equal(fixture.state.boardUpdatesPaused, false);
+  assert.equal(fixture.state.quoteRequestId, 4);
+  assert.equal(fixture.state.bondQuoteRequestId, 7);
   assert.match(fixture.bondMarketPreviewFrame.getAttribute("src"), /code=123065/);
   assert.equal(fixture.calls.refresh, 0);
 });
@@ -185,7 +185,7 @@ test("iframe error leaves a retry affordance and a repeated click retries", () =
   assert.ok(fixture.bondMarketPreviewFrame.attributeWrites.length > writesBefore);
 });
 
-test("closing preview preserves the iframe and resumes with exactly one refresh", () => {
+test("closing preview preserves the iframe without restarting the live board", () => {
   const fixture = previewContext();
   fixture.context.showBondMarketPreview("./bond.html?code=123065&name=宝莱转债");
   const source = fixture.bondMarketPreviewFrame.getAttribute("src");
@@ -195,7 +195,7 @@ test("closing preview preserves the iframe and resumes with exactly one refresh"
   assert.equal(fixture.bondMarketPreview.hidden, true);
   assert.equal(fixture.bondMarketPreviewFrame.getAttribute("src"), source);
   assert.equal(fixture.state.boardUpdatesPaused, false);
-  assert.equal(fixture.calls.refresh, 1);
+  assert.equal(fixture.calls.refresh, 0);
 
   const writesBefore = fixture.bondMarketPreviewFrame.attributeWrites.length;
   fixture.context.showBondMarketPreview("./bond.html?code=123065&name=宝莱转债");
@@ -203,7 +203,7 @@ test("closing preview preserves the iframe and resumes with exactly one refresh"
   assert.equal(fixture.bondPreviewLoading.hidden, true);
 });
 
-test("preview and overlay share one pause scope and resume only after both close", () => {
+test("only the overlay pauses the board and resumes after it closes", () => {
   const fixture = previewContext();
   const url = "./bond.html?code=123065&name=宝莱转债";
   fixture.context.showBondMarketPreview(url);
@@ -217,7 +217,7 @@ test("preview and overlay share one pause scope and resume only after both close
   assert.equal(fixture.state.boardUpdatesPaused, false);
 });
 
-test("background renders are coalesced while a detail panel is active", () => {
+test("background renders are coalesced while the overlay is active", () => {
   const state = { boardUpdatesPaused: true, boardRenderPending: false, needsRenderAfterRename: false };
   let renders = 0;
   const context = vm.createContext({
