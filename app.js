@@ -813,6 +813,7 @@ const state = {
   auctionCursor: 0,
   auctionLoading: false,
   auctionLastFetchAt: 0,
+  auctionPresentationActive: null,
   source: "连接中",
   lastUpdated: null,
   loading: false,
@@ -3745,6 +3746,9 @@ function renderIndexSparkline(item) {
 }
 
 function render() {
+  const auctionDisplay = isAuctionDisplaySession();
+  state.auctionPresentationActive = auctionDisplay;
+  grid.classList.toggle("is-auction", auctionDisplay);
   if (state.activeView === "themes") {
     renderThemeBondBoard();
     return;
@@ -4544,7 +4548,7 @@ function createChangeValue(text) {
 }
 
 function renderStockRow(stock, sectorName) {
-  const auctionDisplay = isAuctionDisplaySession();
+  const auctionDisplay = state.auctionPresentationActive ?? isAuctionDisplaySession();
   const tone = quoteClass(stock.change);
   const nameTone = stockNameClass(stock.change);
   const row = state.editMode ? document.createElement("div") : document.createElement("a");
@@ -4804,6 +4808,18 @@ function sparklinePath(points, width, height) {
     .join(" ");
 }
 
+function syncAuctionDisplayPresentation(auctionDisplay = isAuctionDisplaySession()) {
+  grid.classList.toggle("is-auction", auctionDisplay);
+  if (
+    state.auctionPresentationActive === null
+    || state.auctionPresentationActive === auctionDisplay
+  ) {
+    return false;
+  }
+  renderAfterBackgroundUpdate();
+  return true;
+}
+
 function updateStatus() {
   const session = marketSession();
   const seconds = Math.max(0, Math.ceil((state.nextRefreshAt - Date.now()) / 1000));
@@ -4827,7 +4843,7 @@ function updateStatus() {
   const secondDayHint = secondDayNames.length > 0
     ? ` · 上市第二日候选 ${secondDayNames.join("、")}`
     : "";
-  grid.classList.toggle("is-auction", isAuctionDisplaySession());
+  syncAuctionDisplayPresentation();
   statusNode.textContent = `${state.source} · ${time} · ${session.label} · ${loadingText}${secondDayHint}`;
 }
 
@@ -4985,6 +5001,7 @@ async function boot() {
 
   document.addEventListener("visibilitychange", () => {
     setBondPreviewActive(!document.hidden && !bondMarketPreview.hidden);
+    updateStatus();
     scheduleMainRefresh();
     scheduleIndexRefresh();
     scheduleBondRefresh();

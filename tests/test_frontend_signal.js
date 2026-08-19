@@ -90,6 +90,42 @@ test("null signal speed falls back instead of rendering 0.00%", () => {
   );
 });
 
+test("board rows rerender once when auction display time ends", () => {
+  const classes = new Set(["is-auction"]);
+  const state = { auctionPresentationActive: true };
+  let renders = 0;
+  const context = vm.createContext({
+    state,
+    grid: {
+      classList: {
+        toggle(name, enabled) {
+          if (enabled) classes.add(name);
+          else classes.delete(name);
+        },
+      },
+    },
+    isAuctionDisplaySession: () => false,
+    renderAfterBackgroundUpdate() {
+      renders += 1;
+      state.auctionPresentationActive = false;
+    },
+  });
+  vm.runInContext(
+    sourceBetween(
+      APP_SOURCE,
+      "function syncAuctionDisplayPresentation",
+      "\nfunction updateStatus",
+    ),
+    context,
+  );
+
+  assert.equal(vm.runInContext("syncAuctionDisplayPresentation(false)", context), true);
+  assert.equal(classes.has("is-auction"), false);
+  assert.equal(renders, 1);
+  assert.equal(vm.runInContext("syncAuctionDisplayPresentation(false)", context), false);
+  assert.equal(renders, 1);
+});
+
 test("health verdict controls live and error states without flagging off-hours", () => {
   const classes = new Map();
   const state = { signalPaused: false, signalEvents: [] };
