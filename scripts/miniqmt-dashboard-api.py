@@ -93,6 +93,7 @@ INTRADAY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 # second Bridge poller or asking an external data vendor for another series.
 LIVE_INTRADAY_MAX_POINTS = 480
 LIVE_INTRADAY_SAMPLE_MIN_GAP_MS = 10_000
+LIVE_INTRADAY_PREVIEW_MAX_AGE_MS = 30_000
 LIVE_INTRADAY_SAMPLES: dict[str, list[dict[str, Any]]] = {}
 LIVE_INTRADAY_LOCK = threading.RLock()
 LIVE_INTRADAY_DATABASE_PATH = Path(
@@ -495,6 +496,11 @@ def record_live_intraday_sample(
     quote: dict[str, Any],
 ) -> dict[str, Any] | None:
     price = finite_or_none(quote.get("price"))
+    previous_close = finite_or_none(
+        quote.get("previousClose")
+        if quote.get("previousClose") is not None
+        else quote.get("previous_close")
+    )
     timestamp = live_quote_timestamp(quote)
     trading_date = compact_date(quote.get("date") or quote.get("timetag"))
     if (
@@ -511,6 +517,9 @@ def record_live_intraday_sample(
         "time": timestamp,
         "price": price,
         "date": trading_date,
+        "previous_close": previous_close,
+        "amount": finite_or_none(quote.get("amount")) or 0,
+        "volume": finite_or_none(quote.get("volume")) or 0,
     }
     should_persist = True
     with LIVE_INTRADAY_LOCK:
@@ -5233,6 +5242,78 @@ def live_tick_minute_rows(
     )
 
 
+def cached_live_sample_minute_rows(
+    stored_code: str,
+    trading_date: str,
+) -> tuple[
+    list[dict[str, Any]],
+    float | None,
+    str,
+    float,
+    dict[str, Any] | None,
+]:
+    """Build provisional minute rows from quotes already fetched by the board.
+
+    The inline preview polls frequently, but it must not create a second Bridge
+    quote stream.  Reusing the board's persisted full_tick samples keeps the
+    preview current while preserving the fast path's no-Bridge guarantee.
+    """
+    samples = load_live_intraday_samples([stored_code], trading_date).get(
+        stored_code,
+        [],
+    )
+    latest_sample = next(
+        (
+            sample
+            for sample in reversed(samples)
+            if int(sample.get("time") or 0) > 0
+            and (finite_or_none(sample.get("price")) or 0) > 0
+        ),
+        None,
+    )
+    if latest_sample is None:
+        return [], None, "", 0.0, None
+    latest_timestamp = int(latest_sample.get("time") or 0)
+    current_timestamp = int(china_now().timestamp() * 1000)
+    if (
+        current_timestamp < latest_timestamp
+        or current_timestamp - latest_timestamp > LIVE_INTRADAY_PREVIEW_MAX_AGE_MS
+    ):
+        return [], None, "", 0.0, None
+    latest_moment = datetime.fromtimestamp(
+        latest_timestamp / 1000,
+        CHINA_TIME_ZONE,
+    )
+    minute_moment = latest_moment.replace(second=0, microsecond=0)
+    price = float(latest_sample["price"])
+    minute_row = {
+        "minute_ms": int(minute_moment.timestamp() * 1000),
+        "minute_time": minute_moment.strftime("%Y-%m-%d %H:%M:%S"),
+        "open": price,
+        "high": price,
+        "low": price,
+        "close": price,
+        "amount": 0.0,
+    }
+    previous_close = finite_or_none(latest_sample.get("previous_close"))
+    cumulative_amount = finite_or_none(latest_sample.get("amount")) or 0.0
+    tick = {
+        "lastPrice": finite_or_none(latest_sample.get("price")),
+        "lastClose": previous_close,
+        "amount": cumulative_amount,
+        "volume": finite_or_none(latest_sample.get("volume")) or 0.0,
+        "timetag": latest_moment.strftime("%Y%m%d %H:%M:%S"),
+        "time": latest_timestamp,
+    }
+    return (
+        [minute_row],
+        previous_close,
+        "",
+        cumulative_amount,
+        tick,
+    )
+
+
 def minute_row_clock(row: Any) -> str:
     value = str(row["minute_time"] or "")
     match = re.search(r"(\d{2}:\d{2})", value)
@@ -5450,15 +5531,24 @@ def bond_payload(
     live_name = ""
     live_tick: dict[str, Any] | None = None
     live_tick_error = ""
-    if not date_input and not fast_mode:
+    if not date_input:
         try:
-            (
-                live_rows,
-                live_previous_close,
-                live_name,
-                live_cumulative_amount,
-                live_tick,
-            ) = live_tick_minute_rows(stored_code, trading_date, name)
+            if fast_mode:
+                (
+                    live_rows,
+                    live_previous_close,
+                    live_name,
+                    live_cumulative_amount,
+                    live_tick,
+                ) = cached_live_sample_minute_rows(stored_code, trading_date)
+            else:
+                (
+                    live_rows,
+                    live_previous_close,
+                    live_name,
+                    live_cumulative_amount,
+                    live_tick,
+                ) = live_tick_minute_rows(stored_code, trading_date, name)
         except Exception as error:
             live_tick_error = f"{type(error).__name__}: {error}"
     minute_rows = merge_bond_minute_rows(local_rows, downloaded_rows, live_rows)
@@ -5471,7 +5561,7 @@ def bond_payload(
     if downloaded_rows:
         source_parts.append("MiniQMT 1m补齐" if date_input else "MiniQMT 1m缓存")
     if live_rows:
-        source_parts.append("实时快照")
+        source_parts.append("主看板实时采样" if fast_mode else "实时快照")
     if source_parts:
         minute_source = " + ".join(source_parts)
 
@@ -5914,6 +6004,7 @@ def bond_payload(
                 "refresh_interval_seconds": 2,
                 "live_tick_error": live_tick_error,
                 "live_tick_skipped": fast_mode,
+                "live_sample_used": bool(fast_mode and live_rows),
             },
             "rows": rows,
             "events": events,

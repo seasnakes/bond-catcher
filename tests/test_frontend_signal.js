@@ -685,6 +685,45 @@ test("panel bond requests opt into the Bridge-free fast path", () => {
   assert.match(BOND_SOURCE, /if \(isPanel && \(!state\.panelActive \|\| document\.hidden\)\) return/);
 });
 
+test("an active panel retries a transient empty fast preview after two seconds", () => {
+  const scheduled = [];
+  const context = vm.createContext({
+    state: {
+      panelActive: true,
+      manualDate: false,
+      refreshTimer: 0,
+    },
+    isPanel: true,
+    document: { hidden: false },
+    PANEL_LOAD_ERROR_RETRY_MS: 2_000,
+    marketRefreshWindow: () => ({ active: true }),
+    loadBond: () => {},
+    window: {
+      clearTimeout() {},
+      setTimeout(callback, delay) {
+        scheduled.push({ callback, delay });
+        return scheduled.length;
+      },
+    },
+  });
+  vm.runInContext(
+    sourceBetween(
+      BOND_SOURCE,
+      "function schedulePanelLoadErrorRetry()",
+      "\nasync function loadBond",
+    ),
+    context,
+  );
+
+  assert.equal(context.schedulePanelLoadErrorRetry(), true);
+  assert.equal(scheduled.length, 1);
+  assert.equal(scheduled[0].delay, 2_000);
+
+  context.document.hidden = true;
+  assert.equal(context.schedulePanelLoadErrorRetry(), false);
+  assert.equal(scheduled.length, 1);
+});
+
 function panelHistoryBackfillContext(overrides = {}) {
   const scheduled = [];
   const calls = { fetch: [], render: 0, refresh: 0, status: 0 };

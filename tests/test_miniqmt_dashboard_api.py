@@ -955,6 +955,71 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
         self.assertTrue(payload["realtime"]["live_tick_skipped"])
         self.assertEqual(payload["source"], "本地监控")
 
+    def test_fast_preview_reuses_board_live_sample_for_a_new_bond(self):
+        module = self.module
+        timestamp = int(
+            datetime(
+                2026,
+                8,
+                12,
+                10,
+                6,
+                12,
+                tzinfo=ZoneInfo("Asia/Shanghai"),
+            ).timestamp()
+            * 1000
+        )
+        module.LIVE_INTRADAY_SAMPLES["123279.SZ"] = [
+            {
+                "date": self.trading_date,
+                "time": timestamp,
+                "price": 178.8,
+                "previous_close": 157.3,
+                "amount": 1_250_000_000,
+                "volume": 700_000,
+            }
+        ]
+
+        def forbidden(*_args, **_kwargs):
+            raise AssertionError("fast preview touched Bridge")
+
+        with (
+            mock.patch.object(module.MONITOR, "BridgeClient", side_effect=forbidden),
+            mock.patch.object(module, "live_tick_minute_rows", side_effect=forbidden),
+            mock.patch.object(
+                module,
+                "china_now",
+                return_value=datetime(
+                    2026,
+                    8,
+                    12,
+                    10,
+                    6,
+                    20,
+                    tzinfo=ZoneInfo("Asia/Shanghai"),
+                ),
+            ),
+            mock.patch.object(
+                module,
+                "api_health",
+                return_value={
+                    "monitor_alive": True,
+                    "latest_trading_date": self.trading_date,
+                    "calendar_date": self.trading_date,
+                },
+            ),
+        ):
+            payload = module.bond_payload("123279", fast=True)
+
+        self.assertTrue(payload["fast_preview"])
+        self.assertTrue(payload["realtime"]["live_tick_skipped"])
+        self.assertTrue(payload["realtime"]["live_sample_used"])
+        self.assertEqual(payload["latest_price"], 178.8)
+        self.assertEqual(payload["latest_minute"], "10:06")
+        self.assertAlmostEqual(payload["daily_return"], 13.6681500317864)
+        self.assertEqual(payload["total_amount"], 1_250_000_000)
+        self.assertEqual(payload["source"], "主看板实时采样")
+
     def test_fast_preview_stops_retry_for_non_trading_monitor_code(self):
         module = self.module
         module.MONITOR_HISTORY_REPAIR_PRIORITY_PATH = (

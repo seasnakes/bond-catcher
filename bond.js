@@ -246,6 +246,7 @@ const PANEL_HISTORY_BACKFILL_PARTIAL_DELAY_MS = 30_000;
 const PANEL_HISTORY_BACKFILL_FAILURE_BASE_MS = 15_000;
 const PANEL_HISTORY_BACKFILL_FAILURE_MAX_MS = 120_000;
 const PANEL_HISTORY_BACKFILL_SUCCESS_COOLDOWN_MS = 60_000;
+const PANEL_LOAD_ERROR_RETRY_MS = 2_000;
 const MANUAL_BACKFILL_MIN_POLL_MS = 3_000;
 const MANUAL_BACKFILL_DEFAULT_POLL_MS = 5_000;
 const MANUAL_BACKFILL_POLL_FAILURE_MAX_MS = 30_000;
@@ -1609,6 +1610,22 @@ function startQuickHold(event) {
   }, 30);
 }
 
+function schedulePanelLoadErrorRetry() {
+  if (
+    !isPanel
+    || !state.panelActive
+    || state.manualDate
+    || document.hidden
+    || !marketRefreshWindow().active
+  ) return false;
+  window.clearTimeout(state.refreshTimer);
+  state.refreshTimer = window.setTimeout(
+    () => loadBond({ date: "" }),
+    PANEL_LOAD_ERROR_RETRY_MS,
+  );
+  return true;
+}
+
 async function loadBond(options = {}) {
   if (isPanel && !state.panelActive) return false;
   if (!requestedCode) {
@@ -1658,6 +1675,7 @@ async function loadBond(options = {}) {
       error.message || "MiniQMT读取失败",
     )}</div>`;
     if (manualBackfillMatchesCurrentView()) renderManualBackfillState();
+    schedulePanelLoadErrorRetry();
     return false;
   }
 }
