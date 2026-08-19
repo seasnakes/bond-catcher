@@ -45,6 +45,7 @@ function newFormulaState(code, info, totalBatches) {
     totalBatches,
     processedCount: 0,
     returnedCount: 0,
+    evaluatedCodes: [],
     missingCount: 0,
     missingCodes: [],
     asOf: "",
@@ -207,6 +208,10 @@ async function runTdxFormulaSelections(rawOptions = {}) {
         state.nextBatchIndex = batchIndex + 1;
         state.processedCount += batch.length;
         state.returnedCount += normalized.returnedCount;
+        state.evaluatedCodes = [...new Set([
+          ...(state.evaluatedCodes || []),
+          ...normalized.returnedCodes,
+        ])].sort();
         state.missingCount += normalized.missingCodes.length;
         state.missingCodes = [...new Set([...(state.missingCodes || []), ...normalized.missingCodes])].sort();
         state.selected = mergeSelectedRows(state.selected, normalized.selected);

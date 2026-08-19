@@ -44,6 +44,7 @@ test("extracts the latest 0/1 values from condition formula batches", () => {
     ErrorId: "0",
   }, universe);
   assert.equal(normalized.returnedCount, 3);
+  assert.deepEqual(normalized.returnedCodes, ["000001.SZ", "002131.SZ", "600519.SH"]);
   assert.deepEqual(normalized.missingCodes, []);
   assert.deepEqual(normalized.lineNames, ["XG"]);
   assert.deepEqual(normalized.selected, [{

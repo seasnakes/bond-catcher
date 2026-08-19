@@ -110,6 +110,7 @@ function normalizeFormulaBatchResult(result, universe) {
   const returnedSet = new Set(returnedCodes);
   return {
     returnedCount: returnedSet.size,
+    returnedCodes: [...returnedSet].sort(),
     missingCodes: universe.map((row) => row.code).filter((code) => !returnedSet.has(code)),
     selected,
     dates: Object.fromEntries([...dateCounts.entries()].sort(([left], [right]) => left.localeCompare(right))),
