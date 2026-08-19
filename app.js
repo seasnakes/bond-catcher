@@ -4832,6 +4832,20 @@ function syncAuctionDisplayPresentation(auctionDisplay = isAuctionDisplaySession
   return true;
 }
 
+function compactMarketStatusSource(source) {
+  const value = String(source || "连接中").trim();
+  const miniQmt = value.match(/^MiniQMT实时\s+(\d+\/\d+)/);
+  return miniQmt ? `MiniQMT ${miniQmt[1]}` : value;
+}
+
+function marketStatusItem(text, className, title = "") {
+  const item = document.createElement("span");
+  item.className = `market-status-item ${className}`;
+  item.textContent = text;
+  if (title) item.title = title;
+  return item;
+}
+
 function updateStatus() {
   const session = marketSession();
   const seconds = Math.max(0, Math.ceil((state.nextRefreshAt - Date.now()) / 1000));
@@ -4839,13 +4853,6 @@ function updateStatus() {
   const time = state.lastUpdated
     ? state.lastUpdated.toLocaleTimeString("zh-CN", { hour12: false })
     : "--:--:--";
-  const loadingText = state.boardUpdatesPaused
-    ? "转债详情打开 · 主看板暂停刷新"
-    : state.loading
-    ? "刷新中"
-    : session.canAutoRefresh
-      ? `板块${seconds}s 后刷新 · 分时${SPARKLINE_REFRESH_MS / 1000}s · 指数${indexSeconds}s`
-      : `停止自动刷新 · 下次 ${formatScheduleTime(session.nextAt)}`;
   const secondDayRows = Array.isArray(state.newBondStatus?.candidates)
     ? state.newBondStatus.candidates
     : [];
@@ -4853,10 +4860,47 @@ function updateStatus() {
     .map((row) => String(row?.name || row?.code || "").trim())
     .filter(Boolean);
   const secondDayHint = secondDayNames.length > 0
-    ? ` · 上市第二日候选 ${secondDayNames.join("、")}`
+    ? `上市第二日候选 ${secondDayNames.join("、")}`
     : "";
   syncAuctionDisplayPresentation();
-  statusNode.textContent = `${state.source} · ${time} · ${session.label} · ${loadingText}${secondDayHint}`;
+  const items = [
+    marketStatusItem(
+      compactMarketStatusSource(state.source),
+      "market-status-source",
+      state.source,
+    ),
+    marketStatusItem(time, "market-status-time"),
+    marketStatusItem(session.label, "market-status-session"),
+  ];
+  let refreshSummary = "";
+  if (state.boardUpdatesPaused) {
+    refreshSummary = "转债详情打开 · 主看板暂停刷新";
+    items.push(marketStatusItem("主看板暂停", "market-status-refresh is-paused"));
+  } else if (state.loading) {
+    refreshSummary = "板块刷新中";
+    items.push(marketStatusItem("板块刷新中", "market-status-refresh is-busy"));
+  } else if (session.canAutoRefresh) {
+    refreshSummary = `板块${seconds}s 后刷新 · 分时${SPARKLINE_REFRESH_MS / 1000}s · 指数${indexSeconds}s`;
+    items.push(
+      marketStatusItem(`板块 ${seconds}s`, "market-status-refresh"),
+      marketStatusItem(`分时 ${SPARKLINE_REFRESH_MS / 1000}s`, "market-status-interval"),
+      marketStatusItem(`指数 ${indexSeconds}s`, "market-status-interval"),
+    );
+  } else {
+    refreshSummary = `停止自动刷新 · 下次 ${formatScheduleTime(session.nextAt)}`;
+    items.push(marketStatusItem("自动刷新已停", "market-status-refresh is-paused"));
+  }
+  if (secondDayHint) {
+    const note = document.createElement("span");
+    note.className = "market-status-note";
+    note.textContent = secondDayHint;
+    note.title = secondDayHint;
+    items.push(note);
+  }
+  const fullStatus = `${state.source} · ${time} · ${session.label} · ${refreshSummary}${secondDayHint ? ` · ${secondDayHint}` : ""}`;
+  statusNode.replaceChildren(...items);
+  statusNode.title = fullStatus;
+  statusNode.setAttribute("aria-label", fullStatus);
 }
 
 async function refreshQuotes(options = {}) {

@@ -75,12 +75,13 @@ select {
   top: 0;
   z-index: 5;
   display: grid;
-  grid-template-columns: minmax(260px, auto) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   grid-template-areas:
-    "brand controls"
-    "indices indices";
+    "brand"
+    "controls"
+    "indices";
   align-items: start;
-  gap: 12px;
+  gap: 6px;
   margin-bottom: 8px;
   padding: 7px 8px;
   border: 1px solid #d5dec8;
@@ -91,8 +92,8 @@ select {
 .brand {
   grid-area: brand;
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  align-items: center;
+  gap: 12px;
   min-width: 0;
 }
 
@@ -105,10 +106,92 @@ select {
 }
 
 .brand p {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
   margin: 0;
   color: var(--muted);
   font-size: 12px;
-  line-height: 1.2;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.market-status-item {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 0 7px;
+  border: 1px solid #d5dec8;
+  background: #f7f9f4;
+  color: #596451;
+  font-variant-numeric: tabular-nums;
+  line-height: 20px;
+}
+
+.market-status-source {
+  width: 112px;
+  overflow: hidden;
+  border-color: #bcd1aa;
+  background: #edf7df;
+  color: #31532a;
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+
+.market-status-source::before {
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: #35a853;
+  box-shadow: 0 0 0 2px rgb(53 168 83 / 12%);
+  content: "";
+}
+
+.market-status-time {
+  width: 68px;
+}
+
+.market-status-session {
+  width: 66px;
+}
+
+.market-status-refresh {
+  width: 76px;
+}
+
+.market-status-interval {
+  width: 70px;
+}
+
+.market-status-item.is-busy {
+  border-color: #d6c982;
+  background: #fff7c9;
+  color: #695b19;
+  font-weight: 700;
+}
+
+.market-status-item.is-paused {
+  width: auto;
+  border-color: #e0b2a8;
+  background: #fff0ec;
+  color: #8a3829;
+  font-weight: 700;
+}
+
+.market-status-note {
+  flex: 1 1 auto;
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 2px;
+  color: #747d6c;
+  line-height: 22px;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -642,11 +725,28 @@ body.is-resizing-market-height {
 
 .controls {
   grid-area: controls;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.control-group {
   display: flex;
   align-items: center;
+  gap: 5px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.control-group-primary {
+  min-width: 0;
+}
+
+.control-group-links,
+.control-group-edit {
   justify-content: flex-end;
-  gap: 6px;
-  flex-wrap: wrap;
 }
 
 .view-switch {
@@ -720,7 +820,7 @@ body.is-resizing-market-height {
 }
 
 .search-box input {
-  width: clamp(120px, 15vw, 210px);
+  width: clamp(118px, 12vw, 175px);
   height: 28px;
   border: 0;
   outline: 0;
@@ -1454,6 +1554,34 @@ textarea:disabled {
 }
 
 @media (max-width: 1180px) {
+  .controls {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "primary primary"
+      "links edit";
+  }
+
+  .control-group-primary {
+    grid-area: primary;
+  }
+
+  .control-group-links {
+    grid-area: links;
+    justify-content: flex-start;
+  }
+
+  .control-group-edit {
+    grid-area: edit;
+  }
+
+  .control-group-primary .search-box {
+    flex: 1 1 180px;
+  }
+
+  .control-group-primary .search-box input {
+    width: 100%;
+  }
+
   .market-monitor-row {
     grid-template-columns: 1fr;
     grid-template-rows: auto auto 10px;
@@ -2417,7 +2545,9 @@ textarea:disabled {
   }
 
   .brand {
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 5px;
     min-width: 0;
   }
 
@@ -2426,8 +2556,9 @@ textarea:disabled {
   }
 
   .brand p {
-    white-space: normal;
-    text-align: right;
+    width: 100%;
+    text-align: left;
+    white-space: nowrap;
   }
 
   .global-indices {
@@ -2447,7 +2578,27 @@ textarea:disabled {
   }
 
   .controls {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "primary"
+      "links"
+      "edit";
+  }
+
+  .control-group-primary,
+  .control-group-links,
+  .control-group-edit {
+    width: 100%;
     justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .control-group-primary .search-box {
+    flex: 1 1 100%;
+  }
+
+  .market-status-note {
+    display: none;
   }
 
   .signal-monitor-head {

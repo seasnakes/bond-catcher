@@ -23,50 +23,56 @@
           <div id="globalIndices" class="index-list"></div>
         </section>
         <div class="controls">
-          <div class="view-switch" role="group" aria-label="看板视图">
-            <button id="mainViewButton" class="view-switch-button is-active" type="button" aria-pressed="true">主看板</button>
-            <button id="themeViewButton" class="view-switch-button" type="button" aria-pressed="false">看板二·题材转债</button>
+          <div class="control-group control-group-primary">
+            <div class="view-switch" role="group" aria-label="看板视图">
+              <button id="mainViewButton" class="view-switch-button is-active" type="button" aria-pressed="true">主看板</button>
+              <button id="themeViewButton" class="view-switch-button" type="button" aria-pressed="false">看板二·题材转债</button>
+            </div>
+            <label class="search-box">
+              <span>搜索</span>
+              <input id="searchInput" type="search" placeholder="板块 / 股票 / 转债" autocomplete="off" />
+            </label>
+            <label class="select-box">
+              <span>排序</span>
+              <select id="sortSelect">
+                <option value="hot">默认</option>
+                <option value="change">涨幅</option>
+                <option value="name">名称</option>
+              </select>
+            </label>
+            <label class="select-box">
+              <span>范围</span>
+              <select id="rangeSelect">
+                <option value="all">全部</option>
+                <option value="up">上涨</option>
+                <option value="down">下跌</option>
+              </select>
+            </label>
+            <label class="toggle-box" title="显示或隐藏每只股票/转债的分时缩略走势">
+              <span>K线</span>
+              <input id="sparkToggle" type="checkbox" />
+            </label>
+            <button id="refreshButton" class="icon-button" type="button" title="立即刷新" aria-label="立即刷新">
+              ↻
+            </button>
           </div>
-          <label class="search-box">
-            <span>搜索</span>
-            <input id="searchInput" type="search" placeholder="板块 / 股票 / 转债" autocomplete="off" />
-          </label>
-          <label class="select-box">
-            <span>排序</span>
-            <select id="sortSelect">
-              <option value="hot">默认</option>
-              <option value="change">涨幅</option>
-              <option value="name">名称</option>
-            </select>
-          </label>
-          <label class="select-box">
-            <span>范围</span>
-            <select id="rangeSelect">
-              <option value="all">全部</option>
-              <option value="up">上涨</option>
-              <option value="down">下跌</option>
-            </select>
-          </label>
-          <label class="toggle-box" title="显示或隐藏每只股票/转债的分时缩略走势">
-            <span>K线</span>
-            <input id="sparkToggle" type="checkbox" />
-          </label>
-          <button id="refreshButton" class="icon-button" type="button" title="立即刷新" aria-label="立即刷新">
-            ↻
-          </button>
-          <a class="text-button heatmap-entry" href="./active-bond-index.html">活跃转债指数</a>
-          <a class="text-button heatmap-entry" href="./tdx-formulas.html">公式选股</a>
-          <a class="text-button heatmap-entry" href="./bond-heatmap.html">转债星图</a>
-          <a class="text-button heatmap-entry" href="./bond-tags.html">标签管理</a>
-          <a class="text-button heatmap-entry trading-entry" href="./trading.html">实盘</a>
-          <button id="editListButton" class="text-button" type="button">编辑</button>
-          <button id="addSectorButton" class="text-button add-sector-button" type="button" title="新建板块">
-            +板块
-          </button>
-          <button id="addStackButton" class="text-button add-stack-button" type="button" title="新建叠组">
-            +叠组
-          </button>
-          <button id="bulkEditButton" class="text-button" type="button" title="批量编辑监控列表">列表</button>
+          <nav class="control-group control-group-links" aria-label="转债工具">
+            <a class="text-button heatmap-entry" href="./active-bond-index.html">活跃转债指数</a>
+            <a class="text-button heatmap-entry" href="./tdx-formulas.html">公式选股</a>
+            <a class="text-button heatmap-entry" href="./bond-heatmap.html">转债星图</a>
+            <a class="text-button heatmap-entry" href="./bond-tags.html">标签管理</a>
+            <a class="text-button heatmap-entry trading-entry" href="./trading.html">实盘</a>
+          </nav>
+          <div class="control-group control-group-edit">
+            <button id="editListButton" class="text-button" type="button">编辑</button>
+            <button id="addSectorButton" class="text-button add-sector-button" type="button" title="新建板块">
+              +板块
+            </button>
+            <button id="addStackButton" class="text-button add-stack-button" type="button" title="新建叠组">
+              +叠组
+            </button>
+            <button id="bulkEditButton" class="text-button" type="button" title="批量编辑监控列表">列表</button>
+          </div>
         </div>
       </header>
 
