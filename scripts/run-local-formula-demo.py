@@ -24,7 +24,10 @@ from lib.convertible_bond_reference import (  # noqa: E402
     compact_date,
     fetch_reference_rows,
 )
-from lib.local_formula_engine import FORMULAS, evaluate_latest  # noqa: E402
+from lib.local_formula_engine import (  # noqa: E402
+    FORMULAS,
+    evaluate_latest_with_diagnostics,
+)
 
 
 DEFAULT_DATABASE = ROOT / "runtime" / "convertible-bond-market.sqlite3"
@@ -141,10 +144,18 @@ def database_connection(path: Path) -> sqlite3.Connection:
           trade_date TEXT NOT NULL,
           selected INTEGER NOT NULL,
           bar_count INTEGER NOT NULL,
+          diagnostics_json TEXT NOT NULL DEFAULT '{}',
           PRIMARY KEY (run_id, formula_code, code)
         );
         """
     )
+    signal_columns = {
+        str(row[1]) for row in connection.execute("PRAGMA table_info(formula_signals)")
+    }
+    if "diagnostics_json" not in signal_columns:
+        connection.execute(
+            "ALTER TABLE formula_signals ADD COLUMN diagnostics_json TEXT NOT NULL DEFAULT '{}'"
+        )
     return connection
 
 
@@ -314,6 +325,7 @@ def compare_with_tdx(
     benchmark_path: Path,
     local_selected: dict[str, set[str]],
     local_ready_codes: set[str],
+    diagnostics_by_code: dict[str, dict[str, dict[str, Any]]],
 ) -> dict[str, Any]:
     if not benchmark_path.exists():
         return {"available": False, "reason": "benchmark_missing"}
@@ -347,6 +359,16 @@ def compare_with_tdx(
                 "true_positive": sorted(true_positive),
                 "false_positive": sorted(false_positive),
                 "false_negative": sorted(false_negative),
+                "mismatch_diagnostics": [
+                    {
+                        "code": code,
+                        "classification": (
+                            "false_positive" if code in false_positive else "false_negative"
+                        ),
+                        **diagnostics_by_code.get(code, {}).get(name, {}),
+                    }
+                    for code in sorted(false_positive | false_negative)
+                ],
                 "exact_selected_set": not false_positive and not false_negative,
                 "agreement_rate": round(agreement, 6),
             }
@@ -564,6 +586,7 @@ def main() -> None:
             print(f"final read {batch_index}/{len(batches)}: {len(batch)} bonds", flush=True)
 
     local_selected: dict[str, set[str]] = {name: set() for name in FORMULAS}
+    diagnostics_by_code: dict[str, dict[str, dict[str, Any]]] = {}
     ready_codes: set[str] = set()
     comparable_codes: set[str] = set()
     data_status_counts: dict[str, int] = {}
@@ -589,24 +612,33 @@ def main() -> None:
                 comparable_codes.add(code)
             if status == "ready":
                 ready_codes.add(code)
-                signals = evaluate_latest(rows)
+                signals, diagnostics = evaluate_latest_with_diagnostics(rows)
             elif status == "insufficient":
                 # TDX still returns a current-date zero for very short new-bond
                 # histories.  Evaluate the available bars so those true zeros
                 # can participate in parity without calling the data complete.
-                signals = evaluate_latest(rows)
+                signals, diagnostics = evaluate_latest_with_diagnostics(rows)
             else:
                 signals = {name: False for name in FORMULAS}
+                diagnostics = {
+                    name: {"selected": False, "data_status": status}
+                    for name in FORMULAS
+                }
+            diagnostics_by_code[code] = diagnostics
             for formula, selected in signals.items():
                 if selected:
                     local_selected[formula].add(code)
                 connection.execute(
                     """
                     INSERT INTO formula_signals (
-                      run_id, formula_code, code, trade_date, selected, bar_count
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                      run_id, formula_code, code, trade_date, selected, bar_count,
+                      diagnostics_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (run_id, formula, code, last_date, int(selected), bar_count),
+                    (
+                        run_id, formula, code, last_date, int(selected), bar_count,
+                        json.dumps(diagnostics[formula], ensure_ascii=False),
+                    ),
                 )
             connection.execute(
                 """
@@ -622,7 +654,12 @@ def main() -> None:
                 min_date = row_min if not min_date else min(min_date, row_min)
                 max_date = max(max_date, row_max)
 
-        comparison = compare_with_tdx(args.benchmark, local_selected, comparable_codes)
+        comparison = compare_with_tdx(
+            args.benchmark,
+            local_selected,
+            comparable_codes,
+            diagnostics_by_code,
+        )
         completed_at = datetime.now().astimezone().isoformat(timespec="seconds")
         summary = {
             "run_id": run_id,

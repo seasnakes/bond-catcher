@@ -128,12 +128,12 @@ def _series(rows: list[dict[str, Any]], key: str) -> list[Number]:
     return [number(row.get(key)) for row in rows]
 
 
-def single_needle(rows: list[dict[str, Any]]) -> list[bool]:
+def single_needle_details(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     close = _series(rows, "close")
     low = _series(rows, "low")
     low3, low21 = llv(low, 3), llv(low, 21)
     high3, high21 = hhv(close, 3), hhv(close, 21)
-    result = []
+    result: list[dict[str, Any]] = []
     for index in range(len(rows)):
         short = safe_div(
             None if close[index] is None or low3[index] is None else close[index] - low3[index],
@@ -145,11 +145,30 @@ def single_needle(rows: list[dict[str, Any]]) -> list[bool]:
             None if high21[index] is None or low21[index] is None else high21[index] - low21[index],
             100,
         )
-        result.append(bool(long is not None and short is not None and long >= 70 and short <= 30))
+        long_ok = bool(long is not None and long >= 70)
+        short_ok = bool(short is not None and short <= 30)
+        result.append(
+            {
+                "close": close[index],
+                "llv_low_3": low3[index],
+                "hhv_close_3": high3[index],
+                "short": short,
+                "llv_low_21": low21[index],
+                "hhv_close_21": high21[index],
+                "long": long,
+                "long_gte_70": long_ok,
+                "short_lte_30": short_ok,
+                "selected": long_ok and short_ok,
+            }
+        )
     return result
 
 
-def unusual_move(rows: list[dict[str, Any]]) -> list[bool]:
+def single_needle(rows: list[dict[str, Any]]) -> list[bool]:
+    return [bool(row["selected"]) for row in single_needle_details(rows)]
+
+
+def unusual_move_details(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     close = _series(rows, "close")
     high = _series(rows, "high")
     low = _series(rows, "low")
@@ -198,17 +217,60 @@ def unusual_move(rows: list[dict[str, Any]]) -> list[bool]:
     ]
     vl3 = llv(vl3_source, 30)
 
-    result = []
+    result: list[dict[str, Any]] = []
     for i in range(len(rows)):
         high_values = (vh1[i], vh2[i], vh3[i])
         low_values = (vl1[i], vl2[i], vl3[i])
         if j[i] is None or dif[i] is None or any(value is None for value in high_values + low_values):
-            result.append(False)
+            result.append(
+                {
+                    "j": j[i],
+                    "dif": dif[i],
+                    "vh1": vh1[i],
+                    "vh2": vh2[i],
+                    "vh3": vh3[i],
+                    "vl1": vl1[i],
+                    "vl2": vl2[i],
+                    "vl3": vl3[i],
+                    "avg_high": None,
+                    "avg_low": None,
+                    "high_low_ratio": None,
+                    "j_lt_13": False,
+                    "dif_gt_0": False,
+                    "volume_ratio_gt_3_5": False,
+                    "selected": False,
+                }
+            )
             continue
         avg_high = sum(high_values) / 3  # type: ignore[arg-type]
         avg_low = sum(low_values) / 3  # type: ignore[arg-type]
-        result.append(bool(j[i] < 13 and dif[i] > 0 and avg_high > 3.5 * avg_low))
+        cond1 = j[i] < 13
+        cond2 = dif[i] > 0
+        cond3 = avg_high > 3.5 * avg_low
+        result.append(
+            {
+                "j": j[i],
+                "dif": dif[i],
+                "vh1": vh1[i],
+                "vh2": vh2[i],
+                "vh3": vh3[i],
+                "vl1": vl1[i],
+                "vl2": vl2[i],
+                "vl3": vl3[i],
+                "avg_high": avg_high,
+                "avg_low": avg_low,
+                "high_low_ratio": safe_div(avg_high, avg_low),
+                "j_lt_13": cond1,
+                "dif_gt_0": cond2,
+                "volume_ratio_gt_3_5": cond3,
+                "selected": cond1 and cond2 and cond3,
+            }
+        )
     return result
+
+
+def unusual_move(rows: list[dict[str, Any]]) -> list[bool]:
+    return [bool(row["selected"]) for row in unusual_move_details(rows)]
 
 
 def zx(rows: list[dict[str, Any]]) -> list[bool]:
@@ -382,3 +444,18 @@ def evaluate_latest(rows: list[dict[str, Any]]) -> dict[str, bool]:
     if not rows:
         return {name: False for name in FORMULAS}
     return {name: bool(calculator(rows)[-1]) for name, calculator in FORMULAS.items()}
+
+
+def evaluate_latest_with_diagnostics(
+    rows: list[dict[str, Any]],
+) -> tuple[dict[str, bool], dict[str, dict[str, Any]]]:
+    """Evaluate the latest bar and retain threshold inputs for parity audits."""
+    signals = evaluate_latest(rows)
+    if not rows:
+        return signals, {name: {"selected": False} for name in FORMULAS}
+    diagnostics = {
+        "单针": single_needle_details(rows)[-1],
+        "异动": unusual_move_details(rows)[-1],
+        "ZX": {"selected": signals["ZX"]},
+    }
+    return signals, diagnostics

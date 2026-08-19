@@ -7,7 +7,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from lib.convertible_bond_reference import active_reference_rows
-from lib.local_formula_engine import ema, evaluate_latest, single_needle, sma
+from lib.local_formula_engine import (
+    ema,
+    evaluate_latest,
+    evaluate_latest_with_diagnostics,
+    single_needle,
+    sma,
+)
 
 
 class LocalFormulaEngineTests(unittest.TestCase):
@@ -33,6 +39,23 @@ class LocalFormulaEngineTests(unittest.TestCase):
                 low = 123.0
             rows.append({"open": close, "high": close + 1, "low": low, "close": close, "volume": 1000 + index, "amount": 1})
         self.assertTrue(single_needle(rows)[-1])
+
+    def test_diagnostics_expose_formula_threshold_inputs(self):
+        rows = [
+            {"open": 10, "high": 10, "low": 9, "close": 10, "volume": 100, "amount": 1000}
+            for _ in range(21)
+        ]
+        rows[-3]["low"] = 8
+        rows[-2]["close"] = 12
+        rows[-1]["close"] = 9
+
+        signals, diagnostics = evaluate_latest_with_diagnostics(rows)
+
+        self.assertEqual(signals["单针"], diagnostics["单针"]["selected"])
+        self.assertIn("short", diagnostics["单针"])
+        self.assertIn("long", diagnostics["单针"])
+        self.assertEqual(signals["异动"], diagnostics["异动"]["selected"])
+        self.assertIn("high_low_ratio", diagnostics["异动"])
 
     def test_all_three_formulas_return_a_latest_boolean(self):
         rows = [
