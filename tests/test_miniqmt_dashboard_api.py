@@ -275,6 +275,9 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
                     "price": 25.1,
                     "date": self.trading_date,
                     "timestamp": first_timestamp,
+                    "previousClose": 24.8,
+                    "amount": 100_000,
+                    "volume": 400,
                 },
             )
             refreshed = self.module.record_live_intraday_sample(
@@ -283,6 +286,9 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
                     "price": 25.2,
                     "date": self.trading_date,
                     "timestamp": first_timestamp + 2_000,
+                    "previousClose": 24.8,
+                    "amount": 110_000,
+                    "volume": 440,
                 },
             )
             second = self.module.record_live_intraday_sample(
@@ -291,6 +297,9 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
                     "price": 25.4,
                     "date": self.trading_date,
                     "timestamp": first_timestamp + 11_000,
+                    "previousClose": 24.8,
+                    "amount": 125_000,
+                    "volume": 500,
                 },
             )
 
@@ -308,6 +317,38 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
             ["301127.SZ"], self.trading_date
         )["301127.SZ"]
         self.assertEqual([point["price"] for point in points], [25.2, 25.4])
+        self.assertEqual([point["amount"] for point in points], [110_000, 125_000])
+        self.assertEqual([point["volume"] for point in points], [440, 500])
+        self.assertEqual(points[-1]["previous_close"], 24.8)
+
+    def test_legacy_live_spark_schema_remains_readable(self):
+        database = self.runtime / "legacy-board-spark.sqlite3"
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                """
+                CREATE TABLE board_spark_samples(
+                  trading_date TEXT NOT NULL,
+                  code TEXT NOT NULL,
+                  timestamp INTEGER NOT NULL,
+                  price REAL NOT NULL,
+                  PRIMARY KEY(trading_date,code,timestamp)
+                )
+                """
+            )
+            connection.execute(
+                "INSERT INTO board_spark_samples VALUES(?,?,?,?)",
+                (self.trading_date, "123279.SZ", 1_786_500_300_000, 178.8),
+            )
+        self.module.LIVE_INTRADAY_DATABASE_PATH = database
+
+        points = self.module.load_persisted_live_intraday_samples(
+            ["123279.SZ"], self.trading_date
+        )["123279.SZ"]
+
+        self.assertEqual(len(points), 1)
+        self.assertEqual(points[0]["price"], 178.8)
+        self.assertIsNone(points[0]["amount"])
+        self.assertIsNone(points[0]["volume"])
 
     def test_stock_spark_uses_persisted_postclose_minute_cache(self):
         base_timestamp = int(
@@ -1019,6 +1060,68 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
         self.assertAlmostEqual(payload["daily_return"], 13.6681500317864)
         self.assertEqual(payload["total_amount"], 1_250_000_000)
         self.assertEqual(payload["source"], "主看板实时采样")
+
+    def test_fast_preview_aggregates_full_day_board_samples_for_new_bond(self):
+        module = self.module
+        zone = ZoneInfo("Asia/Shanghai")
+
+        def sample(clock, price, amount, volume):
+            timestamp = int(
+                datetime.strptime(
+                    f"{self.trading_date}{clock}", "%Y%m%d%H%M%S"
+                ).replace(tzinfo=zone).timestamp()
+                * 1000
+            )
+            return {
+                "date": self.trading_date,
+                "time": timestamp,
+                "price": price,
+                "previous_close": 99.0,
+                "amount": amount,
+                "volume": volume,
+            }
+
+        module.LIVE_INTRADAY_SAMPLES["123279.SZ"] = [
+            sample("100501", 100.0, 1_000, 100),
+            sample("100540", 102.0, 1_500, 150),
+            sample("100605", 101.0, 1_600, 160),
+            sample("100650", 103.0, 2_100, 210),
+        ]
+
+        with (
+            mock.patch.object(
+                module,
+                "china_now",
+                return_value=datetime(2026, 8, 12, 10, 7, tzinfo=zone),
+            ),
+            mock.patch.object(
+                module,
+                "api_health",
+                return_value={
+                    "monitor_alive": True,
+                    "latest_trading_date": self.trading_date,
+                    "calendar_date": self.trading_date,
+                },
+            ),
+        ):
+            payload = module.bond_payload("123279", fast=True)
+
+        self.assertEqual(payload["bar_count"], 2)
+        first, second = payload["rows"]
+        self.assertEqual(
+            (first["open"], first["high"], first["low"], first["close"]),
+            (100.0, 102.0, 100.0, 102.0),
+        )
+        self.assertEqual(first["amount"], 0)
+        self.assertEqual(
+            (second["open"], second["high"], second["low"], second["close"]),
+            (101.0, 103.0, 101.0, 103.0),
+        )
+        self.assertEqual(second["amount"], 600)
+        self.assertNotEqual(second["macd"], 0)
+        self.assertNotEqual(second["purple"], first["purple"])
+        self.assertEqual(payload["latest_minute"], "10:06")
+        self.assertEqual(payload["total_amount"], 2_100)
 
     def test_fast_preview_stops_retry_for_non_trading_monitor_code(self):
         module = self.module

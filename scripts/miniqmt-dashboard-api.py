@@ -93,7 +93,6 @@ INTRADAY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 # second Bridge poller or asking an external data vendor for another series.
 LIVE_INTRADAY_MAX_POINTS = 480
 LIVE_INTRADAY_SAMPLE_MIN_GAP_MS = 10_000
-LIVE_INTRADAY_PREVIEW_MAX_AGE_MS = 30_000
 LIVE_INTRADAY_SAMPLES: dict[str, list[dict[str, Any]]] = {}
 LIVE_INTRADAY_LOCK = threading.RLock()
 LIVE_INTRADAY_DATABASE_PATH = Path(
@@ -518,8 +517,11 @@ def record_live_intraday_sample(
         "price": price,
         "date": trading_date,
         "previous_close": previous_close,
-        "amount": finite_or_none(quote.get("amount")) or 0,
-        "volume": finite_or_none(quote.get("volume")) or 0,
+        # full_tick amount/volume are session-to-date cumulative values.  Keep
+        # missing values as None so a later minute aggregation never mistakes
+        # an absent field for a real zero baseline.
+        "amount": finite_or_none(quote.get("amount")),
+        "volume": finite_or_none(quote.get("volume")),
     }
     should_persist = True
     with LIVE_INTRADAY_LOCK:
@@ -544,7 +546,17 @@ def record_live_intraday_sample(
 
 
 def persist_live_intraday_samples(samples: list[dict[str, Any]]) -> None:
-    rows: list[tuple[str, str, int, float]] = []
+    rows: list[
+        tuple[
+            str,
+            str,
+            int,
+            float,
+            float | None,
+            float | None,
+            float | None,
+        ]
+    ] = []
     for sample in samples:
         code = str(sample.get("code") or "")
         trading_date = compact_date(sample.get("date"))
@@ -557,7 +569,17 @@ def persist_live_intraday_samples(samples: list[dict[str, Any]]) -> None:
             and price is not None
             and price > 0
         ):
-            rows.append((trading_date, code, timestamp, price))
+            rows.append(
+                (
+                    trading_date,
+                    code,
+                    timestamp,
+                    price,
+                    finite_or_none(sample.get("previous_close")),
+                    finite_or_none(sample.get("amount")),
+                    finite_or_none(sample.get("volume")),
+                )
+            )
     if not rows:
         return
 
@@ -576,6 +598,22 @@ def persist_live_intraday_samples(samples: list[dict[str, Any]]) -> None:
                     )
                     """
                 )
+                existing_columns = {
+                    str(row[1])
+                    for row in connection.execute(
+                        "PRAGMA table_info(board_spark_samples)"
+                    ).fetchall()
+                }
+                for column, column_type in (
+                    ("previous_close", "REAL"),
+                    ("cumulative_amount", "REAL"),
+                    ("cumulative_volume", "REAL"),
+                ):
+                    if column not in existing_columns:
+                        connection.execute(
+                            f"ALTER TABLE board_spark_samples "
+                            f"ADD COLUMN {column} {column_type}"
+                        )
                 connection.execute(
                     """
                     CREATE INDEX IF NOT EXISTS idx_board_spark_samples_date_code
@@ -585,8 +623,9 @@ def persist_live_intraday_samples(samples: list[dict[str, Any]]) -> None:
                 connection.executemany(
                     """
                     INSERT OR REPLACE INTO board_spark_samples(
-                      trading_date,code,timestamp,price
-                    ) VALUES(?,?,?,?)
+                      trading_date,code,timestamp,price,previous_close,
+                      cumulative_amount,cumulative_volume
+                    ) VALUES(?,?,?,?,?,?,?)
                     """,
                     rows,
                 )
@@ -618,12 +657,26 @@ def load_persisted_live_intraday_samples(
     try:
         with closing(sqlite3.connect(LIVE_INTRADAY_DATABASE_PATH)) as connection:
             connection.row_factory = sqlite3.Row
+            existing_columns = {
+                str(row[1])
+                for row in connection.execute(
+                    "PRAGMA table_info(board_spark_samples)"
+                ).fetchall()
+            }
+            optional_columns = [
+                column if column in existing_columns else f"NULL AS {column}"
+                for column in (
+                    "previous_close",
+                    "cumulative_amount",
+                    "cumulative_volume",
+                )
+            ]
             for index in range(0, len(codes), 400):
                 batch = codes[index : index + 400]
                 placeholders = ",".join("?" for _ in batch)
                 rows = connection.execute(
                     f"""
-                    SELECT code,timestamp,price
+                    SELECT code,timestamp,price,{','.join(optional_columns)}
                     FROM board_spark_samples
                     WHERE trading_date=? AND code IN ({placeholders})
                     ORDER BY code,timestamp
@@ -637,6 +690,15 @@ def load_persisted_live_intraday_samples(
                             "time": int(row["timestamp"]),
                             "price": float(row["price"]),
                             "date": trading_date,
+                            "previous_close": finite_or_none(
+                                row["previous_close"]
+                            ),
+                            "amount": finite_or_none(
+                                row["cumulative_amount"]
+                            ),
+                            "volume": finite_or_none(
+                                row["cumulative_volume"]
+                            ),
                         }
                     )
     except (OSError, sqlite3.Error):
@@ -5262,39 +5324,111 @@ def cached_live_sample_minute_rows(
         stored_code,
         [],
     )
-    latest_sample = next(
-        (
-            sample
-            for sample in reversed(samples)
-            if int(sample.get("time") or 0) > 0
-            and (finite_or_none(sample.get("price")) or 0) > 0
-        ),
-        None,
-    )
-    if latest_sample is None:
+    valid_samples = [
+        sample
+        for sample in samples
+        if int(sample.get("time") or 0) > 0
+        and (finite_or_none(sample.get("price")) or 0) > 0
+    ]
+    if not valid_samples:
         return [], None, "", 0.0, None
+    valid_samples.sort(key=lambda sample: int(sample.get("time") or 0))
+    latest_sample = valid_samples[-1]
     latest_timestamp = int(latest_sample.get("time") or 0)
-    current_timestamp = int(china_now().timestamp() * 1000)
-    if (
-        current_timestamp < latest_timestamp
-        or current_timestamp - latest_timestamp > LIVE_INTRADAY_PREVIEW_MAX_AGE_MS
-    ):
-        return [], None, "", 0.0, None
     latest_moment = datetime.fromtimestamp(
         latest_timestamp / 1000,
         CHINA_TIME_ZONE,
     )
-    minute_moment = latest_moment.replace(second=0, microsecond=0)
-    price = float(latest_sample["price"])
-    minute_row = {
-        "minute_ms": int(minute_moment.timestamp() * 1000),
-        "minute_time": minute_moment.strftime("%Y-%m-%d %H:%M:%S"),
-        "open": price,
-        "high": price,
-        "low": price,
-        "close": price,
-        "amount": 0.0,
-    }
+
+    # The board stores a full-day price sample approximately every ten
+    # seconds. Aggregate every valid continuous-auction sample into the same
+    # one-minute OHLC shape used by the monitor. This restores the complete
+    # detail curve for newly listed bonds that are not yet in QMT's bond list.
+    by_minute: dict[int, dict[str, Any]] = {}
+    for sample in valid_samples:
+        timestamp = int(sample.get("time") or 0)
+        moment = datetime.fromtimestamp(timestamp / 1000, CHINA_TIME_ZONE)
+        if moment.strftime("%Y%m%d") != trading_date:
+            continue
+        minute_moment = moment.replace(second=0, microsecond=0)
+        minute_time = minute_moment.strftime("%Y-%m-%d %H:%M:%S")
+        if elapsed_market_minutes_from_clock(minute_time) <= 0:
+            continue
+        minute_ms = int(minute_moment.timestamp() * 1000)
+        price = float(sample["price"])
+        existing = by_minute.get(minute_ms)
+        if existing is None:
+            by_minute[minute_ms] = {
+                "minute_ms": minute_ms,
+                "minute_time": minute_time,
+                "open": price,
+                "high": price,
+                "low": price,
+                "close": price,
+                "amount": 0.0,
+                "volume": 0.0,
+                "end_cumulative_amount": finite_or_none(sample.get("amount")),
+                "end_cumulative_volume": finite_or_none(sample.get("volume")),
+            }
+            continue
+        existing["high"] = max(float(existing["high"]), price)
+        existing["low"] = min(float(existing["low"]), price)
+        existing["close"] = price
+        cumulative_amount = finite_or_none(sample.get("amount"))
+        cumulative_volume = finite_or_none(sample.get("volume"))
+        if cumulative_amount is not None:
+            existing["end_cumulative_amount"] = cumulative_amount
+        if cumulative_volume is not None:
+            existing["end_cumulative_volume"] = cumulative_volume
+
+    minute_rows = [by_minute[key] for key in sorted(by_minute)]
+    previous_end_amount: float | None = None
+    previous_end_volume: float | None = None
+    previous_clock = ""
+    for row in minute_rows:
+        current_clock = minute_row_clock(row)
+        current_position = elapsed_market_minutes_from_clock(current_clock)
+        previous_position = elapsed_market_minutes_from_clock(previous_clock)
+        consecutive = bool(
+            previous_clock
+            and (
+                current_position - previous_position == 1
+                or (
+                    previous_clock == "11:30"
+                    and current_clock in {"13:00", "13:01"}
+                )
+            )
+        )
+        end_amount = finite_or_none(row.pop("end_cumulative_amount", None))
+        end_volume = finite_or_none(row.pop("end_cumulative_volume", None))
+        if (
+            consecutive
+            and previous_end_amount is not None
+            and end_amount is not None
+            and end_amount >= previous_end_amount
+        ):
+            row["amount"] = end_amount - previous_end_amount
+            row["amount_quality"] = "derived_from_cumulative_full_tick"
+        else:
+            row["amount"] = 0.0
+            row["amount_quality"] = "unavailable"
+        if (
+            consecutive
+            and previous_end_volume is not None
+            and end_volume is not None
+            and end_volume >= previous_end_volume
+        ):
+            row["volume"] = end_volume - previous_end_volume
+            row["volume_quality"] = "derived_from_cumulative_full_tick"
+        else:
+            row["volume"] = 0.0
+            row["volume_quality"] = "unavailable"
+        previous_end_amount = end_amount
+        previous_end_volume = end_volume
+        previous_clock = current_clock
+
+    if not minute_rows:
+        return [], None, "", 0.0, None
     previous_close = finite_or_none(latest_sample.get("previous_close"))
     cumulative_amount = finite_or_none(latest_sample.get("amount")) or 0.0
     tick = {
@@ -5306,7 +5440,7 @@ def cached_live_sample_minute_rows(
         "time": latest_timestamp,
     }
     return (
-        [minute_row],
+        minute_rows,
         previous_close,
         "",
         cumulative_amount,
@@ -5419,7 +5553,10 @@ def merge_bond_minute_rows(
         live = dict(row)
         existing = by_timestamp.get(timestamp)
         if existing is None:
-            live["amount"] = 0.0
+            if live.get("amount_quality") != "derived_from_cumulative_full_tick":
+                live["amount"] = 0.0
+            if live.get("volume_quality") != "derived_from_cumulative_full_tick":
+                live["volume"] = 0.0
             by_timestamp[timestamp] = live
             continue
 
