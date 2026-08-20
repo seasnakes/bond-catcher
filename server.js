@@ -19,6 +19,12 @@ const NEW_BOND_AUTO_SCAN_END = process.env.NEW_BOND_AUTO_SCAN_END || "09:29:30";
 const NEW_BOND_AUTO_SCAN_INTERVAL_MS = Number(
   process.env.NEW_BOND_AUTO_SCAN_INTERVAL_MS || 60_000,
 );
+const NEW_BOND_UNIVERSE_PATH =
+  process.env.NEW_BOND_UNIVERSE_PATH
+  || path.join(ROOT, "runtime", "new-bond-universe.json");
+const NEW_BOND_UNIVERSE_RETENTION_DAYS = Number(
+  process.env.NEW_BOND_UNIVERSE_RETENTION_DAYS || 45,
+);
 const AUCTION_SAMPLE_INTERVAL_MS = 3000;
 const AUCTION_PERSIST_INTERVAL_MS = 30000;
 const AUCTION_MAX_SAMPLES = 210;
@@ -1258,6 +1264,78 @@ function candidateSecid(candidate) {
   return normalizeSecidInput(value);
 }
 
+function candidateMarketCode(candidate) {
+  const direct = String(candidate?.market_code || "").trim().toUpperCase();
+  if (/^\d{6}\.(SH|SZ)$/.test(direct)) return direct;
+  const secid = candidateSecid(candidate);
+  const match = String(secid || "").match(/^([01])\.(\d{6})$/);
+  if (!match) return "";
+  return `${match[2]}.${match[1] === "1" ? "SH" : "SZ"}`;
+}
+
+function addCompactDateDays(value, days) {
+  const match = String(value || "").match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (!match) return "";
+  const moment = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  if (Number.isNaN(moment.getTime())) return "";
+  moment.setUTCDate(moment.getUTCDate() + Math.max(0, Number(days) || 0));
+  return moment.toISOString().slice(0, 10).replaceAll("-", "");
+}
+
+function mergeNewBondUniverseManifest(
+  rawManifest,
+  candidates,
+  targetDate,
+  generatedAt = new Date().toISOString(),
+) {
+  const normalizedTargetDate = String(targetDate || "").replaceAll("-", "");
+  const currentRows = Array.isArray(rawManifest?.bonds) ? rawManifest.bonds : [];
+  const byCode = new Map();
+  for (const row of currentRows) {
+    const code = String(row?.code || "").trim().toUpperCase();
+    const validThrough = String(row?.validThrough || "");
+    if (!/^\d{6}\.(SH|SZ)$/.test(code)) continue;
+    if (validThrough && normalizedTargetDate && validThrough < normalizedTargetDate) continue;
+    byCode.set(code, { ...row, code });
+  }
+
+  for (const candidate of Array.isArray(candidates) ? candidates : []) {
+    const code = candidateMarketCode(candidate);
+    if (!code) continue;
+    const previous = byCode.get(code) || {};
+    const listingDate = String(candidate.listing_date || previous.listingDate || "");
+    const firstTargetDate = String(previous.firstTargetDate || normalizedTargetDate || "");
+    byCode.set(code, {
+      code,
+      name: String(candidate.name || previous.name || code).trim(),
+      listingDate,
+      firstTargetDate,
+      lastTargetDate: normalizedTargetDate,
+      firstDetectedAt: String(previous.firstDetectedAt || generatedAt),
+      lastDetectedAt: generatedAt,
+      validThrough: addCompactDateDays(
+        normalizedTargetDate || firstTargetDate,
+        NEW_BOND_UNIVERSE_RETENTION_DAYS,
+      ),
+      inMiniQmtList: Boolean(candidate.in_miniqmt_list),
+      discovery: String(candidate.discovery || previous.discovery || ""),
+      source: "finance-board-new-bond-discovery",
+    });
+  }
+
+  const bonds = [...byCode.values()].sort((left, right) =>
+    String(left.listingDate || "").localeCompare(String(right.listingDate || ""))
+    || left.code.localeCompare(right.code));
+  return {
+    schemaVersion: 1,
+    updatedAt: generatedAt,
+    targetDate: normalizedTargetDate,
+    retentionDays: NEW_BOND_UNIVERSE_RETENTION_DAYS,
+    source: "finance-board-new-bond-discovery",
+    bonds,
+  };
+}
+
 function mergeSecondDayBondsIntoState(rawState, candidates, targetSector) {
   const state = normalizeBoardState(rawState);
   const sector = state.sectors.find((item) => item.name === targetSector);
@@ -1310,27 +1388,38 @@ async function withBoardStateMutationLock(task) {
   }
 }
 
-async function applySecondDayBonds(candidates, targetSector) {
+async function applySecondDayBonds(candidates, targetSector, targetDate) {
   return withBoardStateMutationLock(async () => {
     const currentState = await readBoardStateFile();
-    const merged = mergeSecondDayBondsIntoState(
-      currentState,
+    const merged = candidates.length > 0
+      ? mergeSecondDayBondsIntoState(currentState, candidates, targetSector)
+      : { state: currentState, added: [], alreadyPresent: [] };
+    const currentUniverse = await readJsonFile(NEW_BOND_UNIVERSE_PATH).catch((error) => {
+      if (error?.code === "ENOENT") return {};
+      throw error;
+    });
+    const universe = mergeNewBondUniverseManifest(
+      currentUniverse,
       candidates,
-      targetSector,
+      targetDate,
     );
-    if (merged.added.length === 0) {
-      return {
-        ...merged,
-        updated: false,
-        boardUpdatedAt: currentState.updatedAt || "",
-      };
+    await fs.promises.mkdir(path.dirname(NEW_BOND_UNIVERSE_PATH), { recursive: true });
+    await writeJsonAtomic(NEW_BOND_UNIVERSE_PATH, universe);
+    if (merged.added.length > 0) {
+      await fs.promises.mkdir(path.dirname(BOARD_STATE_PATH), { recursive: true });
+      await writeJsonAtomic(BOARD_STATE_PATH, merged.state);
     }
-    await fs.promises.mkdir(path.dirname(BOARD_STATE_PATH), { recursive: true });
-    await writeJsonAtomic(BOARD_STATE_PATH, merged.state);
     return {
       ...merged,
-      updated: true,
-      boardUpdatedAt: merged.state.updatedAt,
+      updated: merged.added.length > 0,
+      boardUpdatedAt: merged.added.length > 0
+        ? merged.state.updatedAt
+        : currentState.updatedAt || "",
+      supplementalUniverse: {
+        updatedAt: universe.updatedAt,
+        count: universe.bonds.length,
+        codes: universe.bonds.map((row) => row.code),
+      },
     };
   });
 }
@@ -1344,6 +1433,7 @@ function summarizeNewBondAutoScan(result) {
     updated: Boolean(result.updated),
     added: Array.isArray(result.added) ? result.added : [],
     alreadyPresent: Array.isArray(result.alreadyPresent) ? result.alreadyPresent : [],
+    supplementalUniverse: result.supplementalUniverse || null,
     generatedAt: String(result.generated_at || ""),
   };
 }
@@ -1358,15 +1448,18 @@ async function scanNewBondSecondDay({ targetSector, date = "", apply = false } =
     let added = [];
     let alreadyPresent = [];
     let updated = false;
-    if (apply && candidates.length > 0) {
-      const result = await applySecondDayBonds(candidates, targetSector);
+    let supplementalUniverse = null;
+    if (apply) {
+      const result = await applySecondDayBonds(
+        candidates,
+        targetSector,
+        discovery.target_date || date,
+      );
       boardUpdatedAt = result.boardUpdatedAt;
       added = result.added;
       alreadyPresent = result.alreadyPresent;
       updated = result.updated;
-    } else if (apply) {
-      const currentState = await readBoardStateFile().catch(() => ({}));
-      boardUpdatedAt = String(currentState.updatedAt || "");
+      supplementalUniverse = result.supplementalUniverse;
     } else {
       const currentState = await readBoardStateFile().catch(() => ({}));
       boardUpdatedAt = String(currentState.updatedAt || "");
@@ -1380,6 +1473,7 @@ async function scanNewBondSecondDay({ targetSector, date = "", apply = false } =
       added,
       alreadyPresent,
       boardUpdatedAt,
+      supplementalUniverse,
       lastAutoScan: summarizeNewBondAutoScan(newBondLastResult),
     };
     return result;
@@ -3419,6 +3513,7 @@ module.exports = {
   auctionClockPhase,
   filterAuctionCacheSeries,
   mergeSecondDayBondsIntoState,
+  mergeNewBondUniverseManifest,
   isNewBondAutoScanWindow,
   normalizeAuctionDate,
   normalizeAuctionTime,
