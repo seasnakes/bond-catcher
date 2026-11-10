@@ -40,39 +40,59 @@
     "核电",
     "电力设备",
     "银行",
-    "脑机接口"
+    "脑机接口",
+    "能源金属",
+    "苹果折叠屏",
+    "有色",
+    "养殖",
+    "消费",
+    "游戏",
+    "地产",
+    "造纸",
+    "固态电池",
+    "无人驾驶"
   ],
   "tagCounts": {
-    "次新债": 52,
+    "次新债": 67,
     "小盘": 163,
-    "AI应用": 13,
-    "算力租赁": 3,
-    "医药": 25,
+    "AI应用": 15,
+    "算力租赁": 5,
+    "医药": 28,
     "油气": 14,
     "玻纤": 1,
-    "PCB": 12,
-    "液冷": 5,
-    "机器人": 18,
-    "光模块": 4,
+    "PCB": 11,
+    "液冷": 7,
+    "机器人": 34,
+    "光模块": 6,
     "ST": 5,
-    "能化": 39,
+    "能化": 40,
     "电源": 3,
-    "食品": 4,
+    "食品": 6,
     "饮料": 4,
     "半导体": 37,
-    "半导体材料": 16,
+    "半导体材料": 17,
     "光刻机": 9,
-    "航天": 6,
-    "环保": 26,
-    "消费电子": 12,
+    "航天": 9,
+    "环保": 27,
+    "消费电子": 15,
     "铜缆": 7,
-    "光伏": 27,
+    "光伏": 28,
     "核电": 8,
-    "电力设备": 35,
+    "电力设备": 38,
     "银行": 5,
-    "脑机接口": 2
+    "脑机接口": 2,
+    "能源金属": 11,
+    "苹果折叠屏": 1,
+    "有色": 12,
+    "养殖": 7,
+    "消费": 14,
+    "游戏": 1,
+    "地产": 12,
+    "造纸": 1,
+    "固态电池": 3,
+    "无人驾驶": 7
   },
-  "count": 306,
+  "count": 324,
   "rows": [
     {
       "code": "118053.SH",
@@ -148,6 +168,7 @@
       "floatMarketCap": 3661611129.25,
       "tags": [
         "小盘",
+        "AI应用",
         "算力租赁"
       ],
       "primaryTag": ""
@@ -271,8 +292,10 @@
       "industry3": "摩托车",
       "floatMarketCap": 46999491685.86,
       "tags": [
-        "次新债"
-      ]
+        "次新债",
+        "无人驾驶"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123131.SZ",
@@ -315,8 +338,10 @@
       "floatMarketCap": 3120412325.62,
       "tags": [
         "次新债",
-        "小盘"
-      ]
+        "小盘",
+        "机器人"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123267.SZ",
@@ -409,7 +434,6 @@
       "industry3": "金属制品",
       "floatMarketCap": 29097323737.65,
       "tags": [
-        "次新债",
         "核电"
       ],
       "primaryTag": ""
@@ -440,7 +464,9 @@
       "industry3": "其他小金属",
       "floatMarketCap": 13506771027.53,
       "tags": [
-        "次新债"
+        "次新债",
+        "能源金属",
+        "有色"
       ],
       "primaryTag": ""
     },
@@ -549,7 +575,10 @@
       "industry2": "冶钢原料",
       "industry3": "铁矿石",
       "floatMarketCap": 33863507068.46,
-      "tags": []
+      "tags": [
+        "能源金属"
+      ],
+      "primaryTag": "能源金属"
     },
     {
       "code": "123270.SZ",
@@ -563,8 +592,10 @@
       "floatMarketCap": 1832981562.5,
       "tags": [
         "次新债",
-        "小盘"
-      ]
+        "小盘",
+        "能源金属"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "111025.SH",
@@ -578,12 +609,7 @@
       "floatMarketCap": 28862756211.76,
       "tags": [
         "次新债",
-        "PCB",
-        "能化",
-        "半导体",
-        "半导体材料",
-        "光刻机",
-        "环保"
+        "固态电池"
       ],
       "primaryTag": ""
     },
@@ -597,7 +623,11 @@
       "industry2": "工业金属",
       "industry3": "铜",
       "floatMarketCap": 46310361139.2,
-      "tags": []
+      "tags": [
+        "能源金属",
+        "有色"
+      ],
+      "primaryTag": "能源金属"
     },
     {
       "code": "118016.SH",
@@ -656,7 +686,8 @@
       "floatMarketCap": 1745031551.3999999,
       "tags": [
         "次新债",
-        "小盘"
+        "小盘",
+        "医药"
       ],
       "primaryTag": ""
     },
@@ -671,8 +702,10 @@
       "industry3": "汽车综合服务",
       "floatMarketCap": 7088064000,
       "tags": [
-        "次新债"
-      ]
+        "次新债",
+        "无人驾驶"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123258.SZ",
@@ -685,12 +718,11 @@
       "industry3": "消费电子零部件及组装",
       "floatMarketCap": 16420703640.380001,
       "tags": [
-        "次新债",
         "液冷",
         "消费电子",
         "铜缆"
       ],
-      "primaryTag": ""
+      "primaryTag": "液冷"
     },
     {
       "code": "127037.SZ",
@@ -856,10 +888,12 @@
       "industry3": "车身附件及饰件",
       "floatMarketCap": 19071210942.36,
       "tags": [
+        "机器人",
         "光模块",
         "半导体材料",
         "光刻机"
-      ]
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123245.SZ",
@@ -888,8 +922,10 @@
       "industry3": "水务及水治理",
       "floatMarketCap": 7807259029.19,
       "tags": [
+        "光模块",
         "环保"
-      ]
+      ],
+      "primaryTag": ""
     },
     {
       "code": "113658.SH",
@@ -901,7 +937,10 @@
       "industry2": "物流",
       "industry3": "仓储物流",
       "floatMarketCap": 9344965727.4,
-      "tags": []
+      "tags": [
+        "能化"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "113702.SH",
@@ -946,11 +985,11 @@
       "industry3": "其他自动化设备",
       "floatMarketCap": 13401023340.8,
       "tags": [
-        "次新债",
         "PCB",
         "机器人",
         "半导体"
-      ]
+      ],
+      "primaryTag": ""
     },
     {
       "code": "113056.SH",
@@ -977,8 +1016,11 @@
       "industry3": "铜",
       "floatMarketCap": 46310361139.2,
       "tags": [
-        "次新债"
-      ]
+        "次新债",
+        "能源金属",
+        "有色"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "113705.SH",
@@ -1023,8 +1065,10 @@
       "industry3": "厨房电器",
       "floatMarketCap": 3390733302.83,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "机器人"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123257.SZ",
@@ -1085,8 +1129,10 @@
       "industry3": "装修装饰Ⅲ",
       "floatMarketCap": 3913175667.0400004,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "半导体"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "118050.SH",
@@ -1144,7 +1190,10 @@
       "industry2": "养殖业",
       "industry3": "生猪养殖",
       "floatMarketCap": 128792400594.26,
-      "tags": []
+      "tags": [
+        "食品"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "111012.SH",
@@ -1248,7 +1297,8 @@
       "industry3": "工程机械整机",
       "floatMarketCap": 17867324382.059998,
       "tags": [
-        "小盘"
+        "小盘",
+        "机器人"
       ],
       "primaryTag": ""
     },
@@ -1310,7 +1360,10 @@
       "industry2": "养殖业",
       "industry3": "生猪养殖",
       "floatMarketCap": 83777448763.21,
-      "tags": []
+      "tags": [
+        "养殖"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "113062.SH",
@@ -1413,8 +1466,10 @@
       "industry3": "风力发电",
       "floatMarketCap": 21375429620.7,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "光伏"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123207.SZ",
@@ -1428,8 +1483,10 @@
       "floatMarketCap": 2631389995.52,
       "tags": [
         "小盘",
+        "算力租赁",
         "环保"
-      ]
+      ],
+      "primaryTag": ""
     },
     {
       "code": "113058.SH",
@@ -1441,7 +1498,10 @@
       "industry2": "普钢",
       "industry3": "钢铁管材",
       "floatMarketCap": 7692606095.2,
-      "tags": []
+      "tags": [
+        "有色"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "127104.SZ",
@@ -1453,7 +1513,10 @@
       "industry2": "游戏Ⅱ",
       "industry3": "游戏Ⅲ",
       "floatMarketCap": 6277594346.24,
-      "tags": []
+      "tags": [
+        "游戏"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "110077.SH",
@@ -1497,9 +1560,9 @@
       "industry3": "电池化学品",
       "floatMarketCap": 7768312598.34,
       "tags": [
-        "环保",
         "电力设备"
-      ]
+      ],
+      "primaryTag": ""
     },
     {
       "code": "128129.SZ",
@@ -1527,8 +1590,10 @@
       "industry3": "清洁小家电",
       "floatMarketCap": 15997773007.8,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "消费电子"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "113673.SH",
@@ -1540,7 +1605,10 @@
       "industry2": "汽车零部件",
       "industry3": "车身附件及饰件",
       "floatMarketCap": 20626499337.6,
-      "tags": []
+      "tags": [
+        "机器人"
+      ],
+      "primaryTag": "机器人"
     },
     {
       "code": "113633.SH",
@@ -1662,8 +1730,10 @@
       "floatMarketCap": 3665625923.44,
       "tags": [
         "小盘",
+        "AI应用",
         "半导体"
-      ]
+      ],
+      "primaryTag": "AI应用"
     },
     {
       "code": "111000.SH",
@@ -1707,7 +1777,10 @@
       "industry2": "家居用品",
       "industry3": "定制家居",
       "floatMarketCap": 21198519771.6,
-      "tags": []
+      "tags": [
+        "消费"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "127049.SZ",
@@ -1719,7 +1792,10 @@
       "industry2": "饲料",
       "industry3": "畜禽饲料",
       "floatMarketCap": 31500045752,
-      "tags": []
+      "tags": [
+        "养殖"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "110084.SH",
@@ -1745,7 +1821,9 @@
       "industry2": "汽车零部件",
       "industry3": "底盘与发动机系统",
       "floatMarketCap": 23455377307.44,
-      "tags": [],
+      "tags": [
+        "机器人"
+      ],
       "primaryTag": ""
     },
     {
@@ -1850,8 +1928,10 @@
       "tags": [
         "次新债",
         "小盘",
+        "液冷",
         "机器人"
-      ]
+      ],
+      "primaryTag": "液冷"
     },
     {
       "code": "127050.SZ",
@@ -1864,7 +1944,8 @@
       "industry3": "轮胎轮毂",
       "floatMarketCap": 10537461989.64,
       "tags": [
-        "小盘"
+        "小盘",
+        "无人驾驶"
       ],
       "primaryTag": ""
     },
@@ -1909,7 +1990,10 @@
       "industry2": "养殖业",
       "industry3": "生猪养殖",
       "floatMarketCap": 7441933161.67,
-      "tags": []
+      "tags": [
+        "养殖"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "111017.SH",
@@ -1952,7 +2036,9 @@
       "industry3": "铝",
       "floatMarketCap": 4299588803.58,
       "tags": [
-        "小盘"
+        "小盘",
+        "能源金属",
+        "有色"
       ],
       "primaryTag": ""
     },
@@ -1967,8 +2053,10 @@
       "industry3": "其他汽车零部件",
       "floatMarketCap": 3160974624.9,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "机器人"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "118031.SH",
@@ -2056,8 +2144,10 @@
       "industry3": "防水材料",
       "floatMarketCap": 4329424882.4,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "地产"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123259.SZ",
@@ -2117,7 +2207,10 @@
       "industry2": "专业工程",
       "industry3": "钢结构",
       "floatMarketCap": 6547513220.71,
-      "tags": []
+      "tags": [
+        "地产"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "127053.SZ",
@@ -2129,7 +2222,10 @@
       "industry2": "工业金属",
       "industry3": "铝",
       "floatMarketCap": 5061039088.96,
-      "tags": []
+      "tags": [
+        "机器人"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "113652.SH",
@@ -2156,8 +2252,10 @@
       "industry3": "宠物食品",
       "floatMarketCap": 2057113532.68,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "养殖"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "127064.SZ",
@@ -2172,7 +2270,7 @@
       "tags": [
         "油气",
         "能化",
-        "半导体"
+        "半导体材料"
       ],
       "primaryTag": ""
     },
@@ -2187,8 +2285,10 @@
       "industry3": "水泥制造",
       "floatMarketCap": 9630758158.08,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "地产"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123271.SZ",
@@ -2249,8 +2349,10 @@
       "industry3": "定制家居",
       "floatMarketCap": 2523582116.23,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "消费"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123192.SZ",
@@ -2262,7 +2364,10 @@
       "industry2": "化妆品",
       "industry3": "化妆品制造及其他",
       "floatMarketCap": 5121454840.22,
-      "tags": []
+      "tags": [
+        "消费"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123092.SZ",
@@ -2308,8 +2413,10 @@
       "industry3": "贸易Ⅲ",
       "floatMarketCap": 12738857964.45,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "消费"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123150.SZ",
@@ -2366,7 +2473,8 @@
       "industry3": "综合包装",
       "floatMarketCap": 2689061344.3,
       "tags": [
-        "小盘"
+        "小盘",
+        "固态电池"
       ],
       "primaryTag": ""
     },
@@ -2380,7 +2488,10 @@
       "industry2": "乘用车",
       "industry3": "综合乘用车",
       "floatMarketCap": 104560951427.18,
-      "tags": []
+      "tags": [
+        "机器人"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "127088.SZ",
@@ -2406,7 +2517,10 @@
       "industry2": "汽车零部件",
       "industry3": "其他汽车零部件",
       "floatMarketCap": 6117077119.19,
-      "tags": []
+      "tags": [
+        "机器人"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "128127.SZ",
@@ -2419,8 +2533,10 @@
       "industry3": "园林工程",
       "floatMarketCap": 2300039767.08,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "地产"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123237.SZ",
@@ -2495,8 +2611,10 @@
       "industry3": "瓷砖地板",
       "floatMarketCap": 2738770632.7999997,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "消费"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "118065.SH",
@@ -2585,7 +2703,10 @@
       "industry2": "造纸",
       "industry3": "特种纸",
       "floatMarketCap": 7441368975.04,
-      "tags": []
+      "tags": [
+        "造纸"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "127111.SZ",
@@ -2749,8 +2870,10 @@
       "industry3": "航运",
       "floatMarketCap": 2210911889.12,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "航天"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123160.SZ",
@@ -2810,7 +2933,10 @@
       "industry2": "汽车零部件",
       "industry3": "其他汽车零部件",
       "floatMarketCap": 5477111156.2,
-      "tags": []
+      "tags": [
+        "机器人"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123149.SZ",
@@ -2966,8 +3092,10 @@
       "floatMarketCap": 2624238191.48,
       "tags": [
         "次新债",
-        "小盘"
-      ]
+        "小盘",
+        "机器人"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123155.SZ",
@@ -3026,7 +3154,10 @@
       "industry2": "房屋建设Ⅱ",
       "industry3": "房屋建设Ⅲ",
       "floatMarketCap": 8005239406.6,
-      "tags": []
+      "tags": [
+        "地产"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123144.SZ",
@@ -3054,7 +3185,10 @@
       "industry2": "基础建设",
       "industry3": "基建市政工程",
       "floatMarketCap": 7391673672.9000025,
-      "tags": []
+      "tags": [
+        "地产"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "118022.SH",
@@ -3081,8 +3215,11 @@
       "industry3": "铝",
       "floatMarketCap": 2141142907.75,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "能源金属",
+        "有色"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "110095.SH",
@@ -3173,8 +3310,10 @@
       "industry3": "其他运输设备",
       "floatMarketCap": 18459869083.920002,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "消费电子"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "128134.SZ",
@@ -3187,7 +3326,8 @@
       "industry3": "钢结构",
       "floatMarketCap": 10127035208.29,
       "tags": [
-        "小盘"
+        "小盘",
+        "机器人"
       ],
       "primaryTag": ""
     },
@@ -3235,8 +3375,10 @@
       "industry3": "检测服务",
       "floatMarketCap": 4333366256.45,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "电力设备"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "127060.SZ",
@@ -3249,8 +3391,10 @@
       "industry3": "肉鸡养殖",
       "floatMarketCap": 1507757564.32,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "养殖"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "113686.SH",
@@ -3339,7 +3483,10 @@
       "industry2": "服装家纺",
       "industry3": "非运动服装",
       "floatMarketCap": 6298322175.2,
-      "tags": []
+      "tags": [
+        "消费"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "111022.SH",
@@ -3365,7 +3512,10 @@
       "industry2": "化妆品",
       "industry3": "品牌化妆品",
       "floatMarketCap": 24269372043.21,
-      "tags": []
+      "tags": [
+        "消费"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123171.SZ",
@@ -3505,7 +3655,8 @@
       "industry3": "工程咨询服务Ⅲ",
       "floatMarketCap": 4366057384.91,
       "tags": [
-        "小盘"
+        "小盘",
+        "地产"
       ],
       "primaryTag": ""
     },
@@ -3521,8 +3672,10 @@
       "floatMarketCap": 3253964307.66,
       "tags": [
         "次新债",
-        "小盘"
-      ]
+        "小盘",
+        "地产"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123223.SZ",
@@ -3594,7 +3747,10 @@
       "industry2": "特钢Ⅱ",
       "industry3": "特钢Ⅲ",
       "floatMarketCap": 7370365436.61,
-      "tags": []
+      "tags": [
+        "有色"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123252.SZ",
@@ -3606,7 +3762,9 @@
       "industry2": "工业金属",
       "industry3": "铝",
       "floatMarketCap": 6609014795.190001,
-      "tags": [],
+      "tags": [
+        "有色"
+      ],
       "primaryTag": ""
     },
     {
@@ -3697,8 +3855,10 @@
       "industry3": "基建市政工程",
       "floatMarketCap": 1967338409.28,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "地产"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "113656.SH",
@@ -3711,8 +3871,10 @@
       "industry3": "跨境物流",
       "floatMarketCap": 3239222218.54,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "无人驾驶"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "111021.SH",
@@ -3753,8 +3915,11 @@
       "industry3": "铝",
       "floatMarketCap": 2832772894.3799996,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "能源金属",
+        "有色"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "111015.SH",
@@ -3781,7 +3946,10 @@
       "industry2": "纺织制造",
       "industry3": "其他纺织",
       "floatMarketCap": 7637508610.62,
-      "tags": []
+      "tags": [
+        "消费"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123151.SZ",
@@ -3856,8 +4024,10 @@
       "floatMarketCap": 3604096367.56,
       "tags": [
         "次新债",
-        "小盘"
-      ]
+        "小盘",
+        "无人驾驶"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123265.SZ",
@@ -3871,8 +4041,10 @@
       "floatMarketCap": 2697614322.78,
       "tags": [
         "次新债",
-        "小盘"
-      ]
+        "小盘",
+        "机器人"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "118005.SH",
@@ -3900,8 +4072,10 @@
       "industry3": "瓷砖地板",
       "floatMarketCap": 1964259519.8799999,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "半导体材料"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "113616.SH",
@@ -3946,8 +4120,11 @@
       "industry3": "钢铁管材",
       "floatMarketCap": 2659850933.6400003,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "能源金属",
+        "有色"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123090.SZ",
@@ -4035,7 +4212,10 @@
       "industry2": "饲料",
       "industry3": "畜禽饲料",
       "floatMarketCap": 5668184915.91,
-      "tags": []
+      "tags": [
+        "养殖"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123168.SZ",
@@ -4141,8 +4321,10 @@
       "industry3": "快递",
       "floatMarketCap": 19480698997.96,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "无人驾驶"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "118037.SH",
@@ -4170,8 +4352,10 @@
       "industry3": "厨房小家电",
       "floatMarketCap": 4825702342.8,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "消费电子"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123189.SZ",
@@ -4184,8 +4368,10 @@
       "industry3": "肉鸡养殖",
       "floatMarketCap": 1830767853.06,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "食品"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "127095.SZ",
@@ -4198,7 +4384,8 @@
       "industry3": "航空装备Ⅲ",
       "floatMarketCap": 4667577751.35,
       "tags": [
-        "小盘"
+        "小盘",
+        "航天"
       ],
       "primaryTag": ""
     },
@@ -4213,8 +4400,10 @@
       "industry3": "钢结构",
       "floatMarketCap": 1141144964,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "地产"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123214.SZ",
@@ -4242,8 +4431,10 @@
       "industry3": "其他汽车零部件",
       "floatMarketCap": 1643995522.75,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "机器人"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "113670.SH",
@@ -4256,9 +4447,10 @@
       "industry3": "定制家居",
       "floatMarketCap": 2262952243.8,
       "tags": [
-        "小盘"
+        "小盘",
+        "消费"
       ],
-      "primaryTag": ""
+      "primaryTag": "消费"
     },
     {
       "code": "127062.SZ",
@@ -4271,7 +4463,8 @@
       "industry3": "其他建材",
       "floatMarketCap": 2374972581.96,
       "tags": [
-        "小盘"
+        "小盘",
+        "地产"
       ],
       "primaryTag": ""
     },
@@ -4332,7 +4525,10 @@
       "industry2": "家居用品",
       "industry3": "其他家居用品",
       "floatMarketCap": 5117637300,
-      "tags": []
+      "tags": [
+        "消费"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123220.SZ",
@@ -4423,8 +4619,10 @@
       "industry3": "定制家居",
       "floatMarketCap": 1839697969.6200001,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "消费"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123224.SZ",
@@ -4469,8 +4667,10 @@
       "industry3": "其他家居用品",
       "floatMarketCap": 3362865766.25,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "消费"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123196.SZ",
@@ -4543,8 +4743,10 @@
       "industry3": "非运动服装",
       "floatMarketCap": 3094534257.6000004,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "消费"
+      ],
+      "primaryTag": ""
     },
     {
       "code": "123180.SZ",
@@ -4557,8 +4759,11 @@
       "industry3": "能源及重型设备",
       "floatMarketCap": 1604866182.26,
       "tags": [
-        "小盘"
-      ]
+        "小盘",
+        "能源金属",
+        "有色"
+      ],
+      "primaryTag": "有色"
     },
     {
       "code": "118010.SH",
@@ -4632,7 +4837,9 @@
       "industry2": "化妆品",
       "industry3": "品牌化妆品",
       "floatMarketCap": 8229991310.4,
-      "tags": [],
+      "tags": [
+        "消费"
+      ],
       "primaryTag": ""
     },
     {
@@ -4647,8 +4854,366 @@
       "floatMarketCap": 3260286803.6499996,
       "tags": [
         "小盘",
-        "ST"
-      ]
+        "ST",
+        "地产"
+      ],
+      "primaryTag": ""
+    },
+    {
+      "code": "118076.SH",
+      "name": "先锋转债",
+      "stockCode": "688605.SH",
+      "stockName": "先锋精科",
+      "listedDate": "2026-08-26",
+      "industry1": "新上市转债",
+      "industry2": "待分类",
+      "industry3": "待分类",
+      "tags": [
+        "次新债",
+        "半导体",
+        "光刻机"
+      ],
+      "primaryTag": "光刻机",
+      "supplemental": true,
+      "dataQuality": "自动新债池补充；正股与行业资料按需补齐"
+    },
+    {
+      "code": "111026.SH",
+      "name": "派克转债",
+      "stockCode": "605123.SH",
+      "stockName": "派克新材",
+      "listedDate": "2026-08-25",
+      "industry1": "新上市转债",
+      "industry2": "待分类",
+      "industry3": "待分类",
+      "tags": [
+        "次新债",
+        "航天"
+      ],
+      "primaryTag": "次新债",
+      "supplemental": true,
+      "dataQuality": "自动新债池补充；正股与行业资料按需补齐"
+    },
+    {
+      "code": "118075.SH",
+      "name": "奥普转债",
+      "stockCode": "688686.SH",
+      "stockName": "奥普特",
+      "listedDate": "2026-08-19",
+      "industry1": "新上市转债",
+      "industry2": "待分类",
+      "industry3": "待分类",
+      "tags": [
+        "次新债",
+        "光模块",
+        "苹果折叠屏"
+      ],
+      "primaryTag": "苹果折叠屏",
+      "supplemental": true,
+      "dataQuality": "自动新债池补充；正股与行业资料按需补齐"
+    },
+    {
+      "code": "123280.SZ",
+      "name": "三鑫转债",
+      "stockCode": "300453.SZ",
+      "stockName": "三鑫医疗",
+      "listedDate": "2026-08-19",
+      "industry1": "新上市转债",
+      "industry2": "待分类",
+      "industry3": "待分类",
+      "tags": [
+        "次新债",
+        "医药"
+      ],
+      "primaryTag": "",
+      "supplemental": true,
+      "dataQuality": "自动新债池补充；正股与行业资料按需补齐"
+    },
+    {
+      "code": "123281.SZ",
+      "name": "中仑转债",
+      "stockCode": "301565.SZ",
+      "stockName": "中仑新材",
+      "listedDate": "2026-08-24",
+      "industry1": "基础化工",
+      "industry2": "塑料",
+      "industry3": "膜材料",
+      "tags": [
+        "次新债",
+        "固态电池"
+      ],
+      "primaryTag": "",
+      "supplemental": true,
+      "dataQuality": "自动新债池补充；正股与申万行业自动补齐"
+    },
+    {
+      "code": "123278.SZ",
+      "name": "合金转债",
+      "stockCode": "300697.SZ",
+      "stockName": "电工合金",
+      "listedDate": "2026-08-18",
+      "industry1": "有色金属",
+      "industry2": "工业金属",
+      "industry3": "铜",
+      "tags": [
+        "次新债",
+        "能源金属",
+        "有色"
+      ],
+      "primaryTag": "",
+      "supplemental": true,
+      "dataQuality": "自动新债池补充；正股与申万行业自动补齐"
+    },
+    {
+      "code": "113709.SH",
+      "name": "振26转债",
+      "stockCode": "603067.SH",
+      "stockName": "振华股份",
+      "listedDate": "2026-08-17",
+      "industry1": "基础化工",
+      "industry2": "化学原料",
+      "industry3": "无机盐",
+      "tags": [
+        "次新债",
+        "能化"
+      ],
+      "primaryTag": "",
+      "supplemental": true,
+      "dataQuality": "自动新债池补充；正股与申万行业自动补齐"
+    },
+    {
+      "code": "118074.SH",
+      "name": "特宝转债",
+      "stockCode": "688278.SH",
+      "stockName": "特宝生物",
+      "listedDate": "2026-08-13",
+      "industry1": "医药生物",
+      "industry2": "生物制品",
+      "industry3": "其他生物制品",
+      "tags": [
+        "次新债",
+        "医药"
+      ],
+      "primaryTag": "",
+      "supplemental": true,
+      "dataQuality": "自动新债池补充；正股与申万行业自动补齐"
+    },
+    {
+      "code": "113708.SH",
+      "name": "曙26转债",
+      "stockCode": "603019.SH",
+      "stockName": "中科曙光",
+      "listedDate": "2026-08-06",
+      "industry1": "计算机",
+      "industry2": "计算机设备",
+      "industry3": "其他计算机设备",
+      "tags": [
+        "次新债",
+        "算力租赁"
+      ],
+      "primaryTag": "",
+      "supplemental": true,
+      "dataQuality": "自动新债池补充；正股与申万行业自动补齐"
+    },
+    {
+      "code": "123279.SZ",
+      "name": "天脉转债",
+      "stockCode": "301626.SZ",
+      "stockName": "苏州天脉",
+      "listedDate": "2026-08-18",
+      "industry1": "电子",
+      "industry2": "消费电子",
+      "industry3": "消费电子零部件及组装",
+      "tags": [
+        "次新债",
+        "液冷"
+      ],
+      "primaryTag": "",
+      "supplemental": true,
+      "dataQuality": "自动新债池补充；正股与申万行业自动补齐",
+      "lifecycleStatus": "active_listed",
+      "isActive": true,
+      "visibility": "active",
+      "lifecycleReason": "present_in_qmt_current_list",
+      "lifecycleCheckedAt": "2026-08-31T08:00:32Z"
+    },
+    {
+      "code": "123276.SZ",
+      "name": "久吾转02",
+      "stockCode": "300631.SZ",
+      "stockName": "久吾高科",
+      "listedDate": "2026-08-04",
+      "industry1": "环保",
+      "industry2": "环保设备Ⅱ",
+      "industry3": "环保设备Ⅲ",
+      "tags": [
+        "次新债",
+        "环保"
+      ],
+      "primaryTag": "",
+      "supplemental": true,
+      "dataQuality": "自动新债池补充；正股与申万行业自动补齐",
+      "lifecycleStatus": "active_listed",
+      "isActive": true,
+      "visibility": "active",
+      "lifecycleReason": "present_in_qmt_current_list",
+      "lifecycleCheckedAt": "2026-08-31T08:00:32Z"
+    },
+    {
+      "code": "123277.SZ",
+      "name": "玉禾转债",
+      "stockCode": "300815.SZ",
+      "stockName": "玉禾田",
+      "listedDate": "2026-08-14",
+      "industry1": "环保",
+      "industry2": "环境治理",
+      "industry3": "固废治理",
+      "tags": [
+        "次新债",
+        "环保"
+      ],
+      "primaryTag": "",
+      "supplemental": true,
+      "dataQuality": "自动新债池补充；正股与申万行业自动补齐",
+      "lifecycleStatus": "active_listed",
+      "isActive": true,
+      "visibility": "active",
+      "lifecycleReason": "present_in_qmt_current_list",
+      "lifecycleCheckedAt": "2026-08-31T08:00:32Z"
+    },
+    {
+      "code": "127115.SZ",
+      "name": "炬申转债",
+      "stockCode": "001202.SZ",
+      "stockName": "炬申股份",
+      "listedDate": "2026-08-13",
+      "industry1": "交通运输",
+      "industry2": "物流",
+      "industry3": "原材料供应链服务",
+      "tags": [
+        "次新债",
+        "电力设备"
+      ],
+      "primaryTag": "",
+      "supplemental": true,
+      "dataQuality": "自动新债池补充；正股与申万行业自动补齐",
+      "lifecycleStatus": "active_listed",
+      "isActive": true,
+      "visibility": "active",
+      "lifecycleReason": "present_in_qmt_current_list",
+      "lifecycleCheckedAt": "2026-08-31T08:00:32Z"
+    },
+    {
+      "code": "118073.SH",
+      "name": "赛斯转债",
+      "stockCode": "688480.SH",
+      "stockName": "赛恩斯",
+      "listedDate": "2026-08-12",
+      "industry1": "环保",
+      "industry2": "环境治理",
+      "industry3": "综合环境治理",
+      "tags": [
+        "次新债",
+        "环保"
+      ],
+      "primaryTag": "",
+      "supplemental": true,
+      "dataQuality": "自动新债池补充；正股与申万行业自动补齐",
+      "lifecycleStatus": "active_listed",
+      "isActive": true,
+      "visibility": "active",
+      "lifecycleReason": "present_in_qmt_current_list",
+      "lifecycleCheckedAt": "2026-08-31T08:00:32Z"
+    },
+    {
+      "code": "110103.SH",
+      "name": "申能转债",
+      "stockCode": "600642.SH",
+      "stockName": "申能股份",
+      "listedDate": "2026-08-13",
+      "industry1": "公用事业",
+      "industry2": "电力",
+      "industry3": "火力发电",
+      "tags": [
+        "次新债",
+        "电力设备"
+      ],
+      "primaryTag": "",
+      "supplemental": true,
+      "dataQuality": "自动新债池补充；正股与申万行业自动补齐",
+      "lifecycleStatus": "active_listed",
+      "isActive": true,
+      "visibility": "active",
+      "lifecycleReason": "present_in_qmt_current_list",
+      "lifecycleCheckedAt": "2026-08-31T08:00:32Z"
+    },
+    {
+      "code": "110102.SH",
+      "name": "江农转债",
+      "stockCode": "600389.SH",
+      "stockName": "江山股份",
+      "listedDate": "2026-08-05",
+      "industry1": "基础化工",
+      "industry2": "农化制品",
+      "industry3": "农药",
+      "tags": [
+        "次新债",
+        "养殖"
+      ],
+      "primaryTag": "",
+      "supplemental": true,
+      "dataQuality": "自动新债池补充；正股与申万行业自动补齐",
+      "lifecycleStatus": "active_listed",
+      "isActive": true,
+      "visibility": "active",
+      "lifecycleReason": "present_in_qmt_current_list",
+      "lifecycleCheckedAt": "2026-08-31T08:00:32Z"
+    },
+    {
+      "code": "113707.SH",
+      "name": "科博转债",
+      "stockCode": "603786.SH",
+      "stockName": "科博达",
+      "listedDate": "2026-07-31",
+      "industry1": "汽车",
+      "industry2": "汽车零部件",
+      "industry3": "汽车电子电气系统",
+      "tags": [
+        "次新债",
+        "无人驾驶"
+      ],
+      "primaryTag": "",
+      "supplemental": true,
+      "dataQuality": "自动新债池补充；正股与申万行业自动补齐",
+      "lifecycleStatus": "active_listed",
+      "isActive": true,
+      "visibility": "active",
+      "lifecycleReason": "present_in_qmt_current_list",
+      "lifecycleCheckedAt": "2026-08-31T08:00:32Z"
+    },
+    {
+      "code": "123282.SZ",
+      "name": "震裕转02",
+      "stockCode": "300953.SZ",
+      "stockName": "震裕科技",
+      "listedDate": "2026-09-02",
+      "industry1": "电力设备",
+      "industry2": "电池",
+      "industry3": "锂电池",
+      "issueScaleBillion": 18.8,
+      "rating": "AA-",
+      "tags": [
+        "次新债",
+        "机器人"
+      ],
+      "primaryTag": "",
+      "supplemental": true,
+      "dataQuality": "自动新债池补充；正股与申万行业自动补齐",
+      "lifecycleStatus": "active_listed",
+      "isActive": true,
+      "visibility": "active",
+      "lifecycleReason": "present_in_qmt_current_list",
+      "lifecycleCheckedAt": "2026-09-02T15:56:59Z"
     }
   ]
 }

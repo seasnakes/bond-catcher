@@ -1,6 +1,17 @@
 {
   "description": "可转债标签人工修订。customTags 保存页面新增标签，add 添加标签，remove 删除规则标签。",
-  "customTags": [],
+  "customTags": [
+    "能源金属",
+    "苹果折叠屏",
+    "有色",
+    "养殖",
+    "消费",
+    "游戏",
+    "地产",
+    "造纸",
+    "固态电池",
+    "无人驾驶"
+  ],
   "overrides": {
     "127080.SZ": {
       "add": [
@@ -12,9 +23,7 @@
       "add": [
         "算力租赁"
       ],
-      "remove": [
-        "AI应用"
-      ]
+      "remove": []
     },
     "123157.SZ": {
       "add": [
@@ -75,9 +84,8 @@
     },
     "127084.SZ": {
       "add": [],
-      "remove": [
-        "机器人"
-      ]
+      "remove": [],
+      "primaryTag": null
     },
     "118060.SH": {
       "add": [
@@ -98,9 +106,8 @@
     },
     "113696.SH": {
       "add": [],
-      "remove": [
-        "机器人"
-      ]
+      "remove": [],
+      "primaryTag": null
     },
     "118063.SH": {
       "add": [],
@@ -142,9 +149,8 @@
     },
     "128134.SZ": {
       "add": [],
-      "remove": [
-        "机器人"
-      ]
+      "remove": [],
+      "primaryTag": null
     },
     "127108.SZ": {
       "add": [],
@@ -181,9 +187,9 @@
       "add": [],
       "remove": [
         "医药",
-        "机器人",
-        "航天"
-      ]
+        "机器人"
+      ],
+      "primaryTag": null
     },
     "113678.SH": {
       "add": [],
@@ -201,14 +207,20 @@
     "113697.SH": {
       "add": [],
       "remove": [
+        "次新债",
         "航天"
-      ]
+      ],
+      "primaryTag": null
     },
     "110101.SH": {
-      "add": [],
+      "add": [
+        "能源金属",
+        "有色"
+      ],
       "remove": [
         "航天"
-      ]
+      ],
+      "primaryTag": null
     },
     "118035.SH": {
       "add": [],
@@ -217,17 +229,29 @@
       ]
     },
     "111025.SH": {
-      "add": [],
+      "add": [
+        "固态电池"
+      ],
       "remove": [
-        "航天"
-      ]
+        "PCB",
+        "能化",
+        "半导体",
+        "半导体材料",
+        "光刻机",
+        "航天",
+        "环保"
+      ],
+      "primaryTag": null
     },
     "118069.SH": {
-      "add": [],
+      "add": [
+        "医药"
+      ],
       "remove": [
         "机器人",
         "航天"
-      ]
+      ],
+      "primaryTag": null
     },
     "123245.SZ": {
       "add": [],
@@ -256,10 +280,13 @@
       ]
     },
     "127050.SZ": {
-      "add": [],
+      "add": [
+        "无人驾驶"
+      ],
       "remove": [
         "航天"
-      ]
+      ],
+      "primaryTag": null
     },
     "127038.SZ": {
       "add": [],
@@ -268,10 +295,14 @@
       ]
     },
     "127082.SZ": {
-      "add": [],
+      "add": [
+        "能源金属",
+        "有色"
+      ],
       "remove": [
         "航天"
-      ]
+      ],
+      "primaryTag": null
     },
     "118031.SH": {
       "add": [],
@@ -280,10 +311,14 @@
       ]
     },
     "127064.SZ": {
-      "add": [],
+      "add": [
+        "半导体材料"
+      ],
       "remove": [
+        "半导体",
         "航天"
-      ]
+      ],
+      "primaryTag": null
     },
     "123271.SZ": {
       "add": [],
@@ -331,11 +366,14 @@
       ]
     },
     "123252.SZ": {
-      "add": [],
+      "add": [
+        "有色"
+      ],
       "remove": [
         "医药",
         "航天"
-      ]
+      ],
+      "primaryTag": null
     },
     "111024.SH": {
       "add": [],
@@ -382,10 +420,13 @@
       ]
     },
     "113674.SH": {
-      "add": [],
+      "add": [
+        "地产"
+      ],
       "remove": [
         "AI应用"
-      ]
+      ],
+      "primaryTag": null
     },
     "123113.SZ": {
       "add": [],
@@ -394,23 +435,32 @@
       ]
     },
     "113670.SH": {
-      "add": [],
+      "add": [
+        "消费"
+      ],
       "remove": [
         "AI应用"
-      ]
+      ],
+      "primaryTag": "消费"
     },
     "127062.SZ": {
-      "add": [],
+      "add": [
+        "地产"
+      ],
       "remove": [
         "AI应用",
         "医药"
-      ]
+      ],
+      "primaryTag": null
     },
     "123188.SZ": {
-      "add": [],
+      "add": [
+        "消费"
+      ],
       "remove": [
         "AI应用"
-      ]
+      ],
+      "primaryTag": null
     },
     "118007.SH": {
       "add": [
@@ -425,10 +475,13 @@
       ]
     },
     "123183.SZ": {
-      "add": [],
+      "add": [
+        "固态电池"
+      ],
       "remove": [
         "医药"
-      ]
+      ],
+      "primaryTag": null
     },
     "123065.SZ": {
       "add": [],
@@ -463,8 +516,10 @@
     "123258.SZ": {
       "add": [],
       "remove": [
+        "次新债",
         "机器人"
-      ]
+      ],
+      "primaryTag": "液冷"
     },
     "127061.SZ": {
       "add": [],
@@ -506,6 +561,652 @@
     "110075.SH": {
       "add": [
         "航天"
+      ],
+      "remove": []
+    },
+    "113673.SH": {
+      "add": [
+        "机器人"
+      ],
+      "remove": [],
+      "primaryTag": "机器人"
+    },
+    "118076.SH": {
+      "add": [
+        "半导体",
+        "光刻机"
+      ],
+      "remove": [],
+      "primaryTag": "光刻机"
+    },
+    "111026.SH": {
+      "add": [
+        "航天"
+      ],
+      "remove": [],
+      "primaryTag": "次新债"
+    },
+    "127070.SZ": {
+      "add": [
+        "能源金属"
+      ],
+      "remove": [],
+      "primaryTag": "能源金属"
+    },
+    "118075.SH": {
+      "add": [
+        "光模块",
+        "苹果折叠屏"
+      ],
+      "remove": [],
+      "primaryTag": "苹果折叠屏"
+    },
+    "127045.SZ": {
+      "add": [
+        "食品"
+      ],
+      "remove": []
+    },
+    "123189.SZ": {
+      "add": [
+        "食品"
+      ],
+      "remove": []
+    },
+    "113615.SH": {
+      "add": [
+        "能源金属",
+        "有色"
+      ],
+      "remove": [],
+      "primaryTag": "能源金属"
+    },
+    "123107.SZ": {
+      "add": [
+        "养殖"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113658.SH": {
+      "add": [
+        "能化"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123250.SZ": {
+      "add": [
+        "消费"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123192.SZ": {
+      "add": [
+        "消费"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113627.SH": {
+      "add": [
+        "消费"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "127104.SZ": {
+      "add": [
+        "游戏"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113638.SH": {
+      "add": [
+        "消费"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113634.SH": {
+      "add": [
+        "消费"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113648.SH": {
+      "add": [
+        "养殖"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113647.SH": {
+      "add": [
+        "养殖"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113636.SH": {
+      "add": [
+        "有色"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113692.SH": {
+      "add": [
+        "机器人"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123222.SZ": {
+      "add": [
+        "机器人"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113655.SH": {
+      "add": [
+        "消费"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "127049.SZ": {
+      "add": [
+        "养殖"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "127102.SZ": {
+      "add": [
+        "地产"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "110086.SH": {
+      "add": [
+        "地产"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "127083.SZ": {
+      "add": [
+        "地产"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113058.SH": {
+      "add": [
+        "有色"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "127053.SZ": {
+      "add": [
+        "机器人"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "111002.SH": {
+      "add": [
+        "造纸"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113049.SH": {
+      "add": [
+        "机器人"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "118062.SH": {
+      "add": [],
+      "remove": [
+        "次新债"
+      ]
+    },
+    "123280.SZ": {
+      "add": [
+        "医药"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123281.SZ": {
+      "add": [
+        "固态电池"
+      ],
+      "remove": []
+    },
+    "123278.SZ": {
+      "add": [
+        "能源金属",
+        "有色"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113677.SH": {
+      "add": [
+        "机器人"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113709.SH": {
+      "add": [
+        "能化"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "127109.SZ": {
+      "add": [],
+      "remove": [
+        "环保"
+      ],
+      "primaryTag": null
+    },
+    "118074.SH": {
+      "add": [
+        "医药"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113708.SH": {
+      "add": [
+        "算力租赁"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123207.SZ": {
+      "add": [
+        "算力租赁"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113699.SH": {
+      "add": [
+        "能源金属",
+        "有色"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "127055.SZ": {
+      "add": [
+        "半导体"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113704.SH": {
+      "add": [
+        "无人驾驶"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "128127.SZ": {
+      "add": [
+        "地产"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123279.SZ": {
+      "add": [
+        "液冷"
+      ],
+      "remove": []
+    },
+    "113646.SH": {
+      "add": [
+        "AI应用"
+      ],
+      "remove": [],
+      "primaryTag": "AI应用"
+    },
+    "127068.SZ": {
+      "add": [
+        "能源金属",
+        "有色"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123180.SZ": {
+      "add": [
+        "能源金属",
+        "有色"
+      ],
+      "remove": [],
+      "primaryTag": "有色"
+    },
+    "111009.SH": {
+      "add": [
+        "消费"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "127033.SZ": {
+      "add": [
+        "地产"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "127069.SZ": {
+      "add": [
+        "消费电子"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "127044.SZ": {
+      "add": [
+        "半导体材料"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123270.SZ": {
+      "add": [
+        "能源金属"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123088.SZ": {
+      "add": [
+        "机器人"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113625.SH": {
+      "add": [
+        "消费"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113698.SH": {
+      "add": [
+        "机器人"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123187.SZ": {
+      "add": [
+        "机器人"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123265.SZ": {
+      "add": [
+        "机器人"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123072.SZ": {
+      "add": [
+        "消费"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123276.SZ": {
+      "add": [
+        "环保"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123277.SZ": {
+      "add": [
+        "环保"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113680.SH": {
+      "add": [
+        "能源金属",
+        "有色"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113665.SH": {
+      "add": [
+        "地产"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113688.SH": {
+      "add": [
+        "电力设备"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "127099.SZ": {
+      "add": [
+        "航天"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123154.SZ": {
+      "add": [
+        "机器人"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123274.SZ": {
+      "add": [
+        "机器人"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "127060.SZ": {
+      "add": [
+        "养殖"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113666.SH": {
+      "add": [
+        "消费电子"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "127025.SZ": {
+      "add": [
+        "地产"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123080.SZ": {
+      "add": [
+        "地产"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113693.SH": {
+      "add": [
+        "消费"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "127115.SZ": {
+      "add": [
+        "电力设备"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113659.SH": {
+      "add": [
+        "消费电子"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123133.SZ": {
+      "add": [
+        "养殖"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113051.SH": {
+      "add": [
+        "光伏"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "118073.SH": {
+      "add": [
+        "环保"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "110100.SH": {
+      "add": [
+        "地产"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123216.SZ": {
+      "add": [
+        "地产"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123260.SZ": {
+      "add": [
+        "无人驾驶"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "110103.SH": {
+      "add": [
+        "电力设备"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113656.SH": {
+      "add": [
+        "无人驾驶"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113671.SH": {
+      "add": [
+        "能源金属",
+        "有色"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "127085.SZ": {
+      "add": [
+        "无人驾驶"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "123272.SZ": {
+      "add": [
+        "无人驾驶"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "127047.SZ": {
+      "add": [
+        "消费"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "110102.SH": {
+      "add": [
+        "养殖"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "127040.SZ": {
+      "add": [
+        "消费"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113707.SH": {
+      "add": [
+        "无人驾驶"
+      ],
+      "remove": [],
+      "primaryTag": null
+    },
+    "113706.SH": {
+      "add": [
+        "液冷"
+      ],
+      "remove": [],
+      "primaryTag": "液冷"
+    },
+    "123282.SZ": {
+      "add": [
+        "机器人"
+      ],
+      "remove": []
+    },
+    "123213.SZ": {
+      "add": [
+        "光模块"
       ],
       "remove": []
     }
