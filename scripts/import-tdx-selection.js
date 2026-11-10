@@ -39,7 +39,7 @@ async function main() {
     : await fetchTdxSector({
         blockCode: args["tdx-sector"],
         blockType: Number(args["block-type"] ?? 1),
-        transport: args.transport || (args.endpoint ? "direct" : "vm"),
+        transport: args.transport || (args.endpoint || process.platform === "win32" ? "direct" : "vm"),
         endpoint: args.endpoint || "http://127.0.0.1:17709/",
         vm: args.vm || "Windows 11",
         prlctlPath: args.prlctl || "/usr/local/bin/prlctl",

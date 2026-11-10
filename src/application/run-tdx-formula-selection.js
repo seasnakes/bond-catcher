@@ -117,7 +117,7 @@ async function runTdxFormulaSelections(rawOptions = {}) {
   }
 
   const tqOptions = {
-    transport: rawOptions.transport || (rawOptions.endpoint ? "direct" : "vm"),
+    transport: rawOptions.transport || (rawOptions.endpoint || process.platform === "win32" ? "direct" : "vm"),
     endpoint: rawOptions.endpoint || "http://127.0.0.1:17709/",
     vm: rawOptions.vm || "Windows 11",
     prlctlPath: rawOptions.prlctlPath || "/usr/local/bin/prlctl",

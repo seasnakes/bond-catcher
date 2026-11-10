@@ -36,7 +36,7 @@ async function main() {
     dividendType: Number(args["dividend-type"] ?? 1),
     batchSize: Number(args["batch-size"] || 50),
     limit: Number(args.limit || 0),
-    transport: args.transport || (args.endpoint ? "direct" : "vm"),
+    transport: args.transport || (args.endpoint || process.platform === "win32" ? "direct" : "vm"),
     endpoint: args.endpoint || "http://127.0.0.1:17709/",
     vm: args.vm || "Windows 11",
     prlctlPath: args.prlctl || "/usr/local/bin/prlctl",

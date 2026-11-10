@@ -81,7 +81,7 @@ async function callTqInVm(options, method, params, timeoutMs) {
 
 async function callTq(options, method, params) {
   const timeoutMs = Number(options.timeoutMs || 15_000);
-  if (options.transport === "direct") {
+  if (options.transport === "direct" || (!options.transport && process.platform === "win32")) {
     return callTqDirect(options.endpoint || "http://127.0.0.1:17709/", method, params, timeoutMs);
   }
   return callTqInVm(options, method, params, timeoutMs);

@@ -33,7 +33,7 @@ from lib.local_formula_engine import (  # noqa: E402
 DEFAULT_DATABASE = ROOT / "runtime" / "convertible-bond-market.sqlite3"
 DEFAULT_OUTPUT = ROOT / "runtime" / "local-formula-demo.json"
 DEFAULT_BENCHMARK = ROOT / "runtime" / "tdx-formula-selections.json"
-DEFAULT_BRIDGE = "http://10.211.55.3:18888"
+DEFAULT_BRIDGE = "http://127.0.0.1:18889"
 DEFAULT_BOARD = "http://127.0.0.1:5173"
 
 
