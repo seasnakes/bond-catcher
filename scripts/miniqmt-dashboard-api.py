@@ -159,6 +159,7 @@ DETAIL_TICK_TIMEOUT_SECONDS = float(
 HEALTH_STATUS_MAX_AGE_SECONDS = float(
     os.environ.get("MINIQMT_HEALTH_STATUS_MAX_AGE_SECONDS", "30")
 )
+ACCESS_LOG_ENABLED = os.environ.get("MINIQMT_API_ACCESS_LOG", "0") == "1"
 HEALTH_QUOTE_MAX_AGE_SECONDS = float(
     os.environ.get("MINIQMT_HEALTH_QUOTE_MAX_AGE_SECONDS", "180")
 )
@@ -7926,6 +7927,18 @@ def events_payload(
 
 class DashboardHandler(BaseHTTPRequestHandler):
     server_version = "QMTDashboard/1.0"
+
+    def log_request(self, code: Any = "-", size: Any = "-") -> None:
+        # The board polls /health, /quotes and /sparks every few seconds; logging
+        # each success grew finance-board.log by hundreds of MB between restarts.
+        status = int(code) if str(code).isdigit() else 0
+        if status and status < 400 and not ACCESS_LOG_ENABLED:
+            return
+        route = urllib.parse.urlsplit(self.path).path
+        sys.stderr.write(
+            f"[{self.log_date_time_string()}] {self.client_address[0]} "
+            f"{self.command} {route} {code}\n"
+        )
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)

@@ -1,6 +1,6 @@
 **Finance Board：Skill、开源组件与实际部署版本**
 
-核对日期：2026-11-01。本文补充 [架构总览](/Users/seasnake/code/snake/finance/docs/architecture/project-overview-2026-11-01.md)，依据本机 SKILL.md、自动化配置、代码调用、安装包元数据、历史部署验收文件与上游公开仓库。这里的“已安装”“任务要求使用”“代码调用”“曾验收通过”“当前链路可用”分别记录，不混作一个状态。
+核对日期：2026-11-01。本文补充 [架构总览](../../docs/architecture/project-overview-2026-11-01.md)，依据本机 SKILL.md、自动化配置、代码调用、安装包元数据、历史部署验收文件与上游公开仓库。这里的“已安装”“任务要求使用”“代码调用”“曾验收通过”“当前链路可用”分别记录，不混作一个状态。
 
 **Skill 在架构中的位置**
 
@@ -143,11 +143,11 @@ Skill 文件和脚本存在，不证明当前上游支持每个接口。部分�
 
 **本地验收依据**
 
-- [固定版本与部署准备脚本](/Users/seasnake/code/snake/finance/scripts/prepare_bigqmt_rpc_bundle.py)
-- [单文件管道适配脚本](/Users/seasnake/code/snake/finance/scripts/prepare_bigqmt_pipe_bundle.py)
-- [10 月 27 日部署汇总](/Users/seasnake/code/snake/finance/runtime/qmt-migration/upgrade-20261027/result.json)
-- [Windows 管道与中继验收](/Users/seasnake/code/snake/finance/runtime/qmt-migration/upgrade-20261027/windows-pipe-result.json)
-- [当前连板数据源调用](/Users/seasnake/code/snake/finance/lib/limit-ladder-sources.js)
-- [当前 AI 进程隔离配置](/Users/seasnake/code/snake/finance/lib/codex-text-provider.js)
+- [固定版本与部署准备脚本](../../scripts/prepare_bigqmt_rpc_bundle.py)
+- [单文件管道适配脚本](../../scripts/prepare_bigqmt_pipe_bundle.py)
+- [10 月 27 日部署汇总](../../runtime/qmt-migration/upgrade-20261027/result.json)
+- [Windows 管道与中继验收](../../runtime/qmt-migration/upgrade-20261027/windows-pipe-result.json)
+- [当前连板数据源调用](../../lib/limit-ladder-sources.js)
+- [当前 AI 进程隔离配置](../../lib/codex-text-provider.js)
 - [韭研公社任务的实际管道配置](/Users/seasnake/.local/share/jiuyangongshe-finance/config.json)
-- [仅供设计参考的模块化路线图](/Users/seasnake/code/snake/finance/docs/architecture/2026-08-modularization-roadmap.md)
+- [仅供设计参考的模块化路线图](../../docs/architecture/2026-08-modularization-roadmap.md)

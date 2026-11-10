@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const secid = require("../src/domain/secid.js");
 
 const APP = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
 const SERVER = fs.readFileSync(path.join(__dirname, "..", "server.js"), "utf8");
@@ -120,6 +121,7 @@ function sparksContext({ failQmt = false, failHk = false, hkDate = "2026-09-04" 
   let response;
   const context = vm.createContext({
     URLSearchParams, Error,
+    ...secid,
     currentChinaDateKey: () => "2026-09-04",
     fetchLocalJson: async (url) => {
       calls.push(url);
@@ -134,7 +136,6 @@ function sparksContext({ failQmt = false, failHk = false, hkDate = "2026-09-04" 
     },
     sendJson: (_, status, payload) => { response = { status, payload }; },
   });
-  vm.runInContext(between(SERVER, "function isHongKongSecid(", "\nfunction marketFromCode("), context);
   vm.runInContext(between(SERVER, "async function handleSparks(", "\nasync function handleResolve("), context);
   return { context, calls, response: () => response };
 }

@@ -113,7 +113,7 @@ test("ATR网格使用无底仓默认参数并自动读取最新交易日", () =>
   for (const [id, value] of Object.entries(defaults)) {
     assert.match(html, new RegExp(`id="${id}"[^>]*value="${value}"`));
   }
-  assert.match(html, /id="gridDate" type="date" title="打开页面时自动读取 MiniQMT 最新可用交易日/);
+  assert.match(html, /id="gridDate" type="date" title="打开页面时自动读取 QMT 最新可用交易日/);
   assert.match(frontend, /fetchJson\("\/api\/miniqmt\/health"\)/);
   assert.match(frontend, /miniQmtHealth\?\.latest_trading_date/);
   assert.doesNotMatch(frontend, /localStorage\.getItem\("finance\.quant\.grid\.date"\)/);

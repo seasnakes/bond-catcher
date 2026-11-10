@@ -1,0 +1,11 @@
+
+# <type>(<scope>): <summary>
+#
+# type:  feat | fix | perf | refactor | test | docs | chore | ci | build | revert
+# scope: optional, e.g. board, bond, quant, cb-ai, qmt, miniqmt-api, server, data
+# summary: imperative, no trailing period, <= 72 characters
+#
+# Body (optional): why the change is needed, data sources touched,
+# trading-safety boundaries, validation evidence, rollback notes.
+#
+# Footer (optional): BREAKING CHANGE: ..., Refs: ...

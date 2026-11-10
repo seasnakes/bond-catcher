@@ -87,6 +87,20 @@ tests/
 - 为 `/api/state`、`/api/miniqmt/*`、竞价接口建立契约测试。
 - 停止条件：同一测试集在迁移前后通过；运行时写文件范围不扩大；交易写接口仍只允许回环、同源和二次确认。
 
+状态：进行中。2026-11-10 第一批已从 `server.js` 抽出（约 350 行），URL 与响应字段不变：
+
+| 模块 | 内容 |
+| --- | --- |
+| `src/domain/secid.js` | secid 解析、市场名称、新浪/腾讯/通达信/QMT 代码映射 |
+| `src/domain/board-state.js` | 看板状态规范化（与通达信导入计划同处） |
+| `src/shared/async.js` | 分批、并发映射、超时 |
+| `src/infrastructure/json-file-store.js` | JSON 读取与原子写 |
+| `src/infrastructure/process-exec.js`、`https-text-client.js` | 子进程调用、HTTPS 文本请求 |
+| `src/interfaces/http/http-io.js` | JSON 响应、请求体、回环与同源判断 |
+| `src/interfaces/http/static-files.js` | 静态文件白名单：根目录页面资源、`data/*.json`（不含 `board-state.json`）、`docs/` |
+
+下一批建议：行情供应商客户端（新浪、腾讯、Yahoo、东方财富）、竞价采样与缓存、路由表。测试里按函数名截取 `server.js` 源码的写法，随模块迁出逐个改为直接 `require`。
+
 ### 阶段 3：拆 Python 服务
 
 - 按 `bridge/`、`storage/`、`market_data/`、`signals/`、`backfill/`、`trading/`、`http/` 拆包。

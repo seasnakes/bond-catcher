@@ -1,10 +1,12 @@
 # AGENTS.md
 
-This repository is a local finance board app, usually worked on at
-`/Users/seasnake/code/snake/finance` on macOS.
+This repository is a local finance board app on macOS. The development clone is
+`/Users/seasnake/code/snake/finance-board`; the LaunchAgent may still run from
+the older working copy at `/Users/seasnake/code/snake/finance`.
 
 ## Workflow
 
+- Run `npm run setup:git` once per clone; conventions are in `docs/development-workflow.md`.
 - Keep source changes focused on the requested behavior.
 - Prefer a development branch and pull request for larger fixes.
 - Direct `main` commits are acceptable when the user explicitly asks to update the remote version.
@@ -52,6 +54,7 @@ lsof -nP -iTCP:5173 -sTCP:LISTEN
 
 ## GitHub
 
-- Remote: `https://github.com/seasnakes/finance-board.git`
+- Remote: `https://github.com/seasnakes/bond-catcher.git` (`origin`); the archived
+  `seasnakes/finance-board` stays read-only as `legacy`.
 - Default branch: `main`
 - When publishing changes, stage explicit paths so unrelated local edits are not included accidentally.

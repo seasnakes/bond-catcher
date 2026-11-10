@@ -1,8 +1,33 @@
 const http = require("node:http");
-const https = require("node:https");
 const fs = require("node:fs");
 const path = require("node:path");
-const { execFile, spawn } = require("node:child_process");
+const { spawn } = require("node:child_process");
+const {
+  codeFromInput,
+  isConvertibleBondCode,
+  isHongKongSecid,
+  isSupportedSecid,
+  marketNameForSecid,
+  normalizeSecidInput,
+  normalizeTagSecid,
+  secidToMiniQmtMarketCode,
+  secidToSinaSymbol,
+  secidToTdxStockCode,
+  secidToTencentSymbol,
+  typeForSecid,
+} = require("./src/domain/secid.js");
+const { normalizeBoardState } = require("./src/domain/board-state.js");
+const { chunk, mapWithConcurrency, withTimeout } = require("./src/shared/async.js");
+const { readJsonFile, writeJsonAtomic } = require("./src/infrastructure/json-file-store.js");
+const { execFileAsync, parseLastJsonObject } = require("./src/infrastructure/process-exec.js");
+const { fetchText } = require("./src/infrastructure/https-text-client.js");
+const {
+  isLoopbackRequest,
+  isSameOriginRequest,
+  readJsonBody,
+  sendJson,
+} = require("./src/interfaces/http/http-io.js");
+const { createStaticFileServer } = require("./src/interfaces/http/static-files.js");
 const { createCbAiService } = require("./lib/cb-ai-service.js");
 const {
   compareStrategies,
@@ -58,6 +83,7 @@ const fetchLiveLimitLadder = createLiveLadderFeed({
 
 const PORT = Number(process.env.PORT || 5173);
 const ROOT = __dirname;
+const serveStatic = createStaticFileServer({ root: ROOT });
 const LOCAL_A_SHARE_LIST_PATH = path.join(ROOT, "data", "a-share-list.json");
 const BOARD_STATE_PATH = path.join(ROOT, "data", "board-state.json");
 const LADDER_MANIFEST_PATH = path.join(ROOT, "runtime", "limit-ladder-board.json");
@@ -203,15 +229,6 @@ const DOMESTIC_INDEXES = [
 const GLOBAL_INDEX_SYMBOLS = ["b_KOSPI", "b_NKY", "int_nikkei", "rt_hkHSTECH"];
 const globalIndexSparkCache = new Map();
 let us10yRequest = null;
-
-const MIME_TYPES = {
-  ".html": "text/html; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".png": "image/png",
-  ".svg": "image/svg+xml",
-};
 
 const allowedRemoteAddresses = new Set(String(process.env.FINANCE_ALLOWED_REMOTE_ADDRESSES || "").split(",").map(value => value.trim()).filter(Boolean));
 const server = http.createServer(async (request, response) => {
@@ -997,17 +1014,6 @@ async function handleMiniQmtApi(pathname, response, timeout = 12_000) {
   }
 }
 
-function isLoopbackRequest(request) {
-  const address = String(request.socket?.remoteAddress || "").toLowerCase();
-  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
-}
-
-function isSameOriginRequest(request) {
-  const origin = String(request.headers.origin || "");
-  const host = String(request.headers.host || "");
-  return Boolean(origin && host && (origin === `http://${host}` || origin === `https://${host}`));
-}
-
 async function handleTradingCapabilities(request, response) {
   try {
     const payload = await fetchLocalJson("/trading/capabilities", 12_000);
@@ -1390,7 +1396,7 @@ function cbQuoteExecutionState(quote, now = Date.now()) {
   const clock = chinaDateTimeParts(now);
   const currentDate = clock.date.replaceAll("-", "");
   const quoteDate = String(quote?.date || quote?.timetag || "").replace(/\D/g, "").slice(0, 8);
-  const weekday = new Date(`${clock.date}T00:00:00+08:00`).getDay();
+  const weekday = chinaWeekday(clock);
   const marketOpen = weekday >= 1 && weekday <= 5 && (
     (clock.time >= "09:30:00" && clock.time <= "11:30:30")
     || (clock.time >= "13:00:00" && clock.time <= "15:00:30")
@@ -2917,16 +2923,6 @@ function recalculateBondTagCounts(tagPayload, tagOrder) {
   );
 }
 
-async function readJsonFile(filePath) {
-  return JSON.parse(await fs.promises.readFile(filePath, "utf8"));
-}
-
-async function writeJsonAtomic(filePath, payload) {
-  const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  await fs.promises.writeFile(temporaryPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-  await fs.promises.rename(temporaryPath, filePath);
-}
-
 async function ensureMiniQmtApi() {
   if (!MINIQMT_API_AUTOSTART || shuttingDown) return;
   try {
@@ -3721,7 +3717,7 @@ function scheduleNewBondSecondDayScan(delay = NEW_BOND_AUTO_SCAN_INTERVAL_MS) {
     newBondScanTimer = null;
     const clock = currentChinaDateTimeParts();
     const date = clock.date.replaceAll("-", "");
-    const chinaWeekday = new Date(`${clock.date}T00:00:00+08:00`).getDay();
+    const weekday = chinaWeekday(clock);
     const alreadyScanned = newBondLastResult?.autoScanDate === date;
     const alreadyReconciled = newBondLastReconciliationDate === date;
     const inAutoScanWindow = isNewBondAutoScanWindow(clock.time);
@@ -3732,8 +3728,8 @@ function scheduleNewBondSecondDayScan(delay = NEW_BOND_AUTO_SCAN_INTERVAL_MS) {
     const shouldScanSecondDay = !alreadyScanned && inAutoScanWindow;
     if (
       clock
-      && chinaWeekday !== 0
-      && chinaWeekday !== 6
+      && weekday !== 0
+      && weekday !== 6
       && (shouldReconcile || shouldScanSecondDay)
     ) {
       try {
@@ -4807,14 +4803,6 @@ function isAuctionMinute(time) {
   return typeof time === "string" && time >= "09:15" && time <= "09:25";
 }
 
-function secidToTdxStockCode(secid) {
-  const [market, code] = String(secid || "").split(".");
-  if (!code) return secid;
-  if (/^[489]/.test(code)) return `${code}.BJ`;
-  if (market === "1") return `${code}.SH`;
-  return `${code}.SZ`;
-}
-
 function chinaDateTimeParts(value = Date.now()) {
   const moment = value instanceof Date ? value : new Date(value);
   if (!Number.isFinite(moment.getTime())) return null;
@@ -4837,6 +4825,10 @@ function chinaDateTimeParts(value = Date.now()) {
 
 function currentChinaDateTimeParts() {
   return chinaDateTimeParts(Date.now());
+}
+
+function chinaWeekday(clock) {
+  return new Date(`${clock.date}T00:00:00Z`).getUTCDay();
 }
 
 function normalizeAuctionDate(value) {
@@ -4983,7 +4975,7 @@ function scheduleAuctionSampler(delayMs = 30000) {
       auctionSamplerRunning = true;
       try {
         const clock = currentChinaDateTimeParts();
-        const weekday = new Date().getDay();
+        const weekday = chinaWeekday(clock);
         const isWeekday = weekday >= 1 && weekday <= 5;
         const phase = isWeekday ? auctionClockPhase(clock.time) : "closed";
         if (phase === "collecting") {
@@ -5244,36 +5236,6 @@ async function openTdxCode(code) {
     throw new Error(`通达信返回错误：${errorId}`);
   }
   return result;
-}
-
-function execFileAsync(file, args, options) {
-  return new Promise((resolve, reject) => {
-    execFile(file, args, options, (error, stdout, stderr) => {
-      if (error) {
-        const detail = String(stderr || stdout || error.message || "").trim();
-        reject(new Error(detail || error.message));
-        return;
-      }
-      resolve({ stdout, stderr });
-    });
-  });
-}
-
-function parseLastJsonObject(output) {
-  const text = String(output || "").trim();
-  if (!text) return {};
-  try {
-    return JSON.parse(text);
-  } catch {
-    const start = text.indexOf("{");
-    const end = text.lastIndexOf("}");
-    if (start < 0 || end <= start) return {};
-    try {
-      return JSON.parse(text.slice(start, end + 1));
-    } catch {
-      return {};
-    }
-  }
 }
 
 function latestDatedRows(rows, getDateKey) {
@@ -5580,290 +5542,6 @@ function addLocalSearchStock(stockBySecid, name, secid, market, type) {
     market: market || marketNameForSecid(secid),
     type: type || typeForSecid(secid),
   });
-}
-
-function codeFromInput(input) {
-  return String(input || "")
-    .trim()
-    .replace(/^[a-z]+/i, "")
-    .split(".")
-    .pop()
-    .replace(/\D/g, "");
-}
-
-function marketNameForCode(code) {
-  if (isConvertibleBondCode(code)) return "转债";
-  if (code.startsWith("688")) return "科创板";
-  if (code.startsWith("300") || code.startsWith("301")) return "创业板";
-  if (code.startsWith("8") || code.startsWith("9")) return "北交所";
-  if (code.startsWith("6")) return "沪A";
-  return "深A";
-}
-
-function marketNameForSecid(secid) {
-  if (isHongKongSecid(secid)) return "港股";
-  const code = String(secid || "").split(".").pop() || "";
-  if (isFundCode(code)) return "ETF";
-  return marketNameForCode(code);
-}
-
-function typeForSecid(secid) {
-  const code = String(secid || "").split(".").pop() || "";
-  if (isHongKongSecid(secid)) return "HKStock";
-  if (isConvertibleBondCode(code)) return "Bond";
-  if (isFundCode(code)) return "Fund";
-  return "AStock";
-}
-
-function isSupportedSecid(secid) {
-  return /^[01]\.\d{6}$/.test(secid) || isHongKongSecid(secid);
-}
-
-function isHongKongSecid(secid) {
-  return /^116\.\d{5}$/.test(String(secid || ""));
-}
-
-function isFundCode(code) {
-  return /^(15|16|50|51|52|56|58)\d{4}$/.test(String(code || ""));
-}
-
-function isConvertibleBondCode(code) {
-  return /^(110|111|113|118|123|127|128)\d{3}$/.test(code);
-}
-
-function secidToSinaSymbol(secid) {
-  const [market, code] = secid.split(".");
-  if (!code) return secid;
-  if (market === "116") return `rt_hk${code.padStart(5, "0")}`;
-  if (market === "1") return `sh${code}`;
-  if (code.startsWith("8") || code.startsWith("9")) return `bj${code}`;
-  return `sz${code}`;
-}
-
-function secidToTencentSymbol(secid) {
-  const [market, code] = secid.split(".");
-  if (!code) return secid;
-  if (market === "116") return `hk${code.padStart(5, "0")}`;
-  return secidToSinaSymbol(secid);
-}
-
-function normalizeSecidInput(value) {
-  const text = String(value || "").trim();
-  if (!text) return "";
-
-  const hkPrefixed = text.replace(/^rt_hk/i, "116.").replace(/^hk/i, "116.");
-  if (/^116\.\d{1,5}$/.test(hkPrefixed)) {
-    const code = hkPrefixed.split(".")[1].padStart(5, "0");
-    return `116.${code}`;
-  }
-  if (/^\d{5}$/.test(hkPrefixed)) return `116.${hkPrefixed}`;
-
-  const prefixed = hkPrefixed.replace(/^sh/i, "1.").replace(/^(sz|bj)/i, "0.");
-  if (/^[01]\.\d{6}$/.test(prefixed)) return prefixed;
-  if (/^\d{6}$/.test(prefixed)) return `${marketFromCode(prefixed)}.${prefixed}`;
-  return prefixed;
-}
-
-function normalizeTagSecid(value) {
-  const text = String(value || "").trim();
-  const suffixMatch = text.match(/^(\d{6})\.(SH|SZ)$/i);
-  if (suffixMatch) {
-    return `${suffixMatch[2].toUpperCase() === "SH" ? "1" : "0"}.${suffixMatch[1]}`;
-  }
-  return normalizeSecidInput(text);
-}
-
-function secidToMiniQmtMarketCode(secid) {
-  const normalized = normalizeSecidInput(secid);
-  const match = normalized.match(/^([01])\.(\d{6})$/);
-  if (!match || /^[89]/.test(match[2])) return "";
-  return `${match[2]}.${match[1] === "1" ? "SH" : "SZ"}`;
-}
-
-function marketFromCode(code) {
-  if (/^(5|6|110|111|113|118)/.test(code)) return "1";
-  return "0";
-}
-
-function chunk(items, size) {
-  const chunks = [];
-  for (let index = 0; index < items.length; index += size) {
-    chunks.push(items.slice(index, index + size));
-  }
-  return chunks;
-}
-
-function fetchText(options, encoding = "utf8") {
-  return new Promise((resolve, reject) => {
-    const req = https.get(options, (res) => {
-      const chunks = [];
-      res.on("data", (chunk) => chunks.push(chunk));
-      res.on("end", () => {
-        if (res.statusCode && res.statusCode >= 400) {
-          reject(new Error(`HTTP ${res.statusCode}`));
-          return;
-        }
-
-        resolve(Buffer.concat(chunks).toString(encoding));
-      });
-    });
-
-    if (options.timeout) {
-      req.setTimeout(options.timeout);
-    }
-    req.on("timeout", () => {
-      req.destroy(new Error("request timeout"));
-    });
-    req.on("error", reject);
-  });
-}
-
-function withTimeout(promise, timeoutMs) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`operation timeout after ${timeoutMs}ms`)), timeoutMs),
-    ),
-  ]);
-}
-
-async function mapWithConcurrency(items, limit, mapper) {
-  const results = new Array(items.length);
-  let nextIndex = 0;
-
-  async function worker() {
-    while (nextIndex < items.length) {
-      const currentIndex = nextIndex;
-      nextIndex += 1;
-      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
-    }
-  }
-
-  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
-  await Promise.all(workers);
-  return results;
-}
-
-function readJsonBody(request, limitBytes = 2 * 1024 * 1024) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    let size = 0;
-
-    request.on("data", (chunk) => {
-      size += chunk.length;
-      if (size > limitBytes) {
-        request.destroy(new Error("request body too large"));
-        return;
-      }
-      chunks.push(chunk);
-    });
-    request.on("end", () => {
-      try {
-        const raw = Buffer.concat(chunks).toString("utf8");
-        resolve(raw.trim() ? JSON.parse(raw) : {});
-      } catch (error) {
-        reject(error);
-      }
-    });
-    request.on("error", reject);
-  });
-}
-
-function normalizeBoardState(raw) {
-  const sectors = normalizeBoardSectors(raw?.sectors);
-  const sectorNames = new Set(sectors.map((sector) => sector.name));
-  const stackGroups = Array.isArray(raw?.stackGroups)
-    ? raw.stackGroups
-        .map((group) => {
-          const names = uniqueStrings(group?.sectorNames).filter((name) => sectorNames.has(name));
-          return {
-            name: String(group?.name || "").trim(),
-            sectorNames: names,
-            expandedSectorNames: uniqueStrings(group?.expandedSectorNames).filter((name) =>
-              names.includes(name),
-            ),
-          };
-        })
-        .filter((group) => group.name)
-    : [];
-
-  return {
-    version: String(raw?.version || "server-state-v1"),
-    updatedAt: new Date().toISOString(),
-    sectors,
-    stackGroups,
-  };
-}
-
-function normalizeBoardSectors(sectors) {
-  if (!Array.isArray(sectors)) return [];
-
-  return sectors
-    .map((sector) => ({
-      name: String(sector?.name || "").trim(),
-      stocks: Array.isArray(sector?.stocks)
-        ? sector.stocks
-            .map((stock) => ({
-              name: String(stock?.name || "").trim(),
-              secid: normalizeSecidInput(stock?.secid),
-            }))
-            .filter((stock) => stock.name && stock.secid)
-        : [],
-    }))
-    .filter((sector) => sector.name);
-}
-
-function uniqueStrings(values) {
-  if (!Array.isArray(values)) return [];
-
-  const seen = new Set();
-  return values
-    .map((value) => String(value || "").trim())
-    .filter((value) => {
-      if (!value || seen.has(value)) return false;
-      seen.add(value);
-      return true;
-    });
-}
-
-function serveStatic(pathname, response) {
-  return new Promise((resolve, reject) => {
-    const cleanPath = pathname === "/" ? "/index.html" : pathname;
-    const filePath = path.normalize(path.join(ROOT, cleanPath));
-
-    if (!filePath.startsWith(ROOT)) {
-      response.writeHead(403);
-      response.end("Forbidden");
-      resolve();
-      return;
-    }
-
-    fs.readFile(filePath, (error, content) => {
-      if (error) {
-        response.writeHead(error.code === "ENOENT" ? 404 : 500, {
-          "Content-Type": "text/plain; charset=utf-8",
-        });
-        response.end(error.code === "ENOENT" ? "Not found" : "Server error");
-        resolve();
-        return;
-      }
-
-      response.writeHead(200, {
-        "Content-Type": MIME_TYPES[path.extname(filePath)] || "application/octet-stream",
-        "Cache-Control": "no-store",
-      });
-      response.end(content);
-      resolve();
-    });
-  });
-}
-
-function sendJson(response, status, payload) {
-  response.writeHead(status, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store",
-  });
-  response.end(JSON.stringify(payload));
 }
 
 module.exports = {

@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Fast checks on staged files. Full validation stays in scripts/verify.sh.
+
+set -euo pipefail
+
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+MAX_FILE_BYTES="${MAX_COMMIT_FILE_BYTES:-$((5 * 1024 * 1024))}"
+status=0
+
+git diff --cached --check || status=1
+
+js_files=()
+py_files=()
+while IFS= read -r -d '' file; do
+  case "$file" in
+    data/board-state.json)
+      if [[ "${ALLOW_BOARD_STATE_COMMIT:-0}" != "1" ]]; then
+        echo "data/board-state.json is user board state; set ALLOW_BOARD_STATE_COMMIT=1 to publish it as the shared default." >&2
+        status=1
+      fi
+      ;;
+    runtime/* | tmp/* | outputs/* | .playwright-mcp/* | .specstory/* | *.log | .env | .env.* | *.sqlite3)
+      echo "Refusing to commit local runtime artifact: $file" >&2
+      status=1
+      ;;
+  esac
+
+  if [[ -f "$file" ]]; then
+    size="$(wc -c < "$file" | tr -d ' ')"
+    if (( size > MAX_FILE_BYTES )); then
+      echo "File exceeds $((MAX_FILE_BYTES / 1024 / 1024)) MB: $file" >&2
+      status=1
+    fi
+    case "$file" in
+      *.js | *.cjs) js_files+=("$file") ;;
+      *.py) py_files+=("$file") ;;
+    esac
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+for file in ${js_files[@]+"${js_files[@]}"}; do
+  node --check "$file" || status=1
+done
+
+if (( ${#py_files[@]} > 0 )); then
+  "$PYTHON_BIN" - "${py_files[@]}" <<'PY' || status=1
+import sys
+
+failed = False
+for path in sys.argv[1:]:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            compile(handle.read(), path, "exec")
+    except SyntaxError as error:
+        print(f"{path}:{error.lineno}: {error.msg}", file=sys.stderr)
+        failed = True
+sys.exit(1 if failed else 0)
+PY
+fi
+
+exit "$status"

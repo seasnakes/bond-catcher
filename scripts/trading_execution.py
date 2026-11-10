@@ -16,6 +16,9 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
+from zoneinfo import ZoneInfo
+
+CHINA_TIME_ZONE = ZoneInfo("Asia/Shanghai")
 
 
 UNLOCK_PHRASE = "开启实盘交易"
@@ -451,7 +454,7 @@ class TradingGuard:
         }
 
     def _require_execution_window(self) -> None:
-        moment = datetime.fromtimestamp(self.clock())
+        moment = datetime.fromtimestamp(self.clock(), CHINA_TIME_ZONE)
         if moment.weekday() >= 5:
             raise TradingError("非交易日禁止提交实盘委托", 409)
         minute = moment.hour * 60 + moment.minute

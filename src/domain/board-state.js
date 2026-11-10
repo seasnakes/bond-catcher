@@ -1,5 +1,64 @@
 "use strict";
 
+const { normalizeSecidInput } = require("./secid.js");
+
+function uniqueStrings(values) {
+  if (!Array.isArray(values)) return [];
+
+  const seen = new Set();
+  return values
+    .map((value) => String(value || "").trim())
+    .filter((value) => {
+      if (!value || seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    });
+}
+
+function normalizeBoardSectors(sectors) {
+  if (!Array.isArray(sectors)) return [];
+
+  return sectors
+    .map((sector) => ({
+      name: String(sector?.name || "").trim(),
+      stocks: Array.isArray(sector?.stocks)
+        ? sector.stocks
+            .map((stock) => ({
+              name: String(stock?.name || "").trim(),
+              secid: normalizeSecidInput(stock?.secid),
+            }))
+            .filter((stock) => stock.name && stock.secid)
+        : [],
+    }))
+    .filter((sector) => sector.name);
+}
+
+function normalizeBoardState(raw) {
+  const sectors = normalizeBoardSectors(raw?.sectors);
+  const sectorNames = new Set(sectors.map((sector) => sector.name));
+  const stackGroups = Array.isArray(raw?.stackGroups)
+    ? raw.stackGroups
+        .map((group) => {
+          const names = uniqueStrings(group?.sectorNames).filter((name) => sectorNames.has(name));
+          return {
+            name: String(group?.name || "").trim(),
+            sectorNames: names,
+            expandedSectorNames: uniqueStrings(group?.expandedSectorNames).filter((name) =>
+              names.includes(name),
+            ),
+          };
+        })
+        .filter((group) => group.name)
+    : [];
+
+  return {
+    version: String(raw?.version || "server-state-v1"),
+    updatedAt: new Date().toISOString(),
+    sectors,
+    stackGroups,
+  };
+}
+
 function uniqueStocks(stocks) {
   const seen = new Set();
   const result = [];
@@ -79,7 +138,10 @@ function verifyBoardSelection(state, plan) {
 }
 
 module.exports = {
+  normalizeBoardSectors,
+  normalizeBoardState,
   planBoardSelectionImport,
   uniqueStocks,
+  uniqueStrings,
   verifyBoardSelection,
 };
