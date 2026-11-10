@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>转债 AI 分析 · Finance Board</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="./bond-ai.css" />
+  <script src="./cb-ai-render.js" defer></script>
+  <script src="./bond-ai.js" defer></script>
+</head>
+<body>
+  <main class="ai-shell">
+    <header class="topbar">
+      <div class="nav-links"><a href="./">← 返回看板</a><span class="nav-divider"></span><span>FINANCE BOARD / RESEARCH</span></div>
+      <span id="providerStatus" class="provider-pill">正在检查 Codex…</span>
+    </header>
+    <section class="page-intro">
+      <div><span class="eyebrow">可转债 · 数据与节点反馈</span><h1>转债 AI 分析<span class="version-tag">研究版</span></h1>
+        <p>从日线位置到分时反馈，结合正股与条款，理解每一个关键节点。</p></div>
+      <button id="rulesButton" class="quiet-button" type="button">查看分析规则 ↗</button>
+    </section>
+
+    <form id="contextForm" class="query-bar">
+      <label class="code-control"><span>选择转债</span><input id="codeInput" name="code" type="search" autocomplete="off" list="bondSuggestions" placeholder="名称 / 代码，例如 万凯转债" required /><datalist id="bondSuggestions"></datalist></label>
+      <label><span>分析日期</span><input id="dateInput" type="date" title="留空使用最近有数据的交易日" /></label>
+      <label><span>分时范围</span><select id="daysInput"><option value="1">最近 1 日</option><option value="2">最近 2 日</option><option value="3">最近 3 日</option><option value="4">最近 4 日</option><option value="5" selected>最近 5 日</option></select></label>
+      <button id="loadButton" class="secondary-button" type="submit">更新分析数据</button>
+    </form>
+    <p id="pageStatus" class="page-status" role="status" aria-live="polite">读取现有行情，不会自动生成报告。</p>
+
+    <section id="snapshotPanel" hidden>
+      <div id="redeemAlert" class="redeem-alert" hidden></div>
+      <div class="snapshot-heading">
+        <div class="instrument"><h2 id="instrumentName">—</h2><span id="instrumentCode"></span><strong id="instrumentPrice">—</strong><span id="quoteChange"></span></div>
+        <a id="detailLink" href="./bond.html">完整日 K / 分时 ↗</a>
+      </div>
+      <div id="snapshotStamp" class="snapshot-stamp"></div>
+      <div id="referenceCards" class="reference-cards"></div>
+      <div class="chart-grid">
+        <article class="chart-card"><div class="card-title"><h3>日 K 结构 <small>近 60 根</small></h3><div class="chart-legend"><span class="gold">MA5</span><span class="purple">MA10</span></div></div><canvas id="dailyChart" aria-label="转债日K、MA5与MA10" role="img"></canvas><p id="dailyHint" class="chart-hint">鼠标移入查看价格与均线</p></article>
+        <article class="chart-card"><div class="card-title"><h3>近几日分时 <small id="intradayRange"></small></h3><div class="chart-legend"><span>价格</span><span class="gold">均价≈</span><span class="purple">紫线</span></div></div><canvas id="intradayChart" aria-label="转债近几日分时价格、近似均价与紫线" role="img"></canvas><p id="intradayHint" class="chart-hint">缺失分钟保留断点，不补造价格</p></article>
+      </div>
+    </section>
+
+    <div class="research-grid">
+      <section class="report-card">
+        <div class="report-controls">
+          <div class="card-title"><h2>分析报告</h2><span class="muted">按本次数据生成</span></div>
+          <label class="focus-label" for="focusInput">你更关注什么？<span>选填</span></label>
+          <textarea id="focusInput" maxlength="2000" rows="2" placeholder="例如：现在是否站稳支撑？突破压力还需要哪些确认？正股与转债有没有背离？"></textarea>
+          <div class="focus-chips"><button type="button" data-focus="重点分析支撑附近的企稳、回踩收回和失效条件。">支撑是否站稳</button><button type="button" data-focus="重点分析压力突破是否有成交额与后续守住的确认，列出假突破的反证。">突破还是试探</button><button type="button" data-focus="重点分析近几日分时延续或转弱，以及正股联动、估值与强赎风险。">多日强弱与风险</button></div>
+          <div class="generate-row"><button id="generateButton" class="primary-button" type="button" disabled>生成转债分析 <span>↗</span></button><button id="cancelButton" class="quiet-button" type="button" hidden>取消分析</button><span id="generationHint" class="muted">先读取数据，再生成报告</span></div>
+        </div>
+        <div id="jobProgress" class="job-progress" role="status" aria-live="polite" hidden><span class="pulse-dot"></span><div><strong id="jobStage"></strong><p id="jobElapsed"></p></div></div>
+        <div id="reportToolbar" class="report-toolbar" hidden><span id="reportStamp"></span><div><button id="copyButton" type="button">复制</button><button id="downloadButton" type="button">下载报告</button><button id="snapshotButton" type="button">保存数据快照</button></div></div>
+        <article id="reportContent" class="markdown-report" aria-live="polite"></article>
+        <div id="reportEmpty" class="report-empty"><div class="empty-icon">✦</div><h3>先看数据，再看判断</h3><p>报告会解释关键价位、近几日分时、股债联动与条款风险，<br />并列出延续、突破和失效三种情景。</p><div class="empty-steps"><span>01 行情事实</span><span>02 节点反馈</span><span>03 条件情景</span></div></div>
+      </section>
+
+      <aside class="research-sidebar">
+        <section class="side-card"><div class="card-title"><h3>本次数据依据</h3><span id="qualityBadge" class="small-badge">待载入</span></div><div id="coverageSummary" class="coverage-summary">选择一只转债，查看实际数据覆盖。</div><details id="qualityDetails"><summary>查看缺失与口径说明</summary><ul id="qualityWarnings"></ul></details><div id="valuationSummary" class="valuation-summary"></div></section>
+        <section class="side-card"><div class="card-title"><h3>节点反馈</h3><span class="muted">已完成分钟</span></div><div id="nodeObservations" class="node-observations">尚未读取分时数据。</div><p class="footnote">程序观察条件用于辅助解释，不能单独证明战法有效。</p></section>
+        <section class="side-card"><div class="card-title"><h3>理论参考</h3><span class="small-badge">可追溯</span></div><div id="theorySources" class="theory-sources"></div></section>
+        <section class="side-card"><div class="card-title"><h3>历史报告</h3><button id="refreshHistoryButton" class="inline-button" type="button">刷新</button></div><div id="historyList" class="history-list">正在读取…</div><p class="footnote">保留最近 50 份记录，包含生成时的数据快照。</p></section>
+      </aside>
+    </div>
+    <footer class="page-footer">报告为生成时的研究快照 · 数据缺失会明确说明 · 本文不构成投资建议</footer>
+  </main>
+  <dialog id="rulesDialog"><div class="dialog-title"><h2>分析规则与完整输入</h2><button id="closeRulesButton" class="quiet-button" type="button" aria-label="关闭分析规则">关闭</button></div><p>规则与理论摘要可以核对；“完整输入”还包含本次行情和关注点。</p><div class="dialog-tabs"><button id="systemTab" class="secondary-button" type="button">分析规则</button><button id="fullPromptTab" class="quiet-button" type="button">完整输入</button><button id="downloadPromptButton" class="quiet-button" type="button">下载输入</button></div><textarea id="promptText" readonly aria-label="发送给模型的提示词"></textarea></dialog>
+</body>
+</html>
