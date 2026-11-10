@@ -13,7 +13,7 @@ while IFS= read -r -d '' file; do
   node --check "$file"
 done < <(
   find "$REPO_ROOT" -maxdepth 1 -type f -name '*.js' -print0
-  find "$REPO_ROOT/src" "$REPO_ROOT/scripts" "$REPO_ROOT/tests" \
+  find "$REPO_ROOT/src" "$REPO_ROOT/lib" "$REPO_ROOT/scripts" "$REPO_ROOT/tests" \
     -type f -name '*.js' -print0
 )
 
@@ -54,7 +54,8 @@ for _ in $(seq 1 30); do
   sleep 0.2
 done
 
-for endpoint in / /tdx-formulas.html /api/state /api/indices /api/tdx-formula-selections; do
+for endpoint in / /quant.html /tdx-formulas.html /api/state /api/indices \
+  /api/tdx-formula-selections /api/cb-quant/strategies /api/cb-quant/paper; do
   if ! curl --noproxy '*' --max-time 25 --silent --fail \
     "http://127.0.0.1:${VERIFY_PORT}${endpoint}" >/dev/null; then
     sed -n '1,240p' "$SERVER_LOG"

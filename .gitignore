@@ -11,3 +11,9 @@ runtime/
 .playwright-mcp/
 outputs/
 tmp/
+.venv/
+.runtime/
+windows.local.json
+windows.gateway.env
+monitor/runtime/
+monitor/smoke-runtime/
