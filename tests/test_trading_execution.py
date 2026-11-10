@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -156,6 +158,22 @@ class TradingGuardTest(unittest.TestCase):
                 self.bridge.get,
                 self.bridge.post,
             )
+
+    def test_execution_window_uses_beijing_time_on_any_host(self):
+        previous = os.environ.get("TZ")
+        try:
+            os.environ["TZ"] = "UTC"
+            time.tzset()
+            self.guard._require_execution_window()
+            self.now += 8 * 3600  # 18:00 Beijing, which is 10:00 in UTC
+            with self.assertRaises(TradingError):
+                self.guard._require_execution_window()
+        finally:
+            if previous is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = previous
+            time.tzset()
 
     def test_wrong_unlock_phrase_is_rejected(self):
         with self.assertRaises(TradingError):
