@@ -54,6 +54,7 @@ lsof -nP -iTCP:5173 -sTCP:LISTEN
 
 ## GitHub
 
-- Remote: `https://github.com/seasnakes/finance-board.git`
+- Remote: `https://github.com/seasnakes/bond-catcher.git` (`origin`); the archived
+  `seasnakes/finance-board` stays read-only as `legacy`.
 - Default branch: `main`
 - When publishing changes, stage explicit paths so unrelated local edits are not included accidentally.
