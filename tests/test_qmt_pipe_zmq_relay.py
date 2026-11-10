@@ -7,7 +7,10 @@ from pathlib import Path
 SOURCE = Path(__file__).parents[1] / "scripts/qmt_pipe_zmq_relay.py"
 SPEC = importlib.util.spec_from_file_location("qmt_pipe_zmq_relay_test", SOURCE)
 RELAY = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(RELAY)
+try:
+    SPEC.loader.exec_module(RELAY)
+except ImportError as error:
+    raise unittest.SkipTest(f"Big QMT ZMQ package is not installed: {error}")
 
 
 class Pipe:
