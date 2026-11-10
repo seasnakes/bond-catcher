@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "小王子消息观察器",
+  "version": "1.2.2",
+  "description": "仅读取当前打开页面已显示的益聊或 MX 消息，存档至本机。",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2xGzzZowLqBm9XaPWKchh8LDx4bPQRZ294ZNK4A3pe9pkYceHgQKUF8pNTqwBvac50+MMIzFBKKUKmzrx8R1IyVKczYoehGhVHzEfoN5WBEpfrJA+MgYu8Wo8YpSYXORxjYjCypd8lGLD6C+2Vr7a4vW7ddQ0xdxEW9zsFp4BAo18W6eiZ/6S1PB/8GudWekJFktLOxLQ/zNCULfC5+KmIzahtwOIcTrlT+iJssy0BWbeVRnAlcRn/xsnxuz+AEli0U4xunc9ClUmyi3xW8PlVmAFOomrTjAH8w8P6PR9bccCjkfb1SS5Xc/Qd2J9KBgFgHSO5BOHOXb4qiqXiR/9wIDAQAB",
+  "permissions": [],
+  "host_permissions": ["http://127.0.0.1/*", "http://103.120.91.153/*", "https://mx.2026.naaifu.cn/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "查看小王子消息存档"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://103.120.91.153/*"
+      ],
+      "js": [
+        "collector.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://mx.2026.naaifu.cn/*"],
+      "js": ["collector.js", "news-collector.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

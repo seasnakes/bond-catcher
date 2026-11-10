@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "properties": {
+    "source_id": {"type": "string"},
+    "kind": {"type": "string", "enum": ["news", "research", "commentary", "promotion"]},
+    "headline": {"type": "string"},
+    "summary": {"type": "string"},
+    "key_facts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "fact": {"type": "string"},
+          "evidence": {"type": "string"}
+        },
+        "required": ["fact", "evidence"],
+        "additionalProperties": false
+      }
+    },
+    "mentioned_assets": {"type": "array", "items": {"type": "string"}},
+    "source_caveat": {"type": "string"},
+    "needs_review": {"type": "boolean"}
+  },
+  "required": ["source_id", "kind", "headline", "summary", "key_facts", "mentioned_assets", "source_caveat", "needs_review"],
+  "additionalProperties": false
+}
