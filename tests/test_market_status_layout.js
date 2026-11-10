@@ -16,20 +16,59 @@ function helperSource() {
 const context = vm.createContext({});
 vm.runInContext(helperSource(), context);
 
-test("MiniQMT coverage details stay in the tooltip instead of changing header width", () => {
+test("QMT coverage details stay in the tooltip instead of changing header width", () => {
   assert.equal(
     context.compactMarketStatusSource(
-      "MiniQMT实时 574/575 · 港股6只/北交所2只未接入",
+      "QMT实时 574/575 · 港股6只/北交所2只未接入",
     ),
-    "MiniQMT 574/575",
+    "QMT 574/575",
   );
   assert.equal(
-    context.compactMarketStatusSource("MiniQMT实时 139/140"),
-    "MiniQMT 139/140",
+    context.compactMarketStatusSource("QMT实时 139/140"),
+    "QMT 139/140",
   );
 });
 
-test("non-MiniQMT status messages remain visible", () => {
-  assert.equal(context.compactMarketStatusSource("MiniQMT行情不可用"), "MiniQMT行情不可用");
+test("market feed badge only recognizes the active Big QMT route", () => {
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(context.marketFeedPresentation(
+      { active: "bigqmt", requested: 140, returned: 139 },
+      "",
+    ))),
+    {
+      icon: "Q",
+      label: "大 QMT",
+      mode: "行情",
+      coverage: "139/140",
+      className: "is-bigqmt",
+    },
+  );
+  const fallback = context.marketFeedPresentation(
+    { active: "miniqmt", fallbackActive: true, requested: 140, returned: 140 },
+    "",
+  );
+  assert.equal(fallback.label, "QMT");
+  assert.equal(fallback.mode, "连接中");
+  assert.equal(fallback.className, "is-unknown");
+});
+
+test("stale big QMT reference metadata is visible without hiding the feed", () => {
+  const stale = context.marketFeedPresentation(
+    {
+      active: "bigqmt",
+      requested: 140,
+      returned: 140,
+      bigQmtReferenceStatus: "stale",
+    },
+    "",
+  );
+  assert.equal(stale.icon, "Q");
+  assert.equal(stale.label, "大 QMT");
+  assert.equal(stale.mode, "行情·昨收修复");
+  assert.equal(stale.className, "is-fallback");
+});
+
+test("non-QMT status messages remain visible", () => {
+  assert.equal(context.compactMarketStatusSource("QMT行情不可用"), "QMT行情不可用");
   assert.equal(context.compactMarketStatusSource(""), "连接中");
 });

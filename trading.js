@@ -425,6 +425,27 @@ function renderPayload(payload) {
   renderTable();
 }
 
+function clearTradingPayload(message) {
+  state.payload = null;
+  for (const id of ["totalAsset", "availableCash", "tradeCount", "buyAmount", "sellAmount", "netBuyAmount"]) {
+    setCard(id, "--");
+  }
+  document.querySelector("#assetAccountCount").textContent = "账户数据不可用";
+  document.querySelector("#marketValue").textContent = "持仓市值 --";
+  document.querySelector("#tradePeriod").textContent = "--";
+  document.querySelector("#buyCaption").textContent = "--";
+  document.querySelector("#sellCaption").textContent = "--";
+  document.querySelector("#orderCaption").textContent = "--";
+  for (const id of ["summaryCount", "tradesCount", "ordersCount", "positionsCount"]) {
+    document.querySelector(`#${id}`).textContent = "0";
+  }
+  document.querySelector("#accountStrip").replaceChildren();
+  tableBody.replaceChildren();
+  table.hidden = true;
+  emptyNode.hidden = false;
+  emptyNode.textContent = message;
+}
+
 function isTradingRefreshWindow(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Shanghai",
@@ -463,11 +484,7 @@ async function refreshTradingData(options = {}) {
     statusNode.textContent = `${payload.source} · ${payload.trading_date} ${time} · ${payload.summary?.connected ? "账户已连接" : "账户连接异常"}`;
   } catch (error) {
     statusNode.textContent = `读取失败：${error.message || "QMT 服务不可用"}`;
-    if (!state.payload) {
-      table.hidden = true;
-      emptyNode.hidden = false;
-      emptyNode.textContent = "暂时无法读取 QMT 实盘数据";
-    }
+    clearTradingPayload("暂时无法读取 QMT 实盘数据，已清除旧账户快照");
   } finally {
     refreshButton.disabled = false;
     scheduleRefresh();

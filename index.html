@@ -57,10 +57,14 @@
             </button>
           </div>
           <nav class="control-group control-group-links" aria-label="转债工具">
+            <a class="text-button heatmap-entry" href="#board-limit-ladder">连板天梯</a>
             <a class="text-button heatmap-entry" href="./active-bond-index.html">活跃转债指数</a>
             <a class="text-button heatmap-entry" href="./tdx-formulas.html">公式选股</a>
             <a class="text-button heatmap-entry" href="./bond-heatmap.html">转债星图</a>
+            <a class="text-button heatmap-entry" href="./new-bond-performance.html">次新债表现</a>
             <a class="text-button heatmap-entry" href="./bond-tags.html">标签管理</a>
+            <a class="text-button heatmap-entry" href="./quant.html">量化实验室</a>
+            <a class="text-button heatmap-entry" href="./bond-ai.html">转债 AI 分析</a>
             <a class="text-button heatmap-entry trading-entry" href="./trading.html">实盘</a>
           </nav>
           <div class="control-group control-group-edit">
@@ -80,13 +84,13 @@
       <details id="tvMarketPanel" class="tv-market-panel" open>
         <summary>
           <strong id="marketPanelTitle">外围分时</strong>
-          <span id="marketPanelSubtitle">TradingView / Yahoo · 延迟行情</span>
+          <span id="marketPanelSubtitle">TradingView / Yahoo</span>
           <button id="bondPreviewReset" class="market-panel-reset" type="button" hidden>返回外围</button>
         </summary>
         <div id="externalMarketGrid" class="tv-market-grid">
           <article class="tv-market-card">
             <header>
-              <strong>纳指100（NQ代理）</strong>
+              <strong title="纳指100（NQ代理）· Capital.com CFD">纳指100（NQ代理）</strong>
               <span>Capital.com CFD</span>
             </header>
             <tv-mini-chart
@@ -97,11 +101,31 @@
           </article>
           <article class="tv-market-card">
             <header>
-              <strong>韩国KOSPI</strong>
+              <strong title="韩国KOSPI · 新浪报价 · Yahoo分时">韩国KOSPI</strong>
               <span>新浪报价 · Yahoo分时</span>
             </header>
             <div id="kospiMarketChart" class="native-market-chart" aria-label="韩国KOSPI当日分时">
               <span class="native-market-loading">正在读取今日KOSPI…</span>
+            </div>
+          </article>
+          <article class="tv-market-card">
+            <header title="布伦特原油 · TradingView UKOIL · 美元/桶">
+              <strong>布油</strong>
+              <span>美元/桶</span>
+            </header>
+            <tv-mini-chart
+              symbol="TVC:UKOIL"
+              theme="light"
+              aria-label="布伦特原油日内走势，美元每桶"
+            ></tv-mini-chart>
+          </article>
+          <article class="tv-market-card">
+            <header title="美国10年期国债收益率 · TradingView 社区接口 · 本站采样走势 · 涨跌单位为基点（bp）">
+              <strong>美国10年期国债收益率</strong>
+              <span>TradingView · %</span>
+            </header>
+            <div id="us10yMarketChart" class="native-market-chart" aria-label="美国10年期国债收益率报价与本站采样，单位百分比">
+              <span class="native-market-loading">正在读取美债收益率…</span>
             </div>
           </article>
         </div>
@@ -109,7 +133,7 @@
           <div id="bondPreviewLoading" class="bond-preview-loading" role="status">
             <span class="bond-preview-loading-mark" aria-hidden="true"></span>
             <strong id="bondPreviewLoadingTitle">正在打开转债分时</strong>
-            <small>正在读取 MiniQMT，价格与图表马上显示</small>
+            <small>正在读取 QMT，价格与图表马上显示</small>
           </div>
           <iframe
             id="bondMarketPreviewFrame"
@@ -135,13 +159,13 @@
       <section
         id="signalMonitor"
         class="signal-monitor"
-        aria-label="MiniQMT主力监控精灵"
+        aria-label="QMT主力监控精灵"
         title="QMT全市场可转债只读监控"
       >
         <header class="signal-monitor-head">
           <div class="signal-monitor-title">
             <span class="signal-live-dot" aria-hidden="true"></span>
-            <strong id="signalMonitorTitle">MiniQMT 主力监控精灵</strong>
+            <strong id="signalMonitorTitle">QMT 主力监控精灵</strong>
             <span id="signalMonitorStatus">正在连接</span>
           </div>
           <div class="signal-monitor-controls">
@@ -189,7 +213,7 @@
           </div>
         </header>
         <div id="signalFeed" class="signal-feed" aria-live="polite">
-          <div class="signal-empty">正在读取MiniQMT盘中信号…</div>
+          <div class="signal-empty">正在读取QMT盘中信号…</div>
         </div>
       </section>
 
@@ -259,7 +283,7 @@
       <iframe
         id="bondOverlayFrame"
         class="bond-overlay-frame"
-        title="MiniQMT可转债分时指标"
+        title="QMT可转债分时指标"
       ></iframe>
     </section>
 

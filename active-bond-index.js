@@ -621,7 +621,7 @@ async function loadLive(manual = false) {
   if (state.loading) return;
   state.loading = true;
   nodes.refresh.disabled = true;
-  if (manual) nodes.status.textContent = "正在刷新 MiniQMT 行情…";
+  if (manual) nodes.status.textContent = "正在刷新 QMT 行情…";
   try {
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), 55_000);
@@ -636,7 +636,7 @@ async function loadLive(manual = false) {
     void loadSparklines();
     if (state.selectedOverlays.size) void loadOverlayIndices(true);
   } catch (error) {
-    nodes.status.textContent = `MiniQMT 行情读取失败：${error.message}`;
+    nodes.status.textContent = `QMT 行情读取失败：${error.message}`;
     nodes.liveDot.classList.remove("is-live");
   } finally {
     state.loading = false;

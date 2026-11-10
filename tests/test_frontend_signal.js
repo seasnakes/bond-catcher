@@ -54,7 +54,7 @@ function signalRefreshContext(state, fetchJson) {
     sourceBetween(
       APP_SOURCE,
       "async function refreshSignalFeed(options = {})",
-      "\nfunction createDemoQuotes",
+      "\nfunction retainQuotesForStocks",
     ),
     context,
   );
@@ -179,7 +179,7 @@ test("health verdict controls live and error states without flagging off-hours",
   vm.runInContext("updateSignalMonitorStatus(payloadArg, healthArg)", context);
   assert.equal(classes.get("is-live"), false);
   assert.equal(classes.get("is-error"), true);
-  assert.match(signalMonitorStatus.textContent, /MiniQMT未返回有效行情/);
+  assert.match(signalMonitorStatus.textContent, /QMT未返回有效行情/);
 
   context.healthArg = {
     ok: true,
@@ -201,6 +201,14 @@ test("health verdict controls live and error states without flagging off-hours",
   assert.equal(classes.get("is-live"), false);
   assert.equal(classes.get("is-error"), false);
   assert.match(signalMonitorStatus.textContent, /非交易时段/);
+  context.healthArg = {
+    ...context.healthArg, reason: "healthy_waiting_for_open",
+    latest_trading_date: "20260812", status_age_seconds: 1,
+  };
+  vm.runInContext("updateSignalMonitorStatus(payloadArg, healthArg)", context);
+  assert.equal(classes.get("is-live"), false);
+  assert.equal(classes.get("is-error"), false);
+  assert.match(signalMonitorStatus.textContent, /监控已就绪.*09:30/);
 });
 
 test("cursor reset replaces old-day rows and carries the cursor date", async () => {
@@ -750,7 +758,7 @@ function panelHistoryBackfillContext(overrides = {}) {
   const context = vm.createContext({
     state,
     isPanel: true,
-    document: { hidden: false },
+    document: { hidden: false, querySelector: () => null },
     requestedCode: "123104",
     URLSearchParams,
     Date,

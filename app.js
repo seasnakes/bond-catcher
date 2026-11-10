@@ -2,6 +2,7 @@ const EASTMONEY_TOKEN = "fa5fd1943c7b386f172d6893dbfba10b";
 const EASTMONEY_FIELDS = "f1,f2,f3,f4,f6,f12,f13,f14,f152";
 const UPDATE_INTERVAL_MS = 15000;
 const INDEX_UPDATE_INTERVAL_MS = 5000;
+const US10Y_UPDATE_INTERVAL_MS = 30_000;
 const AUCTION_UPDATE_INTERVAL_MS = 3000;
 const BOND_UPDATE_INTERVAL_MS = 5000;
 const NEW_BOND_STATUS_INTERVAL_MS = 60_000;
@@ -25,7 +26,7 @@ const MARKET_HEIGHT_DEFAULT = 176;
 const MARKET_HEIGHT_MIN = 120;
 const MARKET_HEIGHT_MAX = 520;
 const SPARKLINE_BATCH_SIZE = 100;
-// MiniQMT full_tick is sampled by the existing quote refresh. Ten seconds
+// QMT full_tick is sampled by the existing quote refresh. Ten seconds
 // matches the live-sample bucket while keeping the spark endpoint read-only.
 const SPARKLINE_REFRESH_MS = 10 * 1000;
 const AUCTION_SERIES_BATCH_SIZE = 120;
@@ -78,9 +79,13 @@ const SIGNAL_EVENT_LABELS = {
 };
 const AUCTION_SIGNAL_LABELS = {
   stock_lead: "正股领先",
-  stock_watch: "正股放量",
-  paired_confirmed: "联动确认",
-  bond_spike: "转债放量",
+  stock_watch: "正股金额突出",
+  paired_confirmed: "股债量价同步",
+  bond_spike: "转债金额突出",
+  price_paired: "股债价格走强",
+  price_stock_lead: "正股价格领先",
+  price_bond: "转债价格走强",
+  price_fading: "竞价走弱",
 };
 // Kept as a broad starter-pool reference; the active default is rebuilt from the screenshot text below.
 const LEGACY_DEFAULT_SECTORS = [
@@ -802,6 +807,8 @@ const state = {
   sectors: initialSectors,
   stackGroups: loadStackGroups(initialSectors),
   quotes: new Map(),
+  quoteCacheNote: "",
+  marketSwitching: false,
   hydrated: [],
   indices: [],
   sparklines: new Map(),
@@ -814,6 +821,24 @@ const state = {
   auctionLastFetchAt: 0,
   auctionPresentationActive: null,
   source: "连接中",
+  marketFeed: {
+    active: "unknown",
+    configured: "unknown",
+    fallbackActive: false,
+    switchCount: 0,
+    transport: "",
+    previousCloseReference: "",
+    previousCloseAuditReference: "",
+    previousCloseValidatedCodes: 0,
+    previousCloseNativeCodes: 0,
+    previousCloseMismatchedCodes: 0,
+    previousCloseCorrectedCodes: 0,
+    previousCloseValidationError: "",
+    previousCloseAuditPending: 0,
+    previousCloseBackfillPending: 0,
+    requested: 0,
+    returned: 0,
+  },
   lastUpdated: null,
   loading: false,
   quoteRequestId: 0,
@@ -836,6 +861,9 @@ const state = {
   nextIndexRefreshAt: Date.now() + INDEX_UPDATE_INTERVAL_MS,
   mainRefreshTimer: 0,
   indexRefreshTimer: 0,
+  us10yQuote: null,
+  us10yLoading: false,
+  us10yError: false,
   bondRefreshTimer: 0,
   signalEvents: [],
   signalMode: "intraday",
@@ -843,6 +871,7 @@ const state = {
   auctionSignalDate: "",
   auctionSignalPayload: null,
   auctionSignalSignature: "",
+  auctionAutoSwitchDate: "",
   auctionSignalNewIds: new Set(),
   signalSparklines: new Map(),
   signalSparkPending: new Set(),
@@ -878,6 +907,8 @@ const state = {
   boardRenderPending: false,
 };
 let serverPersistTimer = 0;
+let boardPersistInFlight = 0;
+let boardPersistFailed = false;
 let temporaryStatusTimer = 0;
 let marketResizeTimer = 0;
 let marketResizePointerId = null;
@@ -898,6 +929,7 @@ const themeTagFilters = document.querySelector("#themeTagFilters");
 const statusNode = document.querySelector("#marketStatus");
 const globalIndicesNode = document.querySelector("#globalIndices");
 const kospiMarketChart = document.querySelector("#kospiMarketChart");
+const us10yMarketChart = document.querySelector("#us10yMarketChart");
 const marketMonitorRow = document.querySelector(".market-monitor-row");
 const marketMonitorResizer = document.querySelector("#marketMonitorResizer");
 const marketMonitorHeightResizer = document.querySelector("#marketMonitorHeightResizer");
@@ -1118,7 +1150,7 @@ function showBondMarketPreview(url) {
   const currentUrl = bondMarketPreviewFrame.getAttribute("src") || "";
   const canReuse = currentUrl === previewUrl && loadedUrl === previewUrl;
   bondPreviewLoadingTitle.textContent = `${name} ${code}`;
-  bondPreviewLoadingHint.textContent = "正在读取 MiniQMT，价格与图表马上显示";
+  bondPreviewLoadingHint.textContent = "正在读取 QMT，价格与图表马上显示";
   bondPreviewLoading.hidden = canReuse;
   bondMarketPreviewFrame.dataset.requestedUrl = previewUrl;
   if (!canReuse) {
@@ -1139,7 +1171,7 @@ function showExternalMarkets() {
   state.bondPreviewCode = "";
   state.bondPreviewUrl = "";
   marketPanelTitle.textContent = "外围分时";
-  marketPanelSubtitle.textContent = "TradingView / Yahoo · 延迟行情";
+  marketPanelSubtitle.textContent = "TradingView / Yahoo";
   externalMarketGrid.hidden = false;
   bondMarketPreview.hidden = true;
   bondPreviewLoading.hidden = true;
@@ -1464,7 +1496,7 @@ function loadStackGroups(sectors) {
   return [];
 }
 
-async function loadServerBoardState() {
+async function loadServerBoardState({ background = false } = {}) {
   try {
     const json = await fetchJson("/api/state", 4000);
     if (!json?.exists) return false;
@@ -1473,15 +1505,60 @@ async function loadServerBoardState() {
     if (sectors.length === 0) return false;
 
     const stackGroups = normalizeStackGroups(json.stackGroups, sectors);
+    if (background && (state.editMode || serverPersistTimer || boardPersistInFlight || boardPersistFailed)) return false;
     state.sectors = sectors;
     state.stackGroups = stackGroups;
     state.boardStateUpdatedAt = json.updatedAt || "";
+    state.limitLadder = json.limitLadder || null;
     writeLocalBoardState(sectors, stackGroups);
     return true;
   } catch (error) {
     console.warn("Server board state unavailable, using browser/local defaults.", error);
     return false;
   }
+}
+
+async function refreshBoardLadderState() {
+  if (document.hidden) return;
+  try {
+    const json = await fetchJson("/api/limit-ladder/board", 4000);
+    const previous = JSON.stringify(state.limitLadder);
+    state.limitLadder = json;
+    if (json.boardUpdatedAt && json.boardUpdatedAt !== state.boardStateUpdatedAt
+        && !state.editMode && !serverPersistTimer && !boardPersistInFlight && !boardPersistFailed) {
+      if (await loadServerBoardState({ background: true })) {
+        retainQuotesForStocks(getAllStocks(state.sectors));
+        state.hydrated = hydrateSectors(state.quotes);
+        render();
+        void refreshQuotes({ force: true });
+      }
+    } else if (previous !== JSON.stringify(json)) {
+      updateLadderCaption();
+    }
+  } catch (error) {
+    if (state.limitLadder) state.limitLadder = { ...state.limitLadder, lastError: "自动归组状态暂不可用" };
+    updateLadderCaption();
+    console.warn("Board ladder status unavailable.", error);
+  }
+}
+
+function ladderCaption() {
+  const status = state.limitLadder;
+  if (!status?.ready) return "连板池准备中";
+  const date = status.baseDate.slice(5).replace("-", "/");
+  const phase = status.grouping === "today" ? status.phase === "close" ? "收盘" : "盘中" : "底表";
+  const updated = status.grouping === "today" && status.fetchedAt
+    ? new Date(status.fetchedAt).toLocaleTimeString("zh-CN", { timeZone: "Asia/Shanghai", hour: "2-digit", minute: "2-digit", hour12: false })
+    : "每日自动";
+  return `${date} ${phase} · ${status.count}只 · ${status.stale || status.lastError ? "更新待重试" : status.coveragePending ? "北交待核" : status.fallback ? "备用源" : updated}`;
+}
+
+function updateLadderCaption() {
+  const caption = document.getElementById("boardLadderCaption");
+  if (!caption) return;
+  caption.textContent = ladderCaption();
+  caption.classList.toggle("is-stale", Boolean(state.limitLadder?.stale || state.limitLadder?.lastError || state.limitLadder?.coveragePending));
+  caption.title = `${state.limitLadder?.source || "同花顺 Agent 涨停池"}：${state.limitLadder?.scope || ""}。${state.limitLadder?.grouping === "today" ? "按当日涨停池连板数归组，每分钟更新；盘中封板可能打开。" : "按上一交易日底表归组。"}当前价格与竞价复用主看板行情。${state.limitLadder?.lastError || state.limitLadder?.sourceWarning || ""}`;
 }
 
 async function refreshNewBondSecondDayState() {
@@ -1493,11 +1570,11 @@ async function refreshNewBondSecondDayState() {
       && json.boardUpdatedAt !== state.boardStateUpdatedAt,
     );
     state.newBondStatus = json;
-    if (boardChanged && !state.editMode && !serverPersistTimer) {
-      const loaded = await loadServerBoardState();
+    if (boardChanged && !state.editMode && !serverPersistTimer && !boardPersistInFlight && !boardPersistFailed) {
+      const loaded = await loadServerBoardState({ background: true });
       if (loaded) {
         const stocks = getAllStocks(state.sectors);
-        state.quotes = createDemoQuotes(stocks);
+        retainQuotesForStocks(stocks);
         state.hydrated = hydrateSectors(state.quotes);
         render();
         await refreshQuotes({ force: true });
@@ -1562,11 +1639,13 @@ function saveStackGroups(groups = state.stackGroups) {
 function persistBoardStateSoon() {
   window.clearTimeout(serverPersistTimer);
   serverPersistTimer = window.setTimeout(() => {
-    persistBoardState();
+    serverPersistTimer = 0;
+    void persistBoardState();
   }, 250);
 }
 
 async function persistBoardState() {
+  boardPersistInFlight += 1;
   try {
     const result = await postJson("/api/state", {
       version: ACTIVE_DEFAULT_SECTOR_VERSION,
@@ -1575,8 +1654,12 @@ async function persistBoardState() {
       stackGroups: serializeStackGroups(state.stackGroups),
     });
     state.boardStateUpdatedAt = result.updatedAt || state.boardStateUpdatedAt;
+    boardPersistFailed = false;
   } catch (error) {
+    boardPersistFailed = true;
     console.warn("Failed to persist board state to local file.", error);
+  } finally {
+    boardPersistInFlight -= 1;
   }
 }
 
@@ -1789,10 +1872,6 @@ function addStockToSector(sectorName, stock) {
 
   sector.stocks.push(normalized);
   saveSectors(state.sectors);
-  const demo = createDemoQuotes([normalized]);
-  for (const [secid, quote] of demo) {
-    state.quotes.set(secid, quote);
-  }
   state.hydrated = hydrateSectors(state.quotes);
   render();
 }
@@ -2308,15 +2387,17 @@ async function fetchLocalQuotes(stocks) {
     if (!Array.isArray(rows)) continue;
 
     for (const row of rows) {
+      if (!secids.includes(row.secid) || !Number.isFinite(Number(row.price)) || Number(row.price) <= 0) continue;
       quoteMap.set(row.secid, {
         secid: row.secid,
         code: row.secid.split(".")[1],
         price: Number(row.price),
-        change: Number(row.change),
+        change: row.change == null ? null : Number(row.change),
         amount: Number(row.amount) || 0,
         date: row.date || "",
         time: row.time || "",
         previousClose: Number(row.previousClose),
+        source: row.source || json.source || "新浪港股",
       });
     }
   }
@@ -2331,19 +2412,96 @@ async function fetchLocalQuotes(stocks) {
 function miniQmtMarketCode(secid) {
   const match = String(secid || "").match(/^([01])\.(\d{6})$/);
   if (!match) return "";
-  if (/^[89]/.test(match[2])) return "";
+  if (/^[489]/.test(match[2])) return `${match[2]}.BJ`;
   return `${match[2]}.${match[1] === "1" ? "SH" : "SZ"}`;
+}
+
+function quoteBackendFromPayload(payload) {
+  const raw = payload?.quote_backend || {};
+  const active = ["bigqmt", "miniqmt"].includes(String(raw.active || "").toLowerCase())
+    ? String(raw.active).toLowerCase()
+    : "unknown";
+  const configured = ["auto", "bigqmt", "miniqmt"].includes(
+    String(raw.configured || "").toLowerCase(),
+  )
+    ? String(raw.configured).toLowerCase()
+    : "unknown";
+  return {
+    active,
+    configured,
+    fallbackActive: Boolean(raw.fallback_active),
+    switchCount: Math.max(0, Number(raw.switch_count) || 0),
+    transport: String(raw.transport || ""),
+    previousCloseReference: String(raw.previous_close_reference || ""),
+    previousCloseAuditReference: String(raw.previous_close_audit_reference || ""),
+    previousCloseValidatedCodes: Math.max(
+      0,
+      Number(raw.previous_close_validated_codes) || 0,
+    ),
+    previousCloseNativeCodes: Math.max(
+      0,
+      Number(raw.previous_close_native_codes) || 0,
+    ),
+    previousCloseMismatchedCodes: Math.max(
+      0,
+      Number(raw.previous_close_mismatched_codes) || 0,
+    ),
+    previousCloseCorrectedCodes: Math.max(
+      0,
+      Number(raw.previous_close_corrected_codes) || 0,
+    ),
+    previousCloseValidationError: String(raw.previous_close_validation_error || ""),
+    previousCloseAuditPending: Math.max(
+      0,
+      Number(raw.previous_close_audit_pending) || 0,
+    ),
+    previousCloseBackfillPending: Math.max(
+      0,
+      Number(raw.previous_close_backfill_pending) || 0,
+    ),
+    bigQmtReferenceStatus: String(raw.bigqmt_reference_status || "unknown").toLowerCase(),
+    bigQmtReferenceCheckedCodes: Math.max(
+      0,
+      Number(raw.bigqmt_reference_checked_codes) || 0,
+    ),
+    bigQmtReferenceMismatchedCodes: Math.max(
+      0,
+      Number(raw.bigqmt_reference_mismatched_codes) || 0,
+    ),
+    bigQmtReferenceMismatchRatio: Math.max(
+      0,
+      Number(raw.bigqmt_reference_mismatch_ratio) || 0,
+    ),
+    bigQmtRestartRecommended: Boolean(raw.bigqmt_restart_recommended),
+  };
 }
 
 async function fetchMiniQmtQuotes(stocks) {
   const quoteMap = new Map();
+  let backend = quoteBackendFromPayload(null);
   const marketCodes = Array.from(
     new Set(stocks.map((stock) => miniQmtMarketCode(stock.secid)).filter(Boolean)),
   );
 
-  for (const group of chunk(marketCodes, 100)) {
+  // Smaller batches reduce cold daily-reference work. Bound the whole refresh
+  // as well, so a disconnected backend cannot cost 35s for every batch.
+  const deadline = Date.now() + 45_000;
+  const failedBatches = [];
+  for (const group of chunk(marketCodes, 50)) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
     const query = new URLSearchParams({ codes: group.join(",") });
-    const json = await fetchJson(`/api/miniqmt/quotes?${query}`, 12000);
+    let json;
+    try {
+      json = await fetchJson(`/api/miniqmt/quotes?${query}`, Math.min(35_000, remaining));
+    } catch (error) {
+      failedBatches.push({ codes: group, error: String(error?.message || error) });
+      continue;
+    }
+    const responseBackend = quoteBackendFromPayload(json);
+    if (responseBackend.active !== "unknown" || backend.active === "unknown") {
+      backend = responseBackend;
+    }
     const rows = Array.isArray(json?.quotes) ? json.quotes : [];
     for (const row of rows) {
       const price = Number(row.price);
@@ -2352,51 +2510,90 @@ async function fetchMiniQmtQuotes(stocks) {
         secid: row.secid,
         code: row.code || row.secid.split(".")[1],
         price,
-        change: Number(row.change),
+        change: row.change == null ? null : Number(row.change),
         amount: Number(row.amount) || 0,
         date: row.date || "",
         time: row.time || "",
         previousClose: Number(row.previousClose),
-        source: row.source || "MiniQMT full_tick",
+        source: row.source || "QMT full_tick",
+        fetchedAt: Date.now(),
+        cached: false,
       });
     }
   }
 
   if (marketCodes.length > 0 && quoteMap.size === 0) {
-    throw new Error("MiniQMT行情为空");
+    throw new Error("QMT行情为空");
   }
-  return { quotes: quoteMap, requested: marketCodes.length };
+  const failedSecids = stocks
+    .filter((stock) => miniQmtMarketCode(stock.secid) && !quoteMap.has(stock.secid))
+    .map((stock) => stock.secid);
+  return { quotes: quoteMap, requested: marketCodes.length, backend, failedSecids, failedBatches };
 }
 
 async function fetchPreferredQuotes(stocks) {
-  const miniQmt = await fetchMiniQmtQuotes(stocks);
-  const qmtRequested = miniQmt.requested;
+  const hongKongStocks = stocks.filter((stock) => /^116\.\d{5}$/.test(stock.secid));
+  const qmtStocks = stocks.filter((stock) => miniQmtMarketCode(stock.secid));
+  const [qmtResult, hongKongResult] = await Promise.allSettled([
+    fetchMiniQmtQuotes(qmtStocks),
+    hongKongStocks.length > 0 ? fetchLocalQuotes(hongKongStocks) : Promise.resolve(new Map()),
+  ]);
+  const miniQmt = qmtResult.status === "fulfilled" ? qmtResult.value : {
+    quotes: new Map(),
+    backend: { ...quoteBackendFromPayload(null), active: "unavailable" },
+    failedSecids: qmtStocks.map((stock) => stock.secid),
+  };
+  const hongKongQuotes = hongKongResult.status === "fulfilled" ? hongKongResult.value : new Map();
+  const quotes = new Map([...miniQmt.quotes, ...hongKongQuotes]);
+  if (quotes.size === 0 && (qmtStocks.length > 0 || hongKongStocks.length > 0)) {
+    throw new Error("行情源未返回有效报价");
+  }
+  const qmtRequested = new Set(qmtStocks.map((stock) => stock.secid)).size;
   const qmtReturned = miniQmt.quotes.size;
+  const feed = {
+    ...miniQmt.backend,
+    requested: qmtRequested,
+    returned: qmtReturned,
+    partial: qmtReturned > 0 && qmtReturned < qmtRequested,
+    failedSecids: [...new Set(miniQmt.failedSecids || [])],
+    hongKongRequested: new Set(hongKongStocks.map((stock) => stock.secid)).size,
+    hongKongReturned: hongKongQuotes.size,
+  };
   const unsupported = new Set(
     stocks
-      .filter((stock) => !miniQmtMarketCode(stock.secid))
+      .filter((stock) => !miniQmtMarketCode(stock.secid) && !/^116\.\d{5}$/.test(stock.secid))
       .map((stock) => stock.secid),
   );
-  const unsupportedHongKong = [...unsupported].filter((secid) => /^116\./.test(secid)).length;
   const unsupportedBeijing = [...unsupported].filter((secid) => /^[01]\.[89]\d{5}$/.test(secid)).length;
   const unsupportedOther = Math.max(
     0,
-    unsupported.size - unsupportedHongKong - unsupportedBeijing,
+    unsupported.size - unsupportedBeijing,
   );
   const unsupportedParts = [
-    unsupportedHongKong > 0 ? `港股${unsupportedHongKong}只` : "",
     unsupportedBeijing > 0 ? `北交所${unsupportedBeijing}只` : "",
     unsupportedOther > 0 ? `其他${unsupportedOther}只` : "",
   ].filter(Boolean);
   const unsupportedNote = unsupportedParts.length > 0
     ? ` · ${unsupportedParts.join("/")}未接入`
     : "";
+  const feedName = miniQmt.backend.active === "bigqmt"
+    ? "大 QMT"
+    : "QMT";
+  const qmtSource = qmtRequested > 0
+    ? qmtResult.status === "rejected" ? "QMT行情不可用" : `${feedName}实时 ${qmtReturned}/${qmtRequested}${feed.partial ? ` · ${qmtRequested - qmtReturned}只报价缺失` : ""}`
+    : "";
   return {
-    quotes: miniQmt.quotes,
-    source: `MiniQMT实时 ${qmtReturned}/${qmtRequested}${unsupportedNote}`,
+    quotes,
+    source: [qmtSource, hongKongQuoteStatus(feed)].filter(Boolean).join(" · ") + unsupportedNote,
+    feed,
     qmtRequested,
     qmtReturned,
   };
+}
+
+function hongKongQuoteStatus(feed) {
+  if (!feed?.hongKongRequested) return "";
+  return `新浪港股 ${feed.hongKongReturned}/${feed.hongKongRequested}${feed.hongKongReturned === 0 ? " 暂不可用" : ""}`;
 }
 
 async function fetchLocalSparklines(secids) {
@@ -2433,8 +2630,7 @@ async function ensureAuctionSeriesFor(sectors) {
       sectors
         .flatMap((sector) => sector.stocks)
         .map((stock) => stock.secid)
-        .filter((secid) => /^[01]\.\d{6}$/.test(String(secid || "")))
-        .filter((secid) => !/^[89]/.test(secid.split(".")[1])),
+        .filter((secid) => /^[01]\.\d{6}$/.test(String(secid || ""))),
     ),
   );
   if (secids.length === 0) return;
@@ -2574,7 +2770,9 @@ function localDateKey(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-function marketSession(now = new Date()) {
+function marketSession(now = new Date(), includeHongKong = state.sectors.some(
+  (sector) => sector.stocks.some((stock) => /^116\.\d{5}$/.test(stock.secid)),
+)) {
   const day = now.getDay();
   const isWeekday = day >= 1 && day <= 5;
   const minute = now.getHours() * 60 + now.getMinutes();
@@ -2596,10 +2794,16 @@ function marketSession(now = new Date()) {
     return openSession("连续竞价", "trading", UPDATE_INTERVAL_MS);
   }
   if (minute < 13 * 60) {
+    if (includeHongKong && minute < 12 * 60) {
+      return openSession("港股交易中", "hongkong", UPDATE_INTERVAL_MS);
+    }
     return closedSession("午间休市", todayAt(now, 13, 0));
   }
   if (minute < 15 * 60) {
     return openSession("连续竞价", "trading", UPDATE_INTERVAL_MS);
+  }
+  if (includeHongKong && minute <= 16 * 60 + 10) {
+    return openSession(minute < 16 * 60 ? "港股交易中" : "港股收盘竞价", "hongkong", UPDATE_INTERVAL_MS);
   }
 
   return closedSession("已收盘", nextWeekdayAt(now, 9, 15));
@@ -2717,17 +2921,29 @@ function scheduleBondRefresh() {
     return;
   }
   const session = marketSession();
-  const canFastRefreshBonds = session.canAutoRefresh && session.phase !== "auction";
+  const canFastRefreshBonds = session.canAutoRefresh && session.phase === "trading";
   const delay = canFastRefreshBonds
     ? BOND_UPDATE_INTERVAL_MS
     : Math.max(1000, session.nextAt.getTime() - Date.now());
   state.bondRefreshTimer = window.setTimeout(async () => {
     const currentSession = marketSession();
-    if (!document.hidden && currentSession.canAutoRefresh && currentSession.phase !== "auction") {
+    if (!document.hidden && currentSession.canAutoRefresh && currentSession.phase === "trading") {
       await refreshBondQuotes();
     }
     scheduleBondRefresh();
   }, delay);
+}
+
+function syncAuctionSignalMode() {
+  if (marketSession().phase !== "auction") return;
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
+  if (state.auctionAutoSwitchDate === today) return;
+  state.auctionAutoSwitchDate = today;
+  state.signalMode = "auction";
+  state.signalRequestGeneration += 1;
+  state.signalLoading = false;
+  signalMode.value = "auction";
+  updateSignalModeView();
 }
 
 function scheduleSignalRefresh(delayMs = null) {
@@ -2739,6 +2955,7 @@ function scheduleSignalRefresh(delayMs = null) {
   const delay = delayMs ?? (session.canAutoRefresh ? activeInterval : 30000);
   state.signalTimer = window.setTimeout(async () => {
     if (!document.hidden && !state.signalPaused) {
+      syncAuctionSignalMode();
       await refreshSignalFeed();
     }
     scheduleSignalRefresh();
@@ -2897,47 +3114,114 @@ function auctionSignalLabel(signalType) {
   return AUCTION_SIGNAL_LABELS[signalType] || signalType || "竞价联动";
 }
 
-function auctionSignalPercentile(value) {
-  if (value === null || value === undefined || value === "") return "P--";
-  const percent = Number(value);
-  return Number.isFinite(percent) ? `P${Math.round(percent * 100)}` : "P--";
-}
-
 function auctionSignalMetric(snapshot) {
-  if (!snapshot) return "--";
-  return `${formatSignedPercent(Number(snapshot.change))} · ${auctionSignalPercentile(snapshot.amountPercentile)}`;
+  if (!snapshot) return "暂无采样";
+  const change = Number.isFinite(snapshot.change) ? formatSignedPercent(snapshot.change) : "--";
+  const amount = snapshot.amountStatus === "final"
+    ? `成交额 ${formatAuctionAmount(snapshot.amount, false)}`
+    : snapshot.amountStatus === "pending" ? "成交额待撮合" : "成交额暂缺";
+  return `${change} · ${amount}`;
 }
 
-function renderAuctionSignalSparkline(signal) {
+function auctionVolumeComparisonText(snapshot, phase) {
+  if (Number.isFinite(snapshot?.auctionVolumePct)) {
+    const pct = snapshot.auctionVolumePct;
+    return `竞价昨比 ${pct > 0 && pct < 0.01 ? "<0.01" : pct.toFixed(2)}%`;
+  }
+  return snapshot?.stage === "indicative" && phase === "collecting" ? "竞价昨比待撮合" : "竞价昨比暂缺";
+}
+
+function auctionChartGeometry(points, width, height) {
+  const valid = (Array.isArray(points) ? points : []).filter((point) =>
+    Number.isFinite(point.change) && /^09:(?:1[5-9]|2[0-5]):\d{2}$/.test(point.time));
+  if (!valid.length) return null;
+  const values = valid.map((point) => point.change);
+  const low = Math.min(-0.25, ...values);
+  const high = Math.max(0.25, ...values);
+  const y = (value) => 2 + (high - value) / (high - low) * (height - 4);
+  const x = (time) => {
+    const [, minute, second] = time.split(":").map(Number);
+    return Math.max(0, Math.min(width, ((minute - 15) * 60 + second) / 630 * width));
+  };
+  const path = valid.map((point, index) => {
+    const gap = index > 0 && point.timestamp - valid[index - 1].timestamp > 120000;
+    return `${index === 0 || gap ? "M" : "L"}${x(point.time).toFixed(2)} ${y(point.change).toFixed(2)}`;
+  }).join(" ");
+  const last = valid.at(-1);
+  return { path, baseline: y(0), phaseX: x("09:20:00"), lastX: x(last.time), lastY: y(last.change) };
+}
+
+function renderAuctionSignalSparkline(snapshot, leg = "stock") {
   const box = document.createElement("span");
-  box.className = "auction-signal-pair-spark";
-  box.title = "正股与转债竞价强度对比";
-  const stockWidth = Math.max(3, Math.min(76, Number(signal.stock?.strength || 0) * 0.76));
-  const bondWidth = Math.max(3, Math.min(76, Number(signal.bond?.strength || 0) * 0.76));
-  const stockBar = document.createElement("i");
-  stockBar.className = "auction-signal-stock-bar";
-  stockBar.style.width = `${stockWidth}px`;
-  const bondBar = document.createElement("i");
-  bondBar.className = "auction-signal-bond-bar";
-  bondBar.style.width = `${bondWidth}px`;
-  box.append(stockBar, bondBar);
+  box.className = `auction-signal-curve is-${leg}`;
+  const geometry = auctionChartGeometry(snapshot?.points, 180, 32);
+  if (!geometry) {
+    box.textContent = "暂无竞价轨迹";
+    return box;
+  }
+  box.title = `竞价实采轨迹 · 横轴09:15—09:25:30 · 虚线为昨收；间隔超过120秒断线 · ${snapshot.sampleCount}个点 · 源时间${snapshot.time}`;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 180 32");
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("aria-hidden", "true");
+  const baseline = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  baseline.setAttribute("x1", "0"); baseline.setAttribute("x2", "180");
+  baseline.setAttribute("y1", geometry.baseline); baseline.setAttribute("y2", geometry.baseline);
+  baseline.setAttribute("class", "auction-zero-line");
+  const phase = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  phase.setAttribute("x1", geometry.phaseX); phase.setAttribute("x2", geometry.phaseX);
+  phase.setAttribute("y1", "0"); phase.setAttribute("y2", "32");
+  phase.setAttribute("class", "auction-phase-line");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", geometry.path);
+  const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  dot.setAttribute("cx", geometry.lastX); dot.setAttribute("cy", geometry.lastY); dot.setAttribute("r", "1.8");
+  svg.append(baseline, phase, path, dot);
+  box.append(svg);
+  return box;
+}
+
+function renderAuctionSignalLeg(snapshot, label, leg) {
+  const box = document.createElement("span");
+  box.className = `auction-signal-leg is-${leg}${snapshot?.stale ? " is-stale" : ""}`;
+  const metric = document.createElement("strong");
+  metric.className = "auction-signal-amount";
+  metric.textContent = `${label} ${auctionSignalMetric(snapshot)}`;
+  metric.title = snapshot?.amountStatus === "final"
+    ? `${label}竞价成交额 ${snapshot.amount.toLocaleString("zh-CN", { maximumFractionDigits: 2 })}元 · 源时间 ${snapshot.time}`
+    : "当前行情源未提供撮合前的虚拟匹配金额";
+  const trend = document.createElement("small");
+  trend.className = `auction-signal-trend${snapshot?.trajectory?.weakening ? " is-weakening" : ""}`;
+  const trajectory = snapshot?.trajectory;
+  trend.textContent = trajectory
+    ? `${trajectory.window} ${trajectory.label}${trajectory.sufficient ? ` ${formatSignedPercent(trajectory.firstChange)}→${formatSignedPercent(trajectory.lastChange)}` : ""}${trajectory.sparse ? " · 采样稀疏" : ""}${snapshot.stale ? " · 报价滞后" : ""}`
+    : "等待行情";
+  trend.title = trajectory
+    ? `${trend.textContent} · ${trajectory.sampleCount}点 / ${trajectory.spanSeconds}秒 · 最长采样间隔 ${trajectory.maxGapSeconds}秒`
+    : "等待有效竞价采样";
+  const comparison = document.createElement("small");
+  comparison.className = "auction-signal-trend";
+  comparison.textContent = auctionVolumeComparisonText(snapshot, state.auctionSignalPayload?.phase);
+  comparison.title = "今日开盘竞价成交量 ÷ 上一交易日全天成交量 × 100%";
+  if (Number.isFinite(snapshot?.auctionVolumePct)) {
+    comparison.title += ` · ${snapshot.auctionVolume.toLocaleString("zh-CN")} ÷ ${snapshot.previousDayVolume.toLocaleString("zh-CN")}（${snapshot.previousVolumeDate}）`;
+  }
+  box.append(metric, comparison, renderAuctionSignalSparkline(snapshot, leg), trend);
   return box;
 }
 
 function renderAuctionSignalFeed() {
+  const scrollTop = signalFeed.scrollTop;
   signalFeed.replaceChildren();
   if (state.auctionSignals.length === 0) {
     const empty = document.createElement("div");
     empty.className = "signal-empty";
     if (state.signalLoading) {
-      empty.textContent = "正在读取MiniQMT竞价联动…";
-    } else if (
-      state.auctionSignalPayload?.phase === "collecting"
-      && state.auctionSignalPayload?.amountReady === false
-    ) {
-      empty.textContent = "竞价价格采集中 · 量能等待最终撮合";
+      empty.textContent = "正在读取竞价信号…";
+    } else if (state.auctionSignalPayload?.phase === "collecting") {
+      empty.textContent = "竞价价格采集中 · 尚无满足条件的价格预警 · 成交额待撮合";
     } else {
-      empty.textContent = "当前竞价阶段暂无联动异动";
+      empty.textContent = "暂无当日竞价信号 · 09:15起采集价格，09:25后补充成交额";
     }
     signalFeed.append(empty);
     return;
@@ -2952,57 +3236,51 @@ function renderAuctionSignalFeed() {
     const row = document.createElement("a");
     row.className = `signal-row auction-signal-row is-auction-${signal.status || "watch"}${state.auctionSignalNewIds.has(signal.id) ? " is-new" : ""}`;
     row.href = `./bond.html?${query}`;
-    row.title = `${signal.reason || "竞价联动"} · ${signal.source || "MiniQMT"}`;
+    row.title = `${signal.reason || "竞价联动"} · ${signal.source || "QMT"}`;
 
     const time = document.createElement("span");
     time.className = "signal-time";
     time.textContent = String(signal.eventTime || "").slice(0, 8) || "--:--:--";
+    time.title = `行情源时间；采集时间 ${new Date(signal.capturedAt).toLocaleTimeString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}`;
 
     const pair = document.createElement("span");
     pair.className = "signal-bond auction-signal-pair";
-    const pairName = document.createElement("span");
-    pairName.className = "signal-bond-name";
-    pairName.textContent = `${signal.stockName || signal.stockCode} → ${signal.bondName || signal.bondCode}`;
-    pairName.title = `${signal.stockName || signal.stockCode} → ${signal.bondName || signal.bondCode}`;
-    const code = document.createElement("small");
-    code.className = "signal-code";
-    code.textContent = `${signal.stockCode || ""} → ${signal.bondCode || ""}`;
-    pair.append(pairName, code);
+    const stockName = document.createElement("span");
+    stockName.className = "signal-bond-name";
+    stockName.textContent = `${signal.stockName || signal.stockCode} →`;
+    stockName.title = `${signal.stockName || signal.stockCode} ${signal.stockCode || ""}`;
+    const bondName = document.createElement("span");
+    bondName.className = "signal-bond-name";
+    bondName.textContent = signal.bondName || signal.bondCode;
+    bondName.title = `${bondName.textContent} ${signal.bondCode || ""}`;
+    const type = document.createElement("small");
+    type.className = "auction-signal-type";
+    type.textContent = auctionSignalLabel(signal.signalType);
+    const stage = document.createElement("small");
+    stage.className = "auction-signal-stage";
+    stage.textContent = signal.stage === "indicative" ? "9:25前价格预警"
+      : signal.stage === "final" ? "撮合后观察" : "撮合数据待补齐";
+    pair.append(stockName, bondName, type, stage);
 
     const detail = document.createElement("span");
     detail.className = "signal-detail auction-signal-detail";
-    const type = document.createElement("span");
-    type.className = "signal-type";
-    type.textContent = auctionSignalLabel(signal.signalType);
-    const stockMetric = document.createElement("span");
-    stockMetric.className = "signal-metric auction-signal-stock-metric";
-    stockMetric.textContent = `正股 ${auctionSignalMetric(signal.stock)}`;
-    stockMetric.title = `正股竞价金额增量 ${formatCompactAmount(Number(signal.stock?.recentAmount))}`;
-    const bondMetric = document.createElement("span");
-    bondMetric.className = "signal-metric auction-signal-bond-metric";
-    bondMetric.textContent = `转债 ${auctionSignalMetric(signal.bond)}`;
-    bondMetric.title = `转债竞价金额增量 ${formatCompactAmount(Number(signal.bond?.recentAmount))}`;
-    const gap = document.createElement("span");
-    gap.className = "signal-price auction-signal-gap";
-    gap.textContent = `差 ${Number(signal.leadGap || 0) > 0 ? "+" : ""}${Number(signal.leadGap || 0).toFixed(0)}`;
-    detail.append(type, renderAuctionSignalSparkline(signal), stockMetric, bondMetric, gap);
-
+    detail.append(renderAuctionSignalLeg(signal.stock, "正股", "stock"), renderAuctionSignalLeg(signal.bond, "转债", "bond"));
     const reason = document.createElement("span");
-    reason.className = "signal-support auction-signal-reason";
-    reason.textContent = signal.status === "confirmed" ? "已确认" : signal.reason || "竞价异动";
-    reason.title = signal.reason || "竞价异动";
-
+    reason.className = "auction-signal-reason";
+    reason.textContent = signal.reason || "竞价异动";
+    reason.title = `${signal.reason || ""} · 图示09:15—09:25:30，竖线09:20，横虚线昨收`;
     row.append(time, pair, detail, reason);
     fragment.append(row);
   }
   signalFeed.append(fragment);
+  signalFeed.scrollTop = scrollTop;
 }
 
 function updateSignalModeView() {
   const auction = state.signalMode === "auction";
   signalMonitor.classList.toggle("is-auction-mode", auction);
   if (signalMonitorTitle) {
-    signalMonitorTitle.textContent = auction ? "MiniQMT 竞价联动" : "MiniQMT 主力监控精灵";
+    signalMonitorTitle.textContent = auction ? "竞价量价与走势" : "QMT 主力监控精灵";
   }
   const intradayControls = [
     signalScope?.closest("label"),
@@ -3030,30 +3308,36 @@ function updateAuctionMonitorStatus(payload = null, error = null) {
     signalMonitorStatus.textContent = "正在读取竞价联动";
     return;
   }
-  const phaseLabels = { collecting: "竞价采集中", frozen: "竞价已冻结", closed: "竞价已结束" };
+  const phaseLabels = { collecting: "竞价采集中", frozen: "竞价已冻结", closed: "非竞价时段" };
   const requested = Number(payload.requestedPairs) || 0;
   const sampled = Number(payload.sampledPairs) || 0;
-  const coverage = requested ? `${sampled}/${requested} 对` : "暂无配对";
-  const amountNote = payload.amountReady
-    ? "量能已就绪"
-    : payload.phase === "collecting"
-      ? "量能待撮合"
-      : "量能不足";
-  signalMonitorStatus.textContent = `${phaseLabels[payload.phase] || "竞价状态未知"} · MiniQMT 3秒 · ${amountNote} · 覆盖 ${coverage} · ${state.auctionSignals.length} 条`;
+  const coverage = requested ? `${sampled}/${requested}对` : "暂无配对";
+  const partial = payload.coverage?.partial ? ` · 单边${payload.coverage.partial}对` : "";
+  const stale = payload.coverage?.stale ? ` · 滞后${payload.coverage.stale}对` : "";
+  const amountNote = payload.amountReady ? "成交额已返回"
+    : payload.phase === "collecting" ? "价格预警 · 金额待撮合" : "成交额覆盖不足";
+  const quoteTime = payload.latestQuoteTime ? ` · 源时间${payload.latestQuoteTime}` : "";
+  const count = payload.totalSignals > state.auctionSignals.length
+    ? `前${state.auctionSignals.length}/${payload.totalSignals}条` : `${state.auctionSignals.length}条`;
+  signalMonitorStatus.textContent = `${phaseLabels[payload.phase] || "竞价状态未知"} · ${amountNote} · ${coverage}${partial}${stale}${quoteTime} · ${count}`;
+  signalMonitorStatus.title = "每3秒刷新；曲线横轴09:15—09:25:30，竖线09:20，横虚线昨收。走势至少3点且跨度30秒，优先看09:20后。成交额观察门槛：正股500万元、转债50万元。";
 }
 
 async function refreshAuctionSignalFeed(options = {}) {
   if (state.signalLoading && !options.reset) return;
   if (options.reset) {
+    state.signalRequestGeneration += 1;
     state.auctionSignals = [];
     state.auctionSignalDate = "";
     state.auctionSignalPayload = null;
     state.auctionSignalNewIds = new Set();
   }
+  const requestGeneration = state.signalRequestGeneration;
   state.signalLoading = true;
-  renderAuctionSignalFeed();
+  if (!state.auctionSignals.length) renderAuctionSignalFeed();
   try {
     const payload = await fetchJson("/api/auction/signals", 8000);
+    if (requestGeneration !== state.signalRequestGeneration || state.signalMode !== "auction") return;
     const previousKeys = new Set(
       state.auctionSignals.map((signal) => `${signal.bondSecid}:${signal.signalType}`),
     );
@@ -3077,11 +3361,14 @@ async function refreshAuctionSignalFeed(options = {}) {
     renderAuctionSignalFeed();
     updateAuctionMonitorStatus(payload);
   } catch (error) {
+    if (requestGeneration !== state.signalRequestGeneration || state.signalMode !== "auction") return;
     console.warn("Auction signal request failed.", error);
     updateAuctionMonitorStatus(null, error);
   } finally {
-    state.signalLoading = false;
-    if (state.signalMode === "auction") renderAuctionSignalFeed();
+    if (requestGeneration === state.signalRequestGeneration) {
+      state.signalLoading = false;
+      if (state.signalMode === "auction") renderAuctionSignalFeed();
+    }
   }
 }
 
@@ -3141,7 +3428,7 @@ function renderSignalFeed(newIds = new Set()) {
     const empty = document.createElement("div");
     empty.className = "signal-empty";
     empty.textContent = state.signalLoading
-      ? "正在读取MiniQMT盘中信号…"
+      ? "正在读取QMT盘中信号…"
       : state.signalTypes.size
         ? "当前勾选的信号类型暂无记录"
         : "当前筛选范围内暂无信号";
@@ -3257,16 +3544,16 @@ function signalHealthState(payload, health) {
 
 function signalHealthReasonLabel(reason) {
   const labels = {
-    database_missing: "MiniQMT数据库缺失",
+    database_missing: "QMT数据库缺失",
     monitor_process_not_running: "监控进程已停止",
     monitor_status_missing: "监控状态缺失",
     monitor_status_timestamp_missing: "监控时间缺失",
     monitor_status_stale: "监控状态已过期",
     today_database_missing: "今日数据库缺失",
     monitor_trading_date_mismatch: "监控数据日不一致",
-    miniqmt_returned_zero_quotes: "MiniQMT未返回有效行情",
+    miniqmt_returned_zero_quotes: "QMT未返回有效行情",
     quote_timestamp_missing: "行情时间缺失",
-    quote_data_stale: "MiniQMT行情已过期",
+    quote_data_stale: "QMT行情已过期",
   };
   if (labels[reason]) return labels[reason];
   if (reason.startsWith("monitor_status_")) return "监控状态异常";
@@ -3321,6 +3608,10 @@ function updateSignalMonitorStatus(
     signalMonitorStatus.textContent = `非交易时段 · 最近有效 ${coverage} · 展示 ${state.signalEvents.length} 条${dateNote}`;
     return;
   }
+  if (healthState.reason === "healthy_waiting_for_open") {
+    signalMonitorStatus.textContent = "监控已就绪 · 等待 09:30 开盘后采样";
+    return;
+  }
   if (!healthState.processAlive) {
     signalMonitorStatus.textContent = `监控进程已停止 · 最近返回 ${coverage} · 展示 ${state.signalEvents.length} 条${dateNote}`;
     return;
@@ -3334,10 +3625,10 @@ function updateSignalMonitorStatus(
     return;
   }
   if (healthState.returnedCodes === 0) {
-    signalMonitorStatus.textContent = `等待MiniQMT有效行情 · 实际返回 ${coverage} · 展示 ${state.signalEvents.length} 条${dateNote}`;
+    signalMonitorStatus.textContent = `等待QMT有效行情 · 实际返回 ${coverage} · 展示 ${state.signalEvents.length} 条${dateNote}`;
     return;
   }
-  signalMonitorStatus.textContent = `实时 · ${healthState.updatedTime} · MiniQMT有效 ${coverage} · 展示 ${state.signalEvents.length} 条${dateNote}`;
+  signalMonitorStatus.textContent = `实时 · ${healthState.updatedTime} · QMT有效 ${coverage} · 展示 ${state.signalEvents.length} 条${dateNote}`;
 }
 
 function monitoredSignalCodes() {
@@ -3429,7 +3720,7 @@ async function refreshSignalFeed(options = {}) {
     updateSignalMonitorStatus(payload, health);
   } catch (error) {
     if (requestGeneration !== state.signalRequestGeneration) return;
-    console.warn("MiniQMT signal monitor failed.", error);
+    console.warn("QMT signal monitor failed.", error);
     updateSignalMonitorStatus(null, null, error);
   } finally {
     if (requestGeneration === state.signalRequestGeneration) {
@@ -3439,36 +3730,11 @@ async function refreshSignalFeed(options = {}) {
   }
 }
 
-function createDemoQuotes(stocks) {
-  const minuteSeed = Math.floor(Date.now() / 60000);
-  const quoteMap = new Map();
-
-  for (const stock of stocks) {
-    const hash = hashText(stock.secid + stock.name);
-    const base = 4 + (hash % 45000) / 100;
-    const drift = ((hash % 1600) - 800) / 170;
-    const wave = Math.sin((minuteSeed + (hash % 360)) / 11) * 2.2;
-    const change = clamp(drift + wave, -9.8, 12.6);
-    const price = base * (1 + change / 100);
-
-    quoteMap.set(stock.secid, {
-      ...stock,
-      code: stock.secid.split(".")[1],
-      price,
-      change,
-      amount: 0,
-    });
-  }
-
-  return quoteMap;
-}
-
-function hashText(text) {
-  let hash = 0;
-  for (let index = 0; index < text.length; index += 1) {
-    hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
-  }
-  return hash;
+function retainQuotesForStocks(stocks) {
+  const allowedSecids = new Set(stocks.map((stock) => stock.secid).filter(Boolean));
+  state.quotes = new Map(
+    [...state.quotes].filter(([secid]) => allowedSecids.has(secid)),
+  );
 }
 
 function clamp(value, min, max) {
@@ -3650,35 +3916,40 @@ function renderIndices() {
 }
 
 function renderKospiMarketChart() {
-  if (!kospiMarketChart) return;
-  kospiMarketChart.replaceChildren();
+  renderNativeMarketChart(kospiMarketChart, state.indices.find((row) => row.key === "kospi"));
+}
 
-  const item = state.indices.find((row) => row.key === "kospi");
+function renderNativeMarketChart(target, item, { isYield = false, failed = false } = {}) {
+  if (!target) return;
+  target.replaceChildren();
   const points = Array.isArray(item?.points)
     ? item.points.map(Number).filter((value) => Number.isFinite(value) && value > 0)
     : [];
   const price = Number(item?.price);
   const percent = Number(item?.percent);
-  if (!item || !Number.isFinite(price) || !Number.isFinite(percent) || points.length < 2) {
-    kospiMarketChart.className = "native-market-chart";
+  if (!item || !Number.isFinite(price) || !Number.isFinite(percent) || (!isYield && points.length < 2)) {
+    target.className = "native-market-chart";
     const loading = document.createElement("span");
     loading.className = "native-market-loading";
-    loading.textContent = "今日KOSPI分时暂未到达";
-    kospiMarketChart.append(loading);
+    loading.textContent = isYield ? "美债收益率暂不可用，稍后重试" : "今日KOSPI分时暂未到达";
+    target.append(loading);
     return;
   }
 
   const tone = quoteClass(percent);
-  kospiMarketChart.className = `native-market-chart is-${tone}`;
+  target.className = `native-market-chart is-${tone}`;
 
   const quote = document.createElement("div");
   quote.className = "native-market-quote";
   const priceNode = document.createElement("strong");
   priceNode.className = "native-market-price";
-  priceNode.textContent = formatIndexPrice(price);
+  priceNode.textContent = isYield ? `${price.toFixed(item.priceDecimals ?? 4)}%` : formatIndexPrice(price);
   const changeNode = document.createElement("span");
   changeNode.className = "native-market-change";
-  changeNode.textContent = formatSignedPercent(percent);
+  changeNode.textContent = isYield
+    ? `${item.changeBps > 0 ? "+" : ""}${item.changeBps.toFixed(1)} bp`
+    : formatSignedPercent(percent);
+  if (isYield) changeNode.title = "较前收盘变化：1 bp = 0.01 个百分点";
   quote.append(priceNode, changeNode);
 
   const chartPoints = [...points, price];
@@ -3688,7 +3959,7 @@ function renderKospiMarketChart() {
   svg.setAttribute("preserveAspectRatio", "none");
   svg.setAttribute("aria-hidden", "true");
 
-  const previousClose = price / (1 + percent / 100);
+  const previousClose = isYield ? item.previousClose : price / (1 + percent / 100);
   const low = Math.min(...chartPoints, previousClose);
   const high = Math.max(...chartPoints, previousClose);
   const span = high - low || 1;
@@ -3703,12 +3974,17 @@ function renderKospiMarketChart() {
 
   const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
   line.setAttribute("class", "native-market-line");
+  const sampleTimes = item.sparkTimestamps;
+  const useSampleTime = isYield && item.chartKind === "sampled" &&
+    sampleTimes?.length === points.length && sampleTimes.at(-1) > sampleTimes[0];
   line.setAttribute(
     "d",
     points
       .map((value, index) => {
-        const x = points.length > 1 ? (index / (points.length - 1)) * 98 : 0;
-        return `${index === 0 ? "M" : "L"}${x.toFixed(2)},${yFor(value).toFixed(2)}`;
+        const x = useSampleTime
+          ? (sampleTimes[index] - sampleTimes[0]) / (sampleTimes.at(-1) - sampleTimes[0]) * 98
+          : points.length > 1 ? (index / (points.length - 1)) * 98 : 0;
+        return `${index === 0 || item.sparkBreaks?.[index] ? "M" : "L"}${x.toFixed(2)},${yFor(value).toFixed(2)}`;
       })
       .join(" "),
   );
@@ -3725,12 +4001,43 @@ function renderKospiMarketChart() {
   meta.className = "native-market-meta";
   const session = document.createElement("span");
   const chartDate = item.sparkDate || item.date || "今日";
-  session.textContent = `${chartDate} · 图至 ${item.sparkTime || "--:--"} KST`;
+  session.textContent = isYield
+    ? item.timetag ? `报价 ${item.time} 北京` : "源报价时间未提供"
+    : `${chartDate} · ${item.sparkTime || "--:--"} KST`;
   const quoteTime = document.createElement("span");
-  quoteTime.textContent = item.time ? `报价 ${item.time} 北京时间` : "延迟行情";
+  const quoteAgeMinutes = item.timetag ? Math.max(0, Math.floor((Date.now() / 1000 - item.timetag) / 60)) : null;
+  const fetchedTime = item.fetchedAt ? new Date(item.fetchedAt).toLocaleTimeString("zh-CN", {
+    timeZone: "Asia/Shanghai", hour12: false,
+  }) : "--";
+  quoteTime.textContent = failed
+    ? "更新失败 · 保留上次行情"
+    : isYield
+      ? quoteAgeMinutes >= 15
+        ? `报价时间距今 ${quoteAgeMinutes} 分钟`
+        : `获取 ${fetchedTime} · 30秒刷新`
+      : item.time ? `报价 ${item.time} 北京时间` : "延迟行情";
+  meta.title = isYield
+    ? `${item.source} · 源报价 ${item.timetag ? `${item.date} ${item.time}` : "时间未提供"}（北京时间） · 本站采样 ${item.sparkStartDate || "--"} ${item.sparkTimes?.[0] || "--"} 至 ${chartDate} ${item.sparkTime || "--"}，非全天分时 · 最近成功获取 ${fetchedTime}`
+    : `${session.textContent} · ${quoteTime.textContent}`;
+  if (isYield) meta.classList.add("native-market-meta-stacked");
   meta.append(session, quoteTime);
 
-  kospiMarketChart.append(quote, svg, meta);
+  let plot = svg;
+  if (points.length < 2) {
+    const unavailable = document.createElement("span");
+    unavailable.className = "native-market-plot-unavailable";
+    unavailable.textContent = item.chartKind === "sampled" ? "正在积累采样点" : "分时暂不可用";
+    plot = unavailable;
+  }
+  if (isYield && item.chartKind === "sampled") {
+    const wrapper = document.createElement("div");
+    wrapper.className = "native-market-sampled";
+    const caption = document.createElement("small");
+    caption.textContent = points.length ? `本次采样 · ${item.sparkTimes[0].slice(0, 5)} 起` : "本站采样 · 非全天分时";
+    wrapper.append(caption, plot);
+    plot = wrapper;
+  }
+  target.append(quote, plot, meta);
 }
 
 function renderIndexSparkline(item) {
@@ -3978,7 +4285,7 @@ function renderThemeBondBoard() {
   themeBondGrid.replaceChildren();
 
   if (state.themeLoading && rows.length === 0) {
-    themeBoardSummary.textContent = "正在读取转债标签和MiniQMT实时行情…";
+    themeBoardSummary.textContent = "正在读取转债标签和QMT实时行情…";
     themeBondGrid.innerHTML = '<div class="empty-state">正在加载题材转债…</div>';
     return;
   }
@@ -4251,6 +4558,15 @@ function renderStackCard(item) {
   card.append(head);
 
   const tabs = document.createElement("div");
+  if (group.name === (state.limitLadder?.stackName || "连板天梯")) {
+    card.id = "board-limit-ladder";
+    const caption = document.createElement("div");
+    caption.id = "boardLadderCaption";
+    caption.className = "board-ladder-caption";
+    caption.textContent = ladderCaption();
+    card.append(caption);
+    window.requestAnimationFrame(updateLadderCaption);
+  }
   tabs.className = "stack-tabs";
   for (const sector of sectors) {
     tabs.append(renderStackSection(group, sector, expandedSectorNames.has(sector.name)));
@@ -4291,6 +4607,9 @@ function renderStackSection(group, sector, isExpanded) {
   const name = document.createElement("span");
   name.className = "stack-tab-name";
   name.textContent = sector.name;
+  if (state.limitLadder?.groups?.some((item) => item.name === sector.name)) {
+    name.textContent += ` · ${sector.stocks.length}`;
+  }
 
   const change = document.createElement("span");
   change.className = `stack-tab-change cell-${tone}`;
@@ -4560,11 +4879,13 @@ function createChangeValue(text) {
 }
 
 function renderStockRow(stock, sectorName) {
-  const auctionDisplay = state.auctionPresentationActive ?? isAuctionDisplaySession();
+  const isHongKong = /^116\.\d{5}$/.test(stock.secid);
+  const auctionDisplay = !isHongKong && (state.auctionPresentationActive ?? isAuctionDisplaySession());
   const tone = quoteClass(stock.change);
   const nameTone = stockNameClass(stock.change);
   const row = state.editMode ? document.createElement("div") : document.createElement("a");
   row.className = "stock-row";
+  row.classList.toggle("is-cached-quote", Boolean(stock.cached));
   row.classList.toggle("is-auction", auctionDisplay);
   row.dataset.sectorName = sectorName;
   row.dataset.secid = stock.secid;
@@ -4583,6 +4904,17 @@ function renderStockRow(stock, sectorName) {
     stock.change,
     true,
   )}`;
+  if (stock.cached) row.title += ` · 缓存报价 ${stock.date || ""} ${stock.time || ""} · ${stock.source || "QMT"}`;
+  const ladderInfo = state.limitLadder?.stockInfo?.[stock.secid];
+  if (ladderInfo && state.limitLadder.groups?.some((group) => group.name === sectorName)) {
+    row.title += ` · ${state.limitLadder.baseDate} ${ladderInfo.boards}板 · ${ladderInfo.poolSource}${ladderInfo.reason ? ` · ${ladderInfo.reason}` : ""} · 行情 ${stock.date || ""} ${stock.time || "待报价"}`;
+  }
+  if (isHongKong) {
+    row.title += ` · 港元 · ${stock.source || "新浪港股"} ${stock.date || ""} ${stock.time || ""}`;
+  }
+  if (state.marketFeed?.failedSecids?.includes(stock.secid)) {
+    row.title += " · 本次报价未返回";
+  }
   row.addEventListener("click", (event) => {
     if (state.editMode) {
       event.preventDefault();
@@ -4694,13 +5026,13 @@ function renderSparkline(stock) {
   const box = document.createElement("span");
   box.className = `sparkline is-${tone}${pending ? " is-loading" : ""}`;
   const source = spark?.source || "今日分时";
-  box.title = spark?.time ? `${source}：${spark.time}` : source;
+  box.title = spark?.time ? `${source}：${spark.date || ""} ${spark.time}` : source;
 
   const points = spark?.points || [];
   if (points.length < 2 && !pending) {
-    box.title = spark?.data_is_stale
-      ? "最近交易日MiniQMT分时数据不足"
-      : "暂无MiniQMT分时数据";
+    box.title = /^116\./.test(stock.secid) ? "暂无港股分时数据" : spark?.data_is_stale
+      ? "最近交易日QMT分时数据不足"
+      : "暂无QMT分时数据";
   }
 
   if (!points.length || points.length < 2) {
@@ -4725,67 +5057,39 @@ function renderAuctionSparkline(stock) {
   const box = document.createElement("span");
   box.className = `sparkline auction-sparkline${state.auctionLoading ? " is-loading" : ""}`;
   if (samples.length === 0) {
-    box.title = state.auctionLoading ? "正在读取MiniQMT竞价轨迹" : "暂无竞价采样";
+    box.title = state.auctionLoading ? "正在读取QMT竞价轨迹" : "暂无竞价采样";
     return box;
   }
 
   const latest = samples.at(-1);
-  const points = samples.map((sample) => Number(sample.price)).filter((price) => price > 0);
-  const tone = quoteClass(
-    Number.isFinite(Number(latest.change))
-      ? Number(latest.change)
-      : Number(stock.change),
-  );
+  const tone = quoteClass(Number(latest.change) || 0);
+  const finalAmount = latest.time >= "09:25:00" && Number(latest.amount) > 0;
   box.classList.add(`is-${tone}`);
-  box.title = `MiniQMT竞价 ${latest.time || ""} · 累计金额 ${formatAuctionAmount(
-    Number(latest.amount),
-    false,
-  )}`;
-
+  box.title = `${series.source || "QMT竞价"} ${latest.time || ""} · ${finalAmount ? `成交额 ${formatAuctionAmount(Number(latest.amount), false)}` : latest.time < "09:25:00" ? "成交额待撮合" : "成交额暂缺"} · 横轴09:15—09:25:30，虚线为昨收`;
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", `0 0 ${AUCTION_SPARK_WIDTH} ${AUCTION_SPARK_HEIGHT}`);
   svg.setAttribute("aria-hidden", "true");
-
-  const amounts = samples.map((sample) => Math.max(0, Number(sample.deltaAmount) || 0));
-  const maxAmount = Math.max(...amounts, 0);
-  if (maxAmount > 0) {
-    const barWidth = Math.max(
-      0.4,
-      AUCTION_SPARK_WIDTH / Math.max(amounts.length, 1) - 0.3,
-    );
-    amounts.forEach((amount, index) => {
-      if (amount <= 0) return;
-      const height = Math.max(0.6, (amount / maxAmount) * 5);
-      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-      rect.setAttribute("class", "auction-amount-bar");
-      rect.setAttribute(
-        "x",
-        (
-          (index / Math.max(amounts.length - 1, 1))
-          * (AUCTION_SPARK_WIDTH - barWidth)
-        ).toFixed(2),
-      );
-      rect.setAttribute("y", (AUCTION_SPARK_HEIGHT - height).toFixed(2));
-      rect.setAttribute("width", barWidth.toFixed(2));
-      rect.setAttribute("height", height.toFixed(2));
-      svg.append(rect);
-    });
-  }
-
-  if (points.length >= 2) {
+  const points = samples.map((sample) => ({
+    time: sample.time, timestamp: sample.timestamp,
+    change: Number(series.previousClose) > 0 ? (Number(sample.price) / Number(series.previousClose) - 1) * 100
+      : sample.change == null ? null : Number(sample.change),
+  }));
+  const geometry = auctionChartGeometry(points, AUCTION_SPARK_WIDTH, AUCTION_PRICE_HEIGHT);
+  if (geometry) {
+    const baseline = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    baseline.setAttribute("x1", "0"); baseline.setAttribute("x2", AUCTION_SPARK_WIDTH);
+    baseline.setAttribute("y1", geometry.baseline); baseline.setAttribute("y2", geometry.baseline);
+    baseline.setAttribute("class", "auction-zero-line");
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("class", `spark-${tone}`);
-    path.setAttribute(
-      "d",
-      sparklinePath(points, AUCTION_SPARK_WIDTH, AUCTION_PRICE_HEIGHT),
-    );
-    svg.append(path);
+    path.setAttribute("d", geometry.path);
+    svg.append(baseline, path);
   }
   box.append(svg);
 
   const amount = document.createElement("small");
   amount.className = "auction-amount";
-  amount.textContent = formatAuctionAmount(Number(latest.amount));
+  amount.textContent = finalAmount ? formatAuctionAmount(Number(latest.amount)) : latest.time < "09:25:00" ? "待撮合" : "竞--";
   box.append(amount);
   return box;
 }
@@ -4794,9 +5098,9 @@ function formatAuctionAmount(value, compact = true) {
   if (!Number.isFinite(value) || value <= 0) return compact ? "竞--" : "--";
   let text;
   if (value >= 1e8) {
-    text = `${(value / 1e8).toFixed(1)}亿`;
+    text = `${(value / 1e8).toFixed(2)}亿`;
   } else if (value >= 1e4) {
-    text = `${(value / 1e4).toFixed(value >= 1e7 ? 0 : 1)}万`;
+    text = `${(value / 1e4).toFixed(2)}万`;
   } else {
     text = `${value.toFixed(0)}元`;
   }
@@ -4834,8 +5138,49 @@ function syncAuctionDisplayPresentation(auctionDisplay = isAuctionDisplaySession
 
 function compactMarketStatusSource(source) {
   const value = String(source || "连接中").trim();
-  const miniQmt = value.match(/^MiniQMT实时\s+(\d+\/\d+)/);
-  return miniQmt ? `MiniQMT ${miniQmt[1]}` : value;
+  const qmt = value.match(/^(大 QMT|QMT回退|QMT|QMT)实时\s+(\d+\/\d+)/);
+  return qmt ? `${qmt[1]} ${qmt[2]}` : value;
+}
+
+function marketFeedPresentation(feed, source = "") {
+  let active = String(feed?.active || "unknown").toLowerCase();
+  if (active === "unknown" && /^大 QMT实时/.test(source)) active = "bigqmt";
+  const requested = Math.max(0, Number(feed?.requested) || 0);
+  const returned = Math.max(0, Number(feed?.returned) || 0);
+  const coverage = requested > 0 ? `${returned}/${requested}` : "";
+  if (feed?.cached) {
+    return {
+      icon: "Q",
+      label: active === "bigqmt" ? "大 QMT" : "QMT",
+      mode: "缓存",
+      coverage,
+      className: "is-cached",
+    };
+  }
+  if (requested === 0 && feed?.hongKongRequested > 0) {
+    const available = active !== "unavailable" && feed.hongKongReturned > 0;
+    return {
+      icon: "港",
+      label: "新浪",
+      mode: available ? "港股" : "异常",
+      coverage: `${available ? feed.hongKongReturned : 0}/${feed.hongKongRequested}`,
+      className: available ? "is-miniqmt" : "is-unavailable",
+    };
+  }
+  if (active === "bigqmt") {
+    const staleReference = feed?.bigQmtReferenceStatus === "stale";
+    return {
+      icon: "Q",
+      label: "大 QMT",
+      mode: feed?.partial ? `缺${requested - returned}只` : staleReference ? "行情·昨收修复" : "行情",
+      coverage,
+      className: feed?.partial || staleReference ? "is-fallback" : "is-bigqmt",
+    };
+  }
+  if (active === "unavailable") {
+    return { icon: "!", label: "QMT", mode: "异常", coverage: "", className: "is-unavailable" };
+  }
+  return { icon: "Q", label: "QMT", mode: "连接中", coverage, className: "is-unknown" };
 }
 
 function marketStatusItem(text, className, title = "") {
@@ -4844,6 +5189,164 @@ function marketStatusItem(text, className, title = "") {
   item.textContent = text;
   if (title) item.title = title;
   return item;
+}
+
+function marketFeedStatusItem(feed, source) {
+  const presentation = marketFeedPresentation(feed, source);
+  const item = document.createElement("button");
+  item.type = "button";
+  item.addEventListener("click", openMarketSourcePicker);
+  item.className = `market-status-item market-feed-badge ${presentation.className}`;
+
+  const icon = document.createElement("span");
+  icon.className = "market-feed-icon";
+  icon.textContent = presentation.icon;
+  icon.setAttribute("aria-hidden", "true");
+
+  const name = document.createElement("strong");
+  name.className = "market-feed-name";
+  name.textContent = presentation.label;
+
+  const mode = document.createElement("small");
+  mode.className = "market-feed-mode";
+  mode.textContent = presentation.mode;
+
+  item.append(icon, name, mode);
+
+  const configured = feed?.configured === "auto" ? "自动切换" : "固定数据源";
+  const switches = Math.max(0, Number(feed?.switchCount) || 0);
+  const transport = feed?.transport ? String(feed.transport).toUpperCase() : "";
+  const previousCloseReference = String(feed?.previousCloseReference || "").toLowerCase();
+  const previousCloseAuditReference = String(
+    feed?.previousCloseAuditReference || "",
+  ).toLowerCase();
+  const previousCloseValidated = Math.max(0, Number(feed?.previousCloseValidatedCodes) || 0);
+  const previousCloseNative = Math.max(0, Number(feed?.previousCloseNativeCodes) || 0);
+  const previousCloseMismatched = Math.max(
+    0,
+    Number(feed?.previousCloseMismatchedCodes) || 0,
+  );
+  const previousCloseCorrected = Math.max(0, Number(feed?.previousCloseCorrectedCodes) || 0);
+  const previousCloseAuditPending = Math.max(
+    0,
+    Number(feed?.previousCloseAuditPending) || 0,
+  );
+  const previousCloseBackfillPending = Math.max(
+    0,
+    Number(feed?.previousCloseBackfillPending) || 0,
+  );
+  const bigQmtReferenceStatus = String(feed?.bigQmtReferenceStatus || "unknown");
+  const bigQmtReferenceChecked = Math.max(
+    0,
+    Number(feed?.bigQmtReferenceCheckedCodes) || 0,
+  );
+  const bigQmtReferenceMismatched = Math.max(
+    0,
+    Number(feed?.bigQmtReferenceMismatchedCodes) || 0,
+  );
+  const previousCloseSummary = previousCloseReference === "bigqmt_native_xtdata"
+    ? `昨收：大 QMT 原生 ${previousCloseNative} 只`
+    : "";
+  item.title = [
+    `主看板当前行情：${presentation.label}${presentation.mode === "回退" ? "（自动回退）" : ""}`,
+    transport ? `通信：${transport}` : "",
+    presentation.coverage ? `返回：${presentation.coverage}` : "",
+    feed?.configured && feed.configured !== "unknown" ? `${configured} · 切换 ${switches} 次` : "",
+    previousCloseSummary,
+    bigQmtReferenceStatus === "stale"
+      ? `大QMT原始昨收会话异常 ${bigQmtReferenceMismatched}/${bigQmtReferenceChecked} 只，建议盘前重启大QMT并复验`
+      : "",
+    previousCloseBackfillPending > 0
+      ? `大QMT日线后台补齐 ${previousCloseBackfillPending} 只`
+      : "",
+    feed?.previousCloseValidationError ? "昨收校验暂不可用" : "",
+    source,
+  ].filter(Boolean).join(" · ");
+  item.setAttribute("aria-label", "行情连接状态");
+  item.setAttribute("aria-haspopup", "dialog");
+  item.title += " · 点击查看连接状态";
+  return item;
+}
+
+async function openMarketSourcePicker() {
+  if (document.getElementById("marketSourceDialog")) return;
+  const dialog = document.createElement("dialog");
+  dialog.id = "marketSourceDialog";
+  dialog.className = "market-source-dialog";
+  dialog.setAttribute("aria-label", "行情连接状态");
+  dialog.innerHTML = `<h2>行情连接状态</h2><p>行情与历史数据由大 QMT 提供。</p>
+    <p class="market-source-feedback" role="status">正在读取连接状态…</p>
+    <button type="button" class="market-source-close">关闭</button>`;
+  document.body.append(dialog);
+  dialog.addEventListener("close", () => dialog.remove());
+  dialog.querySelector(".market-source-close").addEventListener("click", () => dialog.close());
+  dialog.showModal();
+  const feedback = dialog.querySelector(".market-source-feedback");
+  try {
+    const payload = await fetchJson("/api/qmt-backends", 6000);
+    const error = payload.backends?.bigqmt?.last_error;
+    feedback.textContent = error
+      ? "大 QMT 连接异常，请检查 Windows 中继与 QMT 数据策略。"
+      : payload.market?.active === "bigqmt"
+        ? "最近一次大 QMT 请求成功。"
+        : "等待大 QMT 数据请求。";
+  } catch {
+    feedback.textContent = "无法读取行情服务状态，请稍后重试。";
+  }
+}
+
+function mergeBoardQuoteSnapshot(previous, fresh, stocks) {
+  const merged = new Map();
+  for (const stock of stocks) {
+    const current = fresh.get(stock.secid);
+    const cached = previous.get(stock.secid);
+    const stamp = (quote) => `${String(quote?.date || "").replaceAll("-", "")}${quote?.time || ""}`;
+    if (current && (!cached || stamp(current) >= stamp(cached))) {
+      merged.set(stock.secid, { ...current, cached: false, fetchedAt: Date.now() });
+    }
+    else if (cached) merged.set(stock.secid, { ...cached, cached: true });
+  }
+  return merged;
+}
+
+function updateQuoteCacheNote() {
+  const cached = [...state.quotes.values()].filter((quote) => quote.cached);
+  const dates = [...new Set(cached.map((quote) => String(quote.date || "").replaceAll("-", "")))].filter(Boolean).sort();
+  const format = (date) => `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`;
+  state.quoteCacheNote = dates.length
+    ? `缓存 ${format(dates[0])}${dates.length > 1 ? ` 至 ${format(dates.at(-1))}` : ""} · ${cached.length}只`
+    : "";
+}
+
+async function restoreQuoteSnapshot() {
+  try {
+    const payload = await fetchJson("/api/quote-snapshot", 2000);
+    for (const row of payload.quotes || []) {
+      if (row.secid && Number.isFinite(row.price) && row.price > 0) {
+        state.quotes.set(row.secid, { ...row, cached: true });
+      }
+    }
+    if (!state.quotes.size) return;
+    state.marketFeed = { ...quoteBackendFromPayload(payload), cached: true };
+    state.source = "本地保存的行情";
+    state.lastUpdated = new Date(Math.max(...[...state.quotes.values()].map((quote) => Number(quote.fetchedAt) || 0)));
+    state.hydrated = hydrateSectors(state.quotes);
+    updateQuoteCacheNote();
+    render();
+  } catch (error) {
+    console.warn("Saved quote snapshot unavailable.", error);
+  }
+}
+
+function canReuseClosedSnapshot(stocks, now = Date.now()) {
+  if (marketSession().canAutoRefresh) return false;
+  const supported = stocks.filter((stock) => miniQmtMarketCode(stock.secid) || /^116\./.test(stock.secid));
+  // The date stays visible even for a closed-market snapshot. A bounded age
+  // ensures reopening after a new session still refreshes in the background.
+  return supported.length > 0 && supported.every((stock) => {
+    const quote = state.quotes.get(stock.secid);
+    return quote && now - Number(quote.fetchedAt) >= 0 && now - Number(quote.fetchedAt) < 15 * 60_000;
+  });
 }
 
 function updateStatus() {
@@ -4864,14 +5367,11 @@ function updateStatus() {
     : "";
   syncAuctionDisplayPresentation();
   const items = [
-    marketStatusItem(
-      compactMarketStatusSource(state.source),
-      "market-status-source",
-      state.source,
-    ),
+    marketFeedStatusItem(state.marketFeed, state.source),
     marketStatusItem(time, "market-status-time"),
     marketStatusItem(session.label, "market-status-session"),
   ];
+  if (state.quoteCacheNote) items.push(marketStatusItem(state.quoteCacheNote, "market-status-cache"));
   let refreshSummary = "";
   if (state.boardUpdatesPaused) {
     refreshSummary = "转债详情打开 · 主看板暂停刷新";
@@ -4904,6 +5404,7 @@ function updateStatus() {
 }
 
 async function refreshQuotes(options = {}) {
+  if (state.marketSwitching) return;
   if (state.boardUpdatesPaused) {
     state.boardRenderPending = true;
     updateStatus();
@@ -4928,6 +5429,7 @@ async function refreshQuotes(options = {}) {
         state.quotes = new Map();
         state.hydrated = [];
         state.source = "空列表";
+        state.marketFeed = { ...state.marketFeed, active: "unknown", requested: 0, returned: 0 };
         state.lastUpdated = new Date();
         updateNextRefreshAt();
         render();
@@ -4940,17 +5442,22 @@ async function refreshQuotes(options = {}) {
     const source = preferred.source;
 
     if (requestId === state.quoteRequestId && !state.boardUpdatesPaused) {
-      state.quotes = quotes;
-      state.hydrated = hydrateSectors(quotes);
+      state.quotes = mergeBoardQuoteSnapshot(state.quotes, quotes, stocks);
+      state.hydrated = hydrateSectors(state.quotes);
+      updateQuoteCacheNote();
       state.source = source;
+      state.marketFeed = preferred.feed;
       state.lastUpdated = new Date();
       updateNextRefreshAt();
       renderAfterBackgroundUpdate();
     }
   } catch (error) {
-    console.warn("MiniQMT board quote request failed; external fallback disabled.", error);
+    console.warn("Board quote request failed.", error);
     if (requestId === state.quoteRequestId) {
-      state.source = "MiniQMT行情不可用";
+      state.source = "行情不可用 · 保留上次报价";
+      for (const quote of state.quotes.values()) quote.cached = true;
+      updateQuoteCacheNote();
+      state.marketFeed = { ...state.marketFeed, active: "unavailable" };
       updateStatus();
     }
   } finally {
@@ -4963,6 +5470,7 @@ async function refreshQuotes(options = {}) {
 }
 
 async function refreshBondQuotes(options = {}) {
+  if (state.marketSwitching) return;
   if (state.boardUpdatesPaused) {
     state.boardRenderPending = true;
     return;
@@ -4981,11 +5489,21 @@ async function refreshBondQuotes(options = {}) {
     const quotes = preferred.quotes;
     if (requestId !== state.bondQuoteRequestId || state.boardUpdatesPaused) return;
 
-    for (const [secid, quote] of quotes) {
-      state.quotes.set(secid, quote);
+    for (const secid of preferred.feed.failedSecids || []) {
+      const saved = state.quotes.get(secid);
+      if (saved) state.quotes.set(secid, { ...saved, cached: true });
     }
+    for (const [secid, quote] of quotes) {
+      state.quotes.set(secid, { ...quote, cached: false, fetchedAt: Date.now() });
+    }
+    updateQuoteCacheNote();
     state.hydrated = hydrateSectors(state.quotes);
-    state.source = preferred.source;
+    state.marketFeed = {
+      ...preferred.feed,
+      hongKongRequested: state.marketFeed.hongKongRequested || 0,
+      hongKongReturned: state.marketFeed.hongKongReturned || 0,
+    };
+    state.source = [preferred.source, hongKongQuoteStatus(state.marketFeed)].filter(Boolean).join(" · ");
     state.lastUpdated = new Date();
     renderAfterBackgroundUpdate();
     updateStatus();
@@ -5016,27 +5534,68 @@ async function refreshIndices(options = {}) {
   renderIndices();
 }
 
+async function refreshUs10y({ force = false } = {}) {
+  if (!us10yMarketChart || state.us10yLoading || (!force && document.hidden)) return;
+  state.us10yLoading = true;
+  try {
+    const quote = await fetchJson("/api/us10y", 12000);
+    if (!Number.isFinite(quote?.price) || !Number.isFinite(quote?.changeBps)) {
+      throw new Error("Invalid US10Y quote");
+    }
+    state.us10yQuote = quote;
+    state.us10yError = Boolean(quote.refreshFailed);
+  } catch (error) {
+    state.us10yError = true;
+    console.warn("US10Y request failed.", error);
+  } finally {
+    state.us10yLoading = false;
+  }
+  renderNativeMarketChart(us10yMarketChart, state.us10yQuote, {
+    isYield: true,
+    failed: state.us10yError,
+  });
+}
+
 async function boot() {
   restoreMarketSplit();
   restoreMarketPanelHeight();
-  await loadServerBoardState();
+  void refreshUs10y({ force: true });
+  window.setInterval(refreshUs10y, US10Y_UPDATE_INTERVAL_MS);
+  await Promise.all([loadServerBoardState(), restoreQuoteSnapshot()]);
   const restoredView = restoreBoardViewState();
-  if (!restoredView && marketSession().phase === "auction") {
-    state.signalMode = "auction";
-  }
+  syncAuctionSignalMode();
   syncSignalPauseButton();
   const stocks = getAllStocks(state.sectors);
   sparkToggle.checked = state.showSparklines;
-  state.quotes = createDemoQuotes(stocks);
+  retainQuotesForStocks(stocks);
   state.hydrated = hydrateSectors(state.quotes);
-  state.source = "演示数据";
-  state.lastUpdated = new Date();
+  if (!state.quotes.size) state.source = "读取行情中";
+  if (!state.quotes.size) state.marketFeed = {
+    active: "unknown",
+    configured: "unknown",
+    fallbackActive: false,
+    switchCount: 0,
+    transport: "",
+    previousCloseReference: "",
+    previousCloseAuditReference: "",
+    previousCloseValidatedCodes: 0,
+    previousCloseNativeCodes: 0,
+    previousCloseMismatchedCodes: 0,
+    previousCloseCorrectedCodes: 0,
+    previousCloseValidationError: "",
+    previousCloseAuditPending: 0,
+    previousCloseBackfillPending: 0,
+    requested: 0,
+    returned: 0,
+  };
+  if (!state.quotes.size) state.lastUpdated = null;
+  updateQuoteCacheNote();
   updateEditModeControls();
   setActiveView(state.activeView);
   renderIndices();
   render();
-  await refreshQuotes({ force: true });
-  await refreshIndices({ force: true });
+  if (!canReuseClosedSnapshot(stocks)) void refreshQuotes({ force: true });
+  void refreshIndices({ force: true });
   await refreshNewBondSecondDayState();
   scheduleMainRefresh();
   scheduleIndexRefresh();
@@ -5048,8 +5607,12 @@ async function boot() {
   await refreshSignalFeed({ reset: true });
   scheduleSignalRefresh();
   restoreBoardViewport(restoredView);
+  if (location.hash === "#board-limit-ladder") {
+    window.requestAnimationFrame(() => document.getElementById("board-limit-ladder")?.scrollIntoView({ block: "nearest", inline: "nearest" }));
+  }
 
   window.setInterval(updateStatus, 1000);
+  window.setInterval(refreshBoardLadderState, 10_000);
   state.newBondStatusTimer = window.setInterval(
     refreshNewBondSecondDayState,
     NEW_BOND_STATUS_INTERVAL_MS,
@@ -5059,6 +5622,8 @@ async function boot() {
     setBondPreviewActive(!document.hidden && !bondMarketPreview.hidden);
     updateStatus();
     if (!document.hidden) {
+      void refreshUs10y();
+      void refreshBoardLadderState();
       refreshNewBondSecondDayState();
       refreshVisibleDataImmediately();
     }
@@ -5227,6 +5792,7 @@ sparkToggle.addEventListener("change", (event) => {
 
 refreshButton.addEventListener("click", () => {
   state.nextRefreshAt = Date.now();
+  void refreshUs10y({ force: true });
   refreshQuotes({ force: true });
   refreshIndices({ force: true });
   refreshBondQuotes({ force: true });
@@ -5564,7 +6130,7 @@ resetListButton.addEventListener("click", () => {
   stockListEditor.value = sectorsToEditorText(state.sectors);
   editorMessage.textContent = "已恢复默认股票池";
   editorMessage.classList.remove("is-error");
-  state.quotes = createDemoQuotes(getAllStocks(state.sectors));
+  retainQuotesForStocks(getAllStocks(state.sectors));
   state.hydrated = hydrateSectors(state.quotes);
   render();
   refreshQuotes({ force: true });
@@ -5582,10 +6148,8 @@ editorForm.addEventListener("submit", async (event) => {
     saveSectors(resolved);
     state.sectors = resolved;
     syncStackGroupsWithSectors();
-    state.quotes = createDemoQuotes(getAllStocks(state.sectors));
+    retainQuotesForStocks(getAllStocks(state.sectors));
     state.hydrated = hydrateSectors(state.quotes);
-    state.source = "演示数据";
-    state.lastUpdated = new Date();
     render();
     editorDialog.close();
     await refreshQuotes({ force: true });

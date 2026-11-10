@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MiniQMT 分时指标</title>
+    <title>QMT 分时指标</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="./bond.css" />
   </head>
@@ -13,9 +13,10 @@
         <a class="back-link" href="./">← 返回看板</a>
         <a class="back-link heatmap-link" href="./bond-heatmap.html">转债星图</a>
         <a class="back-link heatmap-link" href="./bond-tags.html">标签管理</a>
+        <a id="bondAiAnalysisLink" class="back-link heatmap-link" href="./bond-ai.html" target="_blank" rel="noopener">AI 分析</a>
         <div class="instrument-heading">
           <div>
-            <span class="eyebrow">MINIQMT · 只读</span>
+            <span class="eyebrow">大 QMT · 只读</span>
             <h1><span id="bondName">可转债</span> <small id="bondCode"></small></h1>
             <div class="bond-tag-tools">
               <div id="bondTags" class="bond-tags" aria-label="转债标签"></div>
@@ -150,7 +151,7 @@
           <span class="legend-note">移动查看详情 · 双击K线进入当日分时</span>
         </div>
         <div id="chartWrap" class="chart-wrap">
-          <canvas id="indicatorChart" aria-label="MiniQMT六栏分时指标图"></canvas>
+          <canvas id="indicatorChart" aria-label="QMT六栏分时指标图"></canvas>
           <div id="chartTooltip" class="chart-tooltip" hidden></div>
         </div>
       </section>
@@ -167,7 +168,7 @@
         <div class="book-quote-summary">
           <strong id="bookLastPrice">-</strong>
           <span id="bookChange">-</span>
-          <small id="bookTime">MiniQMT full_tick</small>
+          <small id="bookTime">QMT full_tick</small>
         </div>
         <div id="orderBook" class="order-book" aria-label="买卖五档"></div>
         <div class="book-spread-row">

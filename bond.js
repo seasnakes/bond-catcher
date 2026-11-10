@@ -43,6 +43,32 @@ const EVENT_LABELS = {
 const params = new URLSearchParams(window.location.search);
 const requestedCode = String(params.get("code") || "").replace(/\D/g, "");
 const requestedName = params.get("name") || "";
+const TAG_UPDATE_CHANNEL_NAME = "finance:bond-tags";
+const TAG_UPDATE_STORAGE_KEY = "finance:bond-tags-updated";
+const tagUpdateChannel = typeof window.BroadcastChannel === "function"
+  ? new window.BroadcastChannel(TAG_UPDATE_CHANNEL_NAME)
+  : null;
+
+function announceTagUpdate(reason, rows = []) {
+  const normalizedRows = rows.map((row) => ({
+    code: String(row.code || "").toUpperCase(),
+    tags: Array.isArray(row.tags) ? row.tags.map(String) : [],
+    primaryTag: String(row.primaryTag || ""),
+  })).filter((row) => row.code);
+  const message = {
+    type: "finance:bond-tags-updated",
+    version: Date.now(),
+    reason: String(reason || "标签已更新"),
+    codes: normalizedRows.map((row) => row.code),
+    rows: normalizedRows,
+  };
+  tagUpdateChannel?.postMessage(message);
+  try {
+    window.localStorage.setItem(TAG_UPDATE_STORAGE_KEY, JSON.stringify(message));
+  } catch (_error) {
+    // BroadcastChannel remains the primary live notification path.
+  }
+}
 const SHANGHAI_CLOCK_FORMATTER = new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Shanghai",
   year: "numeric",
@@ -265,6 +291,7 @@ function formatNumber(value, digits = 2) {
 }
 
 function formatAmount(value) {
+  if (value === null || value === undefined || value === "") return "-";
   const number = Number(value);
   if (!Number.isFinite(number)) return "-";
   if (Math.abs(number) >= 1e8) return `${(number / 1e8).toFixed(2)}亿`;
@@ -273,6 +300,7 @@ function formatAmount(value) {
 }
 
 function formatPercent(value, digits = 2) {
+  if (value === null || value === undefined || value === "") return "-";
   const number = Number(value);
   if (!Number.isFinite(number)) return "-";
   return `${number > 0 ? "+" : ""}${number.toFixed(digits)}%`;
@@ -287,7 +315,7 @@ function renderBondMetadata(payload) {
     `正股 ${formatNumber(payload.stock_price, 2)} / 转股价 ${formatNumber(payload.conversion_price, 2)}`;
   nodes.circulatingAmount.textContent = formatAmount(payload.circulating_face_value);
   nodes.circulatingDetail.textContent =
-    `${payload.circulating_source || "MiniQMT"} · 未转股面值`;
+    `${payload.circulating_source || "QMT"} · 未转股面值`;
   nodes.circulatingMarketValue.textContent = formatAmount(payload.circulating_market_value);
   nodes.marketValueDetail.textContent =
     `按转债 ${formatNumber(payload.bond_price, 3)} 元计算`;
@@ -524,6 +552,7 @@ async function postJson(url, body, timeoutMs = 12000) {
 
 function applyBondPayload(payload, intradayPayloads = [payload]) {
   state.payload = payload;
+  updateBondAiAnalysisLink(payload.trading_date);
   state.intradayPayloads = intradayPayloads;
   state.intradayRows = intradayPayloads.flatMap((dayPayload, dayIndex) =>
     (dayPayload.rows || []).map((row) => ({
@@ -536,6 +565,14 @@ function applyBondPayload(payload, intradayPayloads = [payload]) {
   );
   state.selectedIndex = Math.max(0, state.intradayRows.length - 1);
   renderPayload(payload);
+}
+
+function updateBondAiAnalysisLink(tradingDate = "") {
+  const link = document.querySelector("#bondAiAnalysisLink");
+  if (!link) return;
+  const query = new URLSearchParams({ code: requestedCode, days: "5" });
+  if (/^\d{8}$/.test(String(tradingDate))) query.set("date", tradingDate);
+  link.href = `./bond-ai.html?${query}`;
 }
 
 function panelHistoryBackfillRequired(payload = state.payload) {
@@ -635,7 +672,7 @@ async function loadPanelHistoryBackfill() {
   );
   try {
     // Omitting fast intentionally invokes the server's ordinary read-only GET.
-    // The backend refreshes its existing MiniQMT minute cache asynchronously;
+    // The backend refreshes its existing QMT minute cache asynchronously;
     // this browser path never calls a history download endpoint.
     const query = new URLSearchParams({ code: requestedCode });
     const payload = await fetchJson(`/api/miniqmt/bond?${query}`, 12000);
@@ -1638,7 +1675,7 @@ async function loadBond(options = {}) {
     : state.manualDate
       ? nodes.dateSelect.value || params.get("date") || ""
       : "";
-  setStatus("正在读取MiniQMT");
+  setStatus("正在读取QMT");
   if (manualBackfillMatchesCurrentView()) renderManualBackfillState();
   try {
     const query = new URLSearchParams({ code: requestedCode });
@@ -1654,7 +1691,7 @@ async function loadBond(options = {}) {
     applyBondPayload(payload, intradayPayloads);
     setStatus(
       intradayPayloads.length > 1
-        ? `${intradayPayloads.length}日分时 · MiniQMT真实分钟数据`
+        ? `${intradayPayloads.length}日分时 · QMT真实分钟数据`
         : statusText(payload),
       statusTone(payload),
     );
@@ -1670,9 +1707,9 @@ async function loadBond(options = {}) {
     return true;
   } catch (error) {
     if (requestId !== state.requestId) return false;
-    setStatus(error.message || "MiniQMT读取失败", "is-error");
+    setStatus(error.message || "QMT读取失败", "is-error");
     nodes.eventList.innerHTML = `<div class="empty-events">${escapeHtml(
-      error.message || "MiniQMT读取失败",
+      error.message || "QMT读取失败",
     )}</div>`;
     if (manualBackfillMatchesCurrentView()) renderManualBackfillState();
     schedulePanelLoadErrorRetry();
@@ -1779,8 +1816,10 @@ function setView(view, options = {}) {
 
   if (options.load === false) return;
   if (state.view === "daily") {
-    if (state.dailyPayload && !options.force) renderDailyPayload(state.dailyPayload);
-    else void loadDaily();
+    if (state.dailyPayload && !options.force) {
+      renderDailyPayload(state.dailyPayload);
+      setStatus(`日K · ${state.dailyPayload.source} · ${state.dailyPayload.rows.length}日`);
+    } else void loadDaily();
   } else if (state.payload && !options.force) {
     renderPayload(state.payload);
     setStatus(statusText(state.payload), statusTone(state.payload));
@@ -1820,7 +1859,9 @@ async function loadDaily() {
   }
   const requestId = (state.requestId += 1);
   const count = Number(nodes.dailyRangeSelect.value) || 120;
-  setStatus("正在读取 MiniQMT 日K");
+  setStatus("正在读取大 QMT 日K");
+  nodes.dataAlert.hidden = true;
+  if (!state.dailyPayload) drawDailyChart();
   nodes.refreshButton.disabled = true;
   try {
     const query = new URLSearchParams({ code: requestedCode, count: String(count) });
@@ -1831,8 +1872,9 @@ async function loadDaily() {
     renderDailyPayload(payload);
     setStatus(`日K · ${payload.source} · ${payload.rows.length}日`);
   } catch (error) {
-    if (requestId !== state.requestId) return;
-    setStatus(error.message || "MiniQMT日K读取失败", "is-error");
+    if (requestId !== state.requestId || state.view !== "daily") return;
+    setStatus("日 K 读取失败，请检查大 QMT 数据连接后重试。", "is-error");
+    if (!state.dailyPayload) drawDailyChart("日 K 暂不可用，请点击立即刷新重试");
   } finally {
     if (requestId === state.requestId) nodes.refreshButton.disabled = false;
   }
@@ -1846,6 +1888,7 @@ function displayDailyDate(value) {
 }
 
 function renderDailyPayload(payload) {
+  updateBondAiAnalysisLink(payload.end_date);
   const rows = payload.rows || [];
   if (!rows.length) return;
   const latest = rows.at(-1);
@@ -1883,7 +1926,7 @@ function renderPayload(payload) {
   const displayedRows = intradayRows();
   const displayedPayloads = intradayPayloads();
   const displayName = payload.name || requestedName || "可转债";
-  document.title = `${displayName} ${payload.code} · MiniQMT分时指标`;
+  document.title = `${displayName} ${payload.code} · QMT分时指标`;
   nodes.name.textContent = displayName;
   nodes.code.textContent = payload.code;
   renderBondTags(payload.tags);
@@ -1971,7 +2014,7 @@ function renderPayload(payload) {
   );
   const historyBackfillPartial = ["partial", "failed"].includes(historyStatus);
   nodes.dataFootnote.textContent = historySourceUnavailable
-    ? `${payload.source || "本地监控"} · MiniQMT 标记为非活跃或非公开连续交易标的，暂无盘中分钟源，已停止自动补齐。`
+    ? `${payload.source || "本地监控"} · QMT 标记为非活跃或非公开连续交易标的，暂无盘中分钟源，已停止自动补齐。`
     : payload.fast_preview
     ? historyBackfillInProgress
       ? `${payload.source || "本地监控"} · 极速预览只读取本地监控和已有缓存；早盘历史分钟正在后台低频补齐，完成后将自动重绘。`
@@ -1995,9 +2038,9 @@ function renderPayload(payload) {
     : historyBackfillPartial
     ? `${payload.source || "本地监控"} · 历史分钟部分可用；后台将在维护窗口内有限重试。`
     : autoRefreshPaused
-    ? `${payload.source || "MiniQMT"} · 当前为非交易时段，自动刷新已暂停；可使用“立即刷新”手动检查。`
+    ? `${payload.source || "QMT"} · 当前为非交易时段，自动刷新已暂停；可使用“立即刷新”手动检查。`
     : payload.full_session
-    ? `${payload.source || "MiniQMT"} · 当前为完整交易日数据；黄色均价线按分钟成交额估算，普通行情不等同于Level-2逐笔。`
+    ? `${payload.source || "QMT"} · 当前为完整交易日数据；黄色均价线按分钟成交额估算，普通行情不等同于Level-2逐笔。`
     : payload.complete_session
       ? "当前分钟数据可用于指标分析，但尚未达到241根完整回放；黄色均价线按分钟成交额估算。"
       : `当前为盘中数据；页面每${payload.realtime?.refresh_interval_seconds || 2}秒读取一次，分钟指标在来源分钟形成后稳定，黄色均价线按分钟成交额估算。`;
@@ -2098,14 +2141,15 @@ function renderDataAlert(payload) {
   }
   nodes.dataAlert.className = "data-alert is-stale";
   if (!marketRefreshWindow().active) {
+    nodes.dataAlert.className = "data-alert is-history";
     nodes.dataAlert.textContent =
-      `今日数据尚未到达，当前临时显示 ${displayDate(payload.trading_date)}。` +
+      `当前显示最近可用交易日 ${displayDate(payload.trading_date)}。` +
       "非交易时段已暂停自动检查，可使用“立即刷新”手动检查。";
     return;
   }
   nodes.dataAlert.textContent =
     `今日数据尚未到达，当前临时显示 ${displayDate(payload.trading_date)}。` +
-    "页面会在交易时段持续检查，并在MiniQMT产生今日数据后自动切换。";
+    "页面会在交易时段持续检查，并在QMT产生今日数据后自动切换。";
 }
 
 function renderDates(dates, selected) {
@@ -2232,6 +2276,7 @@ async function saveTagEditor() {
     if (state.payload) state.payload.tags = payload.tags;
     for (const item of state.intradayPayloads) item.tags = payload.tags;
     renderBondTags(payload.tags);
+    announceTagUpdate("分时页保存转债标签", [payload]);
     nodes.tagEditorStatus.textContent = "已保存";
     window.setTimeout(() => {
       nodes.tagEditor.hidden = true;
@@ -2686,9 +2731,17 @@ function movingAverage(rows, period) {
   });
 }
 
-function drawDailyChart() {
+function drawDailyChart(emptyMessage = "正在读取日 K…") {
   const rows = state.dailyPayload?.rows || [];
-  if (!rows.length) return;
+  if (!rows.length) {
+    const context = setupCanvas();
+    const geometry = dailyChartGeometry(nodes.canvas);
+    context.clearRect(0, 0, geometry.width, geometry.height);
+    context.font = '14px Arial, "Microsoft YaHei", sans-serif';
+    context.fillStyle = "#6c7668";
+    context.fillText(emptyMessage, 24, 40);
+    return;
+  }
   const chartRows = rows.map((row) => ({ ...row }));
   for (const [key, period] of [["ma5", 5], ["ma10", 10], ["ma20", 20]]) {
     const values = movingAverage(chartRows, period);
@@ -3646,6 +3699,7 @@ document.addEventListener("visibilitychange", () => {
 nodes.name.textContent = requestedName || "可转债";
 nodes.code.textContent = requestedCode;
 nodes.intradayDaysSelect.value = String(state.intradayDays);
+updateBondAiAnalysisLink(params.get("date") || "");
 void loadBondMetadata();
 if (!isPanel) {
   void loadBondTradingCapabilities();

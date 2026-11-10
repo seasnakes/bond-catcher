@@ -127,13 +127,13 @@ function auctionSeries(secid, change, deltaAmount) {
     date: "20260812",
     samples: Array.from({ length: 5 }, (_, index) => ({
       date: "20260812",
-      time: `09:2${index}:00`,
-      timestamp: goodTimestamp + index * 3000,
-      capturedAt: capturedAt + index * 3000,
+      time: `09:2${index + 1}:00`,
+      timestamp: Date.parse(`2026-08-12T09:2${index + 1}:00+08:00`),
+      capturedAt: Date.parse(`2026-08-12T09:2${index + 1}:01+08:00`),
       price: 100 + change,
       change,
-      amount: deltaAmount * (index + 1),
-      deltaAmount,
+      amount: index === 4 ? deltaAmount : 0,
+      deltaAmount: index === 4 ? deltaAmount : 0,
     })),
   };
 }
@@ -214,7 +214,9 @@ test("does not label zero-amount auction prices as volume anomalies", () => {
   const result = buildAuctionSignalRows(pairs, series, "20260812");
   assert.equal(result.amountReady, false);
   assert.deepEqual(result.amountCoverage, { stock: 0, bond: 0 });
-  assert.equal(result.signals.length, 0);
+  assert.equal(result.signals.length, 2);
+  assert.ok(result.signals.every((signal) => signal.signalType === "price_paired"));
+  assert.ok(result.signals.every((signal) => signal.stock.amount === null && signal.bond.amount === null));
 });
 
 test("deduplicates the same bond-stock pair across board groups", () => {

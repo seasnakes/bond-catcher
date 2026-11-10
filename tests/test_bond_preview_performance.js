@@ -5,6 +5,7 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const APP_SOURCE = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+const STYLE_SOURCE = fs.readFileSync(path.join(__dirname, "..", "styles.css"), "utf8");
 
 function sourceBetween(startMarker, endMarker) {
   const start = APP_SOURCE.indexOf(startMarker);
@@ -135,6 +136,16 @@ function previewContext() {
     bondOverlay,
   };
 }
+
+test("bond preview preserves the monitor height so board targets do not move", () => {
+  const previewRule = STYLE_SOURCE.match(/\.bond-market-preview\s*\{(?<body>[^}]+)\}/)?.groups?.body || "";
+
+  assert.match(
+    previewRule,
+    /height:\s*calc\(var\(--market-panel-body-height,\s*176px\)\s*\+\s*31px\)/,
+  );
+  assert.doesNotMatch(STYLE_SOURCE, /\.market-monitor-row\.is-bond-preview\s+\.signal-feed/);
+});
 
 test("preview paints a loading shell immediately and keeps the board live", () => {
   const fixture = previewContext();
