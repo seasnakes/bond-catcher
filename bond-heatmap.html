@@ -31,6 +31,14 @@
       <section class="heatmap-workspace">
         <aside class="heatmap-controls" aria-label="星图设置">
           <label>
+            <span>呈现方式</span>
+            <select id="viewSelect">
+              <option value="treemap">矩形星图</option>
+              <option value="terrain2d" selected>2D 等高线</option>
+              <option value="terrain3d">3D 山体</option>
+            </select>
+          </label>
+          <label>
             <span>分组</span>
             <select id="groupSelect">
               <option value="industry1">申万一级行业</option>
@@ -41,18 +49,60 @@
             </select>
           </label>
           <label>
-            <span>面积代表</span>
+            <span id="sizeLabel">点大小代表</span>
             <select id="sizeSelect">
               <option value="amount" selected>成交额</option>
               <option value="issue">发行规模</option>
             </select>
           </label>
+          <label id="heightControl">
+            <span>山峰高度</span>
+            <select
+              id="heightSelect"
+              title="分组正股相对强度 = 去重正股涨跌幅中位数 + 1.6 ×（上涨占比 − 50%），再按全市场分组横截面标准化"
+            >
+              <option value="groupStrength" selected>强度加权相似密度</option>
+              <option value="groupPeak">分组独立强度峰</option>
+              <option value="activity">转债活跃度</option>
+              <option value="density">相似标的密度</option>
+            </select>
+          </label>
+          <label id="zoomControl" class="zoom-control" hidden>
+            <span>画面缩放 <output id="zoomValue">112%</output></span>
+            <input id="zoomRange" type="range" min="75" max="180" step="1" value="112" />
+            <small>放大后拖动空白处可平移</small>
+          </label>
+          <div id="cameraControls" class="camera-controls" hidden>
+            <div class="camera-heading">
+              <span>3D 视角</span>
+              <button id="cameraReset" type="button">复位</button>
+            </div>
+            <label>
+              <span>水平旋转 <output id="cameraYawValue">-10°</output></span>
+              <input id="cameraYaw" type="range" min="-180" max="180" step="1" value="-10" />
+            </label>
+            <label>
+              <span>俯视角 <output id="cameraPitchValue">50°</output></span>
+              <input id="cameraPitch" type="range" min="18" max="72" step="1" value="50" />
+            </label>
+            <p>短拖旋转 · 长按后拖拽平移 · 滚轮也可缩放</p>
+          </div>
           <label>
             <span>色彩代表</span>
             <select id="colorSelect">
               <option value="change" selected>涨跌幅</option>
               <option value="premium">转股溢价率</option>
               <option value="price">转债价格</option>
+            </select>
+          </label>
+          <label id="attentionControl" hidden>
+            <span>异动名称标注</span>
+            <select id="attentionSelect">
+              <option value="0">关闭</option>
+              <option value="1">转债涨跌幅 ≥ 1%</option>
+              <option value="2" selected>转债涨跌幅 ≥ 2%</option>
+              <option value="3">转债涨跌幅 ≥ 3%</option>
+              <option value="5">转债涨跌幅 ≥ 5%</option>
             </select>
           </label>
           <label>
@@ -71,13 +121,13 @@
             <span>搜索</span>
             <input id="searchInput" type="search" placeholder="名称 / 代码 / 正股" autocomplete="off" />
           </label>
-          <button id="refreshButton" type="button">刷新 MiniQMT 行情</button>
+          <button id="refreshButton" type="button">刷新 QMT 行情</button>
           <div id="colorLegend" class="color-legend" aria-label="色彩刻度"></div>
           <p id="dataNote" class="data-note"></p>
         </aside>
 
         <section id="heatmapStage" class="heatmap-stage" aria-label="可转债热力图">
-          <svg id="heatmapSvg" role="img" aria-label="按所选维度分组的可转债分层矩形图"></svg>
+          <svg id="heatmapSvg" role="img" aria-label="可转债矩形星图与聚类地形图"></svg>
           <div id="heatmapTooltip" class="heatmap-tooltip" hidden></div>
           <section id="sectorPreview" class="sector-preview" aria-label="分组转债列表" hidden>
             <header>
@@ -116,6 +166,7 @@
       <button id="closeBondDetail" class="detail-close" type="button" aria-label="关闭分时详情">×</button>
       <iframe id="bondDetailFrame" title="可转债分时指标"></iframe>
     </section>
+    <script src="./bond-landscape.js" defer></script>
     <script src="./bond-heatmap.js" defer></script>
   </body>
 </html>

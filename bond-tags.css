@@ -164,6 +164,14 @@ h1 { margin: 3px 0 0; font-size: clamp(25px, 3vw, 38px); }
   color: #2f4923;
 }
 
+.tag-filter-list button.is-untagged-filter {
+  border-style: dashed;
+}
+
+.tag-filter-list button.is-untagged-filter.is-active {
+  border-style: solid;
+}
+
 .tag-edit-panel { margin-top: 9px; padding: 12px; }
 .tag-edit-panel[hidden] { display: none; }
 .tag-edit-panel header, .tag-edit-panel footer, .tag-table-card > header {

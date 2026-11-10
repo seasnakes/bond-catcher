@@ -188,6 +188,82 @@ select {
   opacity: 0.65;
 }
 
+.camera-controls {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #bdc9b1;
+  background: #f2f6ee;
+}
+
+.camera-controls[hidden] {
+  display: none;
+}
+
+.camera-heading,
+.camera-controls label > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  color: #53634b;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.camera-heading > span {
+  font-size: 11px;
+}
+
+.camera-heading button {
+  width: auto;
+  height: 22px;
+  padding: 0 7px;
+  font-size: 10px;
+}
+
+.camera-controls input[type="range"] {
+  height: 18px;
+  padding: 0;
+  accent-color: #627d55;
+}
+
+.camera-controls output {
+  color: #263222;
+  font-variant-numeric: tabular-nums;
+}
+
+.camera-controls p {
+  margin: 0;
+  color: #778272;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.zoom-control > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.zoom-control input[type="range"] {
+  height: 18px;
+  padding: 0;
+  accent-color: #627d55;
+}
+
+.zoom-control output {
+  color: #263222;
+  font-variant-numeric: tabular-nums;
+}
+
+.zoom-control small {
+  color: #778272;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
 .color-legend {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
@@ -220,12 +296,218 @@ select {
   min-width: 0;
   min-height: 620px;
   overflow: hidden;
+  transition: background-color 180ms ease;
 }
 
 #heatmapSvg {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.heatmap-controls label[hidden] {
+  display: none;
+}
+
+.heatmap-stage.is-landscape {
+  border-color: #28322d;
+  background: #090d0b;
+}
+
+.heatmap-stage.is-landscape #heatmapSvg {
+  cursor: grab;
+  touch-action: none;
+}
+
+.heatmap-stage.is-landscape.is-rotating #heatmapSvg,
+.heatmap-stage.is-landscape.is-panning #heatmapSvg {
+  cursor: grabbing;
+}
+
+.heatmap-stage.is-landscape .bond-point,
+.heatmap-stage.is-landscape .landscape-label {
+  cursor: pointer;
+}
+
+.landscape-background {
+  fill: #090d0b;
+}
+
+.landscape-grid-dot {
+  fill: rgba(206, 221, 207, 0.16);
+  pointer-events: none;
+}
+
+.terrain-cell {
+  stroke: none;
+  pointer-events: none;
+}
+
+.terrain-contour {
+  fill: none;
+  stroke: rgba(224, 232, 221, 0.56);
+  stroke-linecap: round;
+  stroke-width: 0.75px;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.terrain-face {
+  stroke: rgba(220, 232, 222, 0.08);
+  stroke-width: 0.45px;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.terrain-mesh {
+  fill: none;
+  stroke: rgba(224, 234, 224, 0.3);
+  stroke-width: 0.65px;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.bond-point {
+  cursor: pointer;
+  stroke: rgba(255, 255, 255, 0.82);
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+
+.bond-point:hover,
+.bond-point:focus-visible {
+  stroke: #fff7bb;
+  stroke-width: 2.5px;
+}
+
+.bond-selection-marker {
+  pointer-events: none;
+}
+
+.bond-selection-ring {
+  fill: none;
+  stroke: #fff36f;
+  vector-effect: non-scaling-stroke;
+}
+
+.bond-selection-ring.is-inner {
+  stroke-width: 2.4px;
+  filter: drop-shadow(0 0 3px rgba(255, 243, 111, 0.95));
+}
+
+.bond-selection-ring.is-outer {
+  opacity: 0.52;
+  stroke-width: 1.6px;
+  animation: bond-selection-pulse 1.15s ease-in-out infinite;
+}
+
+@keyframes bond-selection-pulse {
+  0%,
+  100% {
+    opacity: 0.28;
+    stroke-width: 1.2px;
+  }
+
+  50% {
+    opacity: 0.82;
+    stroke-width: 3px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bond-selection-ring.is-outer {
+    animation: none;
+    opacity: 0.65;
+  }
+}
+
+.landscape-label {
+  cursor: pointer;
+}
+
+.landscape-label circle,
+.landscape-label path {
+  fill: #d7bc73;
+  stroke: rgba(255, 245, 207, 0.88);
+  stroke-width: 0.8px;
+  vector-effect: non-scaling-stroke;
+}
+
+.landscape-label text {
+  fill: #eef2ed;
+  font-size: 11px;
+  font-weight: 700;
+  paint-order: stroke;
+  pointer-events: none;
+  stroke: rgba(6, 9, 7, 0.92);
+  stroke-width: 3px;
+}
+
+.landscape-label .landscape-label-meta {
+  fill: #b7c2b9;
+  font-size: 8px;
+  font-weight: 500;
+}
+
+.attention-labels {
+  pointer-events: none;
+}
+
+.attention-label {
+  cursor: pointer;
+  pointer-events: all;
+}
+
+.attention-label line {
+  stroke: rgba(224, 232, 221, 0.6);
+  stroke-width: 0.75px;
+  vector-effect: non-scaling-stroke;
+}
+
+.attention-label rect {
+  fill: rgba(8, 12, 9, 0.9);
+  stroke: rgba(225, 234, 224, 0.4);
+  stroke-width: 0.65px;
+  vector-effect: non-scaling-stroke;
+}
+
+.attention-label:hover rect,
+.attention-label:focus-visible rect,
+.attention-label.is-selected rect {
+  stroke: #fff36f;
+  stroke-width: 1.5px;
+}
+
+.attention-label:focus-visible {
+  outline: none;
+}
+
+.attention-label text {
+  fill: #f1f4ef;
+  font-size: 9.5px;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: rgba(5, 8, 6, 0.92);
+  stroke-width: 2px;
+}
+
+.attention-label .attention-change.is-up {
+  fill: #ff616c;
+}
+
+.attention-label .attention-change.is-down {
+  fill: #49ca7e;
+}
+
+.attention-label .attention-change.is-flat {
+  fill: #c2cbc3;
+}
+
+.landscape-caption {
+  fill: rgba(214, 224, 214, 0.64);
+  font-size: 9px;
+  letter-spacing: 0.035em;
+  pointer-events: none;
 }
 
 .group-outline {
@@ -627,6 +909,16 @@ select {
   .heatmap-controls {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .camera-controls {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .camera-heading,
+  .camera-controls p {
+    grid-column: 1 / -1;
   }
 
   .color-legend,

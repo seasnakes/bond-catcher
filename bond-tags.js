@@ -1,10 +1,19 @@
 const params = new URLSearchParams(window.location.search);
+const FILTER_UNTAGGED = "__untagged__";
+const ATTRIBUTE_TAGS = new Set(["次新债", "小盘", "ST"]);
+const TAG_UPDATE_CHANNEL_NAME = "finance:bond-tags";
+const TAG_UPDATE_STORAGE_KEY = "finance:bond-tags-updated";
+const initialUntaggedFilter = params.get("filter") === "untagged";
+const tagUpdateChannel = typeof window.BroadcastChannel === "function"
+  ? new window.BroadcastChannel(TAG_UPDATE_CHANNEL_NAME)
+  : null;
 
 const state = {
   rows: [],
   tagOrder: [],
   tagCounts: {},
-  selectedTag: params.get("tag") || "",
+  selectedTag: initialUntaggedFilter ? "" : params.get("tag") || "",
+  showUntagged: initialUntaggedFilter,
   quotes: new Map(),
   searchAliases: new Map(),
   editingRow: null,
@@ -14,10 +23,12 @@ const state = {
   selectedCodes: new Set(),
   bulkSaving: false,
   tagCreating: false,
+  quotesLoading: false,
 };
 
 const nodes = {
   status: document.querySelector("#dataStatus"),
+  quoteStatus: document.querySelector("#quoteStatus"),
   allCount: document.querySelector("#allCount"),
   matchedCount: document.querySelector("#matchedCount"),
   tagCount: document.querySelector("#tagCount"),
@@ -90,9 +101,55 @@ async function fetchJson(url, options = {}) {
   }
 }
 
+function announceTagUpdate(reason, details = {}) {
+  const rows = Array.isArray(details.rows)
+    ? details.rows.map((row) => ({
+        code: String(row.code || "").toUpperCase(),
+        tags: Array.isArray(row.tags) ? row.tags.map(String) : [],
+        primaryTag: String(row.primaryTag || ""),
+      })).filter((row) => row.code)
+    : [];
+  const message = {
+    type: "finance:bond-tags-updated",
+    version: Date.now(),
+    reason: String(reason || "标签已更新"),
+    codes: rows.map((row) => row.code),
+    rows,
+    ...(Array.isArray(details.tagOrder) ? { tagOrder: details.tagOrder.map(String) } : {}),
+  };
+  tagUpdateChannel?.postMessage(message);
+  try {
+    window.localStorage.setItem(TAG_UPDATE_STORAGE_KEY, JSON.stringify(message));
+  } catch (_error) {
+    // BroadcastChannel remains the primary live notification path.
+  }
+}
+
+async function enrichSupplementalRows() {
+  const rows = state.rows.filter((row) => row.supplemental && (
+    !/^\d{6}\.(SH|SZ)$/.test(String(row.stockCode || ""))
+    || !row.stockName || row.stockName === "待补正股"
+  ));
+  for (let index = 0; index < rows.length; index += 5) {
+    const group = rows.slice(index, index + 5);
+    const metadataRows = await Promise.all(group.map((row) =>
+      fetchJson(`/api/miniqmt/bond-meta?code=${encodeURIComponent(row.code)}`, { timeout: 20000 })
+        .catch(() => null)));
+    metadataRows.forEach((metadata, metadataIndex) => {
+      if (!metadata?.ok) return;
+      const row = group[metadataIndex];
+      if (metadata.name) row.name = String(metadata.name);
+      if (metadata.stock_code) row.stockCode = String(metadata.stock_code).toUpperCase();
+      if (metadata.stock_name) row.stockName = String(metadata.stock_name);
+    });
+    renderTable();
+  }
+}
+
 function filteredRows() {
   const query = nodes.search.value.trim();
   return state.rows.filter((row) => {
+    if (state.showUntagged && !rowIsUntagged(row)) return false;
     if (state.selectedTag && !(row.tags || []).includes(state.selectedTag)) return false;
     if (!query) return true;
     return searchMatchScore(row, query) < Number.POSITIVE_INFINITY;
@@ -103,6 +160,13 @@ function filteredRows() {
     const rightAmount = Number(state.quotes.get(right.code)?.amount) || 0;
     return rightPrimary - leftPrimary || rightAmount - leftAmount || String(left.code).localeCompare(String(right.code));
   });
+}
+
+function rowIsUntagged(row) {
+  return !(Array.isArray(row?.tags) && row.tags.some((tag) => {
+    const normalized = String(tag || "").trim();
+    return normalized && !ATTRIBUTE_TAGS.has(normalized);
+  }));
 }
 
 function normalizeSearchValue(value) {
@@ -169,6 +233,7 @@ function suggestedRows(query, options = {}) {
   const normalized = normalizeSearchValue(query);
   if (!normalized && !options.allowEmpty) return [];
   return state.rows
+    .filter((row) => !options.untaggedOnly || rowIsUntagged(row))
     .filter((row) => !options.excludeTag || !(row.tags || []).includes(options.excludeTag))
     .map((row) => ({ row, score: normalized ? searchMatchScore(row, normalized) : 0 }))
     .filter((item) => Number.isFinite(item.score))
@@ -226,11 +291,14 @@ function selectTopSearchRow(row) {
 }
 
 function setSelectedTag(tag) {
-  state.selectedTag = state.tagOrder.includes(tag) ? tag : "";
+  state.showUntagged = tag === FILTER_UNTAGGED;
+  state.selectedTag = state.showUntagged ? "" : state.tagOrder.includes(tag) ? tag : "";
   state.selectedCodes.clear();
   const url = new URL(window.location.href);
   if (state.selectedTag) url.searchParams.set("tag", state.selectedTag);
   else url.searchParams.delete("tag");
+  if (state.showUntagged) url.searchParams.set("filter", "untagged");
+  else url.searchParams.delete("filter");
   window.history.replaceState(window.history.state, "", url);
   renderFilters();
   renderTable();
@@ -260,14 +328,24 @@ function renderBulkActions(rows = filteredRows()) {
 
 function renderFilters() {
   nodes.filters.replaceChildren();
+  const untaggedCount = state.rows.filter(rowIsUntagged).length;
   const entries = [
     ["", "全部", state.rows.length],
+    [FILTER_UNTAGGED, "未打标签", untaggedCount],
     ...state.tagOrder.map((tag) => [tag, tag, Number(state.tagCounts[tag]) || 0]),
   ];
   for (const [value, label, count] of entries) {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = state.selectedTag === value ? "is-active" : "";
+    const active = value === FILTER_UNTAGGED
+      ? state.showUntagged
+      : !state.showUntagged && state.selectedTag === value;
+    button.classList.toggle("is-active", active);
+    button.classList.toggle("is-untagged-filter", value === FILTER_UNTAGGED);
+    button.setAttribute("aria-pressed", String(active));
+    if (value === FILTER_UNTAGGED) {
+      button.title = "只显示尚未设置题材标签的转债；次新债、小盘、ST 等系统属性不计";
+    }
     button.textContent = `${label} ${count}`;
     button.addEventListener("click", () => setSelectedTag(value));
     nodes.filters.append(button);
@@ -282,12 +360,16 @@ function makeCell(className = "") {
 
 function renderTable() {
   const rows = filteredRows();
-  nodes.tableBody.replaceChildren();
+  const fragment = document.createDocumentFragment();
   nodes.allCount.textContent = String(state.rows.length);
   nodes.matchedCount.textContent = String(rows.length);
   nodes.tagCount.textContent = String(state.tagOrder.length);
-  nodes.resultTitle.textContent = state.selectedTag ? `${state.selectedTag} 标签` : "全部转债";
-  nodes.resultMeta.textContent = state.selectedTag
+  nodes.resultTitle.textContent = state.showUntagged
+    ? "未打题材标签的转债"
+    : state.selectedTag ? `${state.selectedTag} 标签` : "全部转债";
+  nodes.resultMeta.textContent = state.showUntagged
+    ? `共 ${rows.length} 只 · 次新债/小盘/ST 不算题材标签，保存题材标签后会自动移出`
+    : state.selectedTag
     ? `共 ${rows.length} 只 · 主标签优先，其次按成交额排序`
     : `共 ${rows.length} 只 · 默认按成交额排序`;
   nodes.empty.hidden = rows.length > 0;
@@ -355,7 +437,7 @@ function renderTable() {
       tagButton.addEventListener("click", () => setSelectedTag(tag));
       tagWrap.append(tagButton);
     }
-    if (!tagWrap.childElementCount) tagWrap.textContent = "未分类";
+    if (!tagWrap.childElementCount) tagWrap.textContent = "未打标签";
     tags.append(tagWrap);
 
     const actions = makeCell();
@@ -367,8 +449,9 @@ function renderTable() {
     actions.append(edit);
 
     tableRow.append(bond, stock, industry, price, change, amount, tags, actions);
-    nodes.tableBody.append(tableRow);
+    fragment.append(tableRow);
   }
+  nodes.tableBody.replaceChildren(fragment);
 }
 
 function renderEditOptions() {
@@ -456,6 +539,7 @@ async function createTag(event) {
     state.tagCounts = payload.tagCounts || { ...state.tagCounts, [tag]: 0 };
     nodes.createTagInput.value = "";
     nodes.createTagStatus.textContent = `已新增“${tag}”，可在编辑标签时直接选用`;
+    announceTagUpdate("新增标签", { tagOrder: payload.tagOrder || state.tagOrder });
     renderFilters();
     renderTable();
     if (state.editingRow) {
@@ -515,6 +599,7 @@ async function saveQuickAdd() {
     });
     row.tags = payload.tags || [];
     row.primaryTag = payload.primaryTag || "";
+    announceTagUpdate("快捷添加标签", { rows: [row] });
     recalculateCounts();
     renderFilters();
     renderTable();
@@ -550,6 +635,7 @@ async function saveEditor() {
     });
     state.editingRow.tags = payload.tags || [];
     state.editingRow.primaryTag = payload.primaryTag || "";
+    announceTagUpdate("保存转债标签", { rows: [state.editingRow] });
     recalculateCounts();
     renderFilters();
     renderTable();
@@ -583,6 +669,7 @@ async function removeSelectedTag() {
       row.primaryTag = next.primaryTag || "";
     }
     state.selectedCodes.clear();
+    announceTagUpdate("批量移除标签", { rows: payload.rows || [] });
     recalculateCounts();
     renderFilters();
     renderTable();
@@ -597,39 +684,53 @@ async function removeSelectedTag() {
 }
 
 async function loadQuotes() {
+  if (state.quotesLoading || !state.rows.length) return;
+  state.quotesLoading = true;
   nodes.refresh.disabled = true;
-  nodes.status.textContent = "正在刷新 MiniQMT 行情…";
+  nodes.quoteStatus.textContent = "正在后台刷新 QMT 行情，可继续编辑标签…";
   try {
     const query = new URLSearchParams({ codes: state.rows.map((row) => row.code).join(",") });
     const payload = await fetchJson(`/api/miniqmt/quotes?${query}`, { timeout: 30000 });
     state.quotes = new Map((payload.quotes || []).map((quote) => [quote.monitor_code, quote]));
-    nodes.status.textContent = `${payload.source} · ${payload.generated_at.replace("T", " ")}`;
+    nodes.quoteStatus.textContent = `${payload.source || "QMT"} · ${String(payload.generated_at || "").replace("T", " ")}`;
     renderTable();
   } catch (error) {
-    nodes.status.textContent = `行情读取失败：${error.message}`;
+    nodes.quoteStatus.textContent = `行情暂不可用，标签仍可编辑${state.quotes.size ? "；保留上次行情" : ""}：${error.message}`;
   } finally {
+    state.quotesLoading = false;
     nodes.refresh.disabled = false;
   }
 }
 
-async function initialize() {
+async function loadSearchAliases() {
   try {
-    const [payload, aliasPayload] = await Promise.all([
-      fetchJson("/api/miniqmt/tags", { timeout: 20000 }),
-      fetchJson("./data/convertible-bond-search-aliases.json", { timeout: 20000 })
-        .catch(() => ({ aliases: {} })),
-    ]);
+    const payload = await fetchJson("./data/convertible-bond-search-aliases.json", { timeout: 20000 });
+    state.searchAliases = new Map(Object.entries(payload.aliases || {}));
+    if (nodes.search.value.trim()) renderTable();
+  } catch (_error) {
+    // Names and codes remain searchable without the optional alias index.
+  }
+}
+
+async function initialize() {
+  nodes.refresh.disabled = true;
+  void loadSearchAliases();
+  try {
+    const payload = await fetchJson("/api/miniqmt/tags", { timeout: 20000 });
     state.rows = payload.rows || [];
-    state.searchAliases = new Map(Object.entries(aliasPayload.aliases || {}));
     state.tagOrder = payload.tagOrder || [];
     state.tagCounts = payload.tagCounts || {};
     if (!state.tagOrder.includes(state.selectedTag)) state.selectedTag = "";
     renderFilters();
     renderTable();
     renderQuickAdd();
-    await loadQuotes();
+    nodes.status.textContent = `标签已就绪 · ${state.rows.length} 只转债，可直接编辑`;
+    nodes.refresh.disabled = false;
+    void loadQuotes();
+    void enrichSupplementalRows();
   } catch (error) {
     nodes.status.textContent = `标签读取失败：${error.message}`;
+    nodes.quoteStatus.textContent = "标签尚未就绪，未请求行情";
     nodes.empty.hidden = false;
     nodes.empty.textContent = error.message || "标签读取失败";
   }
@@ -641,7 +742,7 @@ nodes.search.addEventListener("input", () => {
     nodes.searchSuggestions,
     nodes.search.value,
     selectTopSearchRow,
-    { preferredTag: state.selectedTag },
+    { preferredTag: state.selectedTag, untaggedOnly: state.showUntagged },
   );
 });
 nodes.search.addEventListener("focus", () => {
@@ -649,13 +750,16 @@ nodes.search.addEventListener("focus", () => {
     nodes.searchSuggestions,
     nodes.search.value,
     selectTopSearchRow,
-    { preferredTag: state.selectedTag },
+    { preferredTag: state.selectedTag, untaggedOnly: state.showUntagged },
   );
 });
 nodes.search.addEventListener("keydown", (event) => {
   if (event.key === "Escape") nodes.searchSuggestions.hidden = true;
   if (event.key === "Enter") {
-    const first = suggestedRows(nodes.search.value, { preferredTag: state.selectedTag })[0];
+    const first = suggestedRows(nodes.search.value, {
+      preferredTag: state.selectedTag,
+      untaggedOnly: state.showUntagged,
+    })[0];
     if (!first) return;
     event.preventDefault();
     selectTopSearchRow(first);
