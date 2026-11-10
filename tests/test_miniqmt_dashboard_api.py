@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import unittest
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from unittest import mock
@@ -37,6 +38,9 @@ def load_dashboard_module(runtime_root: Path):
             "MINIQMT_RUNTIME_ROOT": str(runtime_root),
             "MINIQMT_BACKFILL_STATE_PATH": str(
                 runtime_root / "intraday-backfill-jobs.json"
+            ),
+            "MINIQMT_REDEEM_STATUS_DATABASE_PATH": str(
+                runtime_root / "convertible-bond-market.sqlite3"
             ),
             "FINANCE_BOARD_STATE_PATH": str(runtime_root / "board-state.json"),
         },
@@ -156,6 +160,54 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_quote_backend_metadata_reports_actual_gateway_route(self):
+        class GatewayBridge:
+            def get(self, path, timeout=None):
+                self.path = path
+                self.timeout = timeout
+                return {
+                    "market": {
+                        "configured": "bigqmt",
+                        "active": "bigqmt",
+                        "switch_count": 2,
+                        "previous_close_validation": {
+                            "reference": "miniqmt",
+                            "validated_codes": 586,
+                            "corrected_codes": 462,
+                            "last_error": None,
+                        },
+                        "previous_close_backfill": {
+                            "pending": 100,
+                        },
+                        "bigqmt_reference_data": {
+                            "status": "stale",
+                            "checked_codes": 586,
+                            "mismatched_codes": 585,
+                            "mismatch_ratio": 0.9983,
+                            "restart_recommended": True,
+                        },
+                    }
+                }
+
+        bridge = GatewayBridge()
+        payload = self.module.quote_backend_metadata(bridge)
+
+        self.assertEqual(bridge.path, "/api/meta/qmt-backends")
+        self.assertEqual(payload["active"], "bigqmt")
+        self.assertEqual(payload["configured"], "bigqmt")
+        self.assertFalse(payload["fallback_active"])
+        self.assertEqual(payload["switch_count"], 2)
+        self.assertEqual(payload["transport"], "zmq")
+        self.assertEqual(payload["previous_close_reference"], "miniqmt")
+        self.assertEqual(payload["previous_close_validated_codes"], 586)
+        self.assertEqual(payload["previous_close_corrected_codes"], 462)
+        self.assertEqual(payload["previous_close_backfill_pending"], 100)
+        self.assertEqual(payload["bigqmt_reference_status"], "stale")
+        self.assertEqual(payload["bigqmt_reference_checked_codes"], 586)
+        self.assertEqual(payload["bigqmt_reference_mismatched_codes"], 585)
+        self.assertAlmostEqual(payload["bigqmt_reference_mismatch_ratio"], 0.9983)
+        self.assertTrue(payload["bigqmt_restart_recommended"])
+
     def write_runtime_status(
         self,
         returned_codes: int,
@@ -175,6 +227,307 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+
+    def test_active_index_current_table_hides_codes_absent_from_current_bond_list(self):
+        filtered, removed = self.module.filter_active_index_current_constituents(
+            [
+                {"code": "118053.SH", "name": "正帆转债"},
+                {"code": "111026.SH", "name": "派克转债"},
+            ],
+            {"111026.SH"},
+        )
+        self.assertEqual([row["code"] for row in filtered], ["111026.SH"])
+        self.assertEqual(removed, 1)
+
+        fail_safe, fail_safe_removed = (
+            self.module.filter_active_index_current_constituents(
+                [{"code": "118053.SH"}],
+                set(),
+            )
+        )
+        self.assertEqual([row["code"] for row in fail_safe], ["118053.SH"])
+        self.assertEqual(fail_safe_removed, 0)
+        self.assertTrue(
+            self.module.is_directed_convertible_market_code("110815.SH")
+        )
+        self.assertTrue(
+            self.module.is_directed_convertible_market_code("124025.SZ")
+        )
+        self.assertFalse(
+            self.module.is_directed_convertible_market_code("113575.SH")
+        )
+
+    def test_jisilu_redeem_row_preserves_progress_and_recount_date(self):
+        no_redeem = self.module.normalise_jisilu_redeem_cell(
+            {
+                "bond_id": "123160",
+                "bond_nm": "泰福转债",
+                "stock_id": "300992",
+                "redeem_icon": "G",
+                "redeem_count_days": 15,
+                "redeem_real_days": 0,
+                "redeem_total_days": 30,
+                "redeem_remain_days": -1,
+                "recount_dt": "2026-09-01",
+                "redeem_price_ratio": "130%",
+                "force_redeem_price": "25.610",
+            }
+        )
+        self.assertEqual(no_redeem["status"], "公告不强赎")
+        self.assertEqual(no_redeem["progress"], "0/15|30")
+        self.assertEqual(no_redeem["next_recount_date"], "20260901")
+        self.assertEqual(no_redeem["display_value"], "2026-09-01重计")
+        self.assertIsNone(no_redeem["remaining_hit_days"])
+        self.assertEqual(no_redeem["trigger_ratio"], 130.0)
+
+        near = self.module.normalise_jisilu_redeem_cell(
+            {
+                "bond_id": "123261",
+                "bond_nm": "普联转债",
+                "redeem_icon": "",
+                "redeem_count_days": 15,
+                "redeem_real_days": 12,
+                "redeem_total_days": 30,
+                "redeem_remain_days": 3,
+            }
+        )
+        self.assertEqual(near["status"], "临近强赎")
+        self.assertEqual(near["progress"], "12/15|30")
+        self.assertEqual(near["remaining_hit_days"], 3)
+
+    def test_redeem_status_sqlite_keeps_only_latest_row_per_bond(self):
+        row = self.module.normalise_jisilu_redeem_cell(
+            {
+                "bond_id": "123160",
+                "bond_nm": "泰福转债",
+                "redeem_icon": "G",
+                "redeem_count_days": 15,
+                "redeem_real_days": 0,
+                "redeem_total_days": 30,
+                "recount_dt": "2026-09-01",
+            }
+        )
+        snapshot = {
+            "ok": True,
+            "source": "集思录 redeem_list",
+            "fetched_at": "2026-08-28T15:20:00+08:00",
+            "rows": {"123160": row},
+        }
+        with mock.patch.object(self.module, "REDEEM_DAILY_MIN_EXPECTED_ROWS", 1):
+            first = self.module.persist_redeem_snapshot(
+                "20260827", snapshot, calendar_source="fixture"
+            )
+            row["progress"] = "1/15|30"
+            second = self.module.persist_redeem_snapshot(
+                "20260828", snapshot, calendar_source="fixture"
+            )
+
+        self.assertTrue(first["recorded"])
+        self.assertTrue(second["recorded"])
+        stored = self.module.latest_local_redeem_status(
+            "123160.SZ", on_or_before="20260828"
+        )
+        self.assertEqual(stored["trade_date"], "20260828")
+        self.assertEqual(stored["progress"], "1/15|30")
+        with closing(sqlite3.connect(self.module.REDEEM_STATUS_DATABASE_PATH)) as connection, connection:
+            count = connection.execute(
+                "SELECT COUNT(*) FROM redeem_status_observations "
+                "WHERE code='123160'"
+            ).fetchone()[0]
+        self.assertEqual(count, 1)
+
+    def test_redeem_snapshot_uses_latest_completed_exchange_session(self):
+        dates = ["20260827", "20260828", "20260831"]
+        with mock.patch.object(
+            self.module, "latest_exchange_trade_dates", return_value=dates
+        ):
+            before_close = datetime(
+                2026, 8, 28, 14, 0, tzinfo=ZoneInfo("Asia/Shanghai")
+            )
+            after_close = datetime(
+                2026, 8, 28, 16, 45, tzinfo=ZoneInfo("Asia/Shanghai")
+            )
+            weekend = datetime(
+                2026, 8, 30, 10, 0, tzinfo=ZoneInfo("Asia/Shanghai")
+            )
+            self.assertEqual(
+                self.module.redeem_snapshot_trade_date(before_close)[0],
+                "20260827",
+            )
+            self.assertEqual(
+                self.module.redeem_snapshot_trade_date(after_close)[0],
+                "20260828",
+            )
+            self.assertEqual(
+                self.module.redeem_snapshot_trade_date(weekend)[0],
+                "20260828",
+            )
+
+    def test_partial_redeem_refresh_does_not_replace_latest_complete_state(self):
+        row = self.module.normalise_jisilu_redeem_cell(
+            {
+                "bond_id": "123261",
+                "bond_nm": "普联转债",
+                "redeem_count_days": 15,
+                "redeem_real_days": 12,
+                "redeem_total_days": 30,
+            }
+        )
+        with mock.patch.object(self.module, "REDEEM_DAILY_MIN_EXPECTED_ROWS", 1):
+            complete = self.module.persist_redeem_snapshot(
+                "20260828",
+                {
+                    "ok": True,
+                    "source": "fixture",
+                    "fetched_at": "2026-08-28T15:20:00+08:00",
+                    "rows": {"123261": row},
+                },
+                calendar_source="fixture",
+            )
+            partial = self.module.persist_redeem_snapshot(
+                "20260831",
+                {
+                    "ok": False,
+                    "source": "fixture",
+                    "fetched_at": "2026-08-31T15:20:00+08:00",
+                    "rows": {},
+                    "error": "source incomplete",
+                },
+                calendar_source="fixture",
+            )
+
+        self.assertTrue(complete["recorded"])
+        self.assertFalse(partial["recorded"])
+        stored = self.module.latest_local_redeem_status("123261")
+        self.assertEqual(stored["trade_date"], "20260828")
+        self.assertEqual(stored["progress"], "12/15|30")
+
+    def test_redeem_daily_refresh_fetches_market_only_once_when_current(self):
+        row = self.module.normalise_jisilu_redeem_cell(
+            {
+                "bond_id": "123261",
+                "bond_nm": "普联转债",
+                "redeem_count_days": 15,
+                "redeem_real_days": 12,
+                "redeem_total_days": 30,
+                "redeem_remain_days": 3,
+            }
+        )
+        snapshot = {
+            "ok": True,
+            "source": "集思录 redeem_list",
+            "fetched_at": "2026-08-28T15:20:00+08:00",
+            "rows": {"123261": row},
+        }
+        now = datetime(2026, 8, 28, 15, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+        self.module.REDEEM_DAILY_LAST_ATTEMPT_MONOTONIC = float("-inf")
+        with (
+            mock.patch.object(
+                self.module,
+                "redeem_snapshot_trade_date",
+                return_value=("20260828", "fixture"),
+            ),
+            mock.patch.object(
+                self.module,
+                "jisilu_redeem_snapshot",
+                return_value=snapshot,
+            ) as fetch,
+            mock.patch.object(self.module, "REDEEM_DAILY_MIN_EXPECTED_ROWS", 1),
+        ):
+            first = self.module.refresh_daily_redeem_snapshot_if_due(now)
+            second = self.module.refresh_daily_redeem_snapshot_if_due(now)
+
+        self.assertTrue(first["updated"])
+        self.assertEqual(second["status"], "current")
+        fetch.assert_called_once_with(force=True)
+
+    def test_trading_payload_rejects_empty_asset(self):
+        module = self.module
+
+        def bridge_get(path, _params):
+            if path.endswith("account_status"):
+                return {"connected": True}
+            if path.endswith("asset"):
+                return None
+            raise AssertionError(path)
+
+        with (
+            mock.patch.object(
+                module,
+                "configured_trading_accounts",
+                return_value=[{"label": "普通户", "id": "masked", "type": ""}],
+            ),
+            mock.patch.object(module, "bridge_trading_get", side_effect=bridge_get),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "账户资产返回为空"):
+                module.trading_payload()
+
+    def test_trading_payload_keeps_zero_positions_as_valid_account_data(self):
+        module = self.module
+
+        def bridge_get(path, _params):
+            if path.endswith("account_status"):
+                return {"connected": True}
+            if path.endswith("asset"):
+                return {
+                    "cash": 1000,
+                    "frozen_cash": 0,
+                    "market_value": 0,
+                    "total_asset": 1000,
+                }
+            if path.endswith(("positions", "orders", "trades")):
+                return []
+            raise AssertionError(path)
+
+        with (
+            mock.patch.object(
+                module,
+                "configured_trading_accounts",
+                return_value=[{"label": "普通户", "id": "masked", "type": ""}],
+            ),
+            mock.patch.object(module, "bridge_trading_get", side_effect=bridge_get),
+        ):
+            payload = module.trading_payload()
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["summary"]["total_asset"], 1000)
+        self.assertEqual(payload["summary"]["current_position_count"], 0)
+        self.assertEqual(payload["positions"], [])
+
+    def test_disabled_trading_capabilities_skip_all_windows_requests(self):
+        with mock.patch.object(self.module, "bridge_trading_get", return_value={
+            "trading": {"configured": "disabled"}
+        }) as get:
+            payload = self.module.trading_capabilities_payload()
+        get.assert_called_once_with("/api/meta/qmt-backends", {})
+        self.assertFalse(payload["bridge_enabled"])
+        self.assertFalse(payload["bridge_connected"])
+        self.assertEqual(payload["accounts"], [])
+
+    def test_trading_capabilities_require_account_connection(self):
+        module = self.module
+
+        def bridge_get(path, _params):
+            if path.endswith("qmt-backends"):
+                return {"trading": {"configured": "bigqmt"}}
+            if path.endswith("health"):
+                return {"trading": {"enabled": True, "connected": True}}
+            if path.endswith("account_status"):
+                return {"connected": False}
+            raise AssertionError(path)
+
+        with (
+            mock.patch.object(
+                module,
+                "configured_trading_accounts",
+                return_value=[{"label": "普通户", "id": "masked", "type": ""}],
+            ),
+            mock.patch.object(module, "bridge_trading_get", side_effect=bridge_get),
+        ):
+            payload = module.trading_capabilities_payload()
+
+        self.assertTrue(payload["bridge_enabled"])
+        self.assertFalse(payload["bridge_connected"])
 
     def test_new_bond_calendar_falls_back_when_qmt_has_not_rolled_forward(self):
         is_trading, previous_date, source, latest_date = (
@@ -205,6 +558,312 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
         self.assertEqual(previous_date, "")
         self.assertIn("新浪交易日历", source)
         self.assertEqual(latest_date, "20260824")
+
+    def test_new_bond_recent_scope_returns_inventory_for_more_than_second_day(self):
+        module = self.module
+
+        class CandidateBridge:
+            def get(self, path, _params, timeout=10.0):
+                del timeout
+                if path.endswith("is_trading_date"):
+                    return {"is_trading": True}
+                if path.endswith("prev_trading_date"):
+                    return {"prev_trading_date": "20260821"}
+                raise AssertionError(path)
+
+            def convertible_bonds(self):
+                return ["123278.SZ"]
+
+        rows = [
+            {
+                "code": "123278",
+                "market_code": "123278.SZ",
+                "secid": "0.123278",
+                "name": "合金转债",
+                "listing_date": "20260818",
+            },
+            {
+                "code": "123280",
+                "market_code": "123280.SZ",
+                "secid": "0.123280",
+                "name": "三鑫转债",
+                "listing_date": "20260819",
+            },
+            {
+                "code": "123001",
+                "market_code": "123001.SZ",
+                "secid": "0.123001",
+                "name": "旧债",
+                "listing_date": "20260701",
+            },
+        ]
+        with (
+            mock.patch.object(
+                module.MONITOR,
+                "BridgeClient",
+                lambda *args, **kwargs: CandidateBridge(),
+            ),
+            mock.patch.object(module, "latest_bond_reference_list", return_value=rows),
+        ):
+            payload = module.new_bond_candidates_payload(
+                "20260824",
+                scope="recent",
+                lookback_days=10,
+            )
+
+        self.assertEqual(payload["scope"], "recent")
+        self.assertEqual(
+            [row["code"] for row in payload["candidates"]],
+            ["123278", "123280"],
+        )
+        self.assertTrue(payload["candidates"][0]["in_miniqmt_list"])
+        self.assertIn("每日新债存量对账", payload["candidates"][0]["discovery"])
+
+    def test_new_bond_performance_aggregates_real_closes_and_aligns_endpoints(self):
+        candidate = {
+            "code": "123278",
+            "market_code": "123278.SZ",
+            "name": "合金转债",
+            "stock_code": "300697.SZ",
+            "stock_name": "电工合金",
+            "listing_date": "20260825",
+        }
+        raw_rows = []
+        for day_index, trading_date in enumerate(
+            ("20260825", "20260826", "20260827", "20260828")
+        ):
+            for minute, close in (
+                ("093100", 100 + day_index),
+                ("094500", 101 + day_index),
+                ("100000", 102 + day_index),
+                ("130100", 103 + day_index),
+            ):
+                raw_rows.append(
+                    {
+                        "index": f"{trading_date}{minute}",
+                        "close": close,
+                    }
+                )
+
+        series, excluded = self.module.align_new_bond_performance_series(
+            candidate,
+            raw_rows,
+            15,
+        )
+
+        self.assertIsNone(excluded)
+        self.assertEqual(series["session_count"], 4)
+        self.assertTrue(series["starts_on_listing_date"])
+        self.assertFalse(series["listing_day_complete"])
+        self.assertEqual(series["listing_day_raw_bar_count"], 4)
+        self.assertEqual(series["points"][0]["progress"], 0)
+        self.assertEqual(series["points"][-1]["progress"], 1)
+        self.assertEqual(series["base_close"], 101)
+        self.assertEqual(series["last_close"], 106)
+        self.assertAlmostEqual(series["return_pct"], (106 / 101 - 1) * 100)
+
+    def test_new_bond_performance_excludes_fewer_than_four_observed_sessions(self):
+        candidate = {
+            "code": "118076",
+            "market_code": "118076.SH",
+            "name": "先锋转债",
+            "listing_date": "20260826",
+        }
+        rows = [
+            {"index": f"{trading_date}094500", "close": 100 + index}
+            for index, trading_date in enumerate(("20260826", "20260827", "20260828"))
+        ]
+
+        series, excluded = self.module.align_new_bond_performance_series(
+            candidate,
+            rows,
+            30,
+        )
+
+        self.assertIsNone(series)
+        self.assertEqual(excluded["reason"], "observed_sessions_below_4")
+        self.assertEqual(excluded["observed_sessions"], 3)
+
+    def test_new_bond_performance_daily_uses_actual_daily_bar_closes(self):
+        candidate = {
+            "code": "123278",
+            "market_code": "123278.SZ",
+            "name": "合金转债",
+            "listing_date": "20260825",
+        }
+        rows = [
+            {
+                "index": trading_date,
+                "open": close - 1,
+                "high": close + 2,
+                "low": close - 2,
+                "close": close,
+            }
+            for trading_date, close in (
+                ("20260825", 101.5),
+                ("20260826", 104.2),
+                ("20260827", 103.8),
+                ("20260828", 106.6),
+            )
+        ]
+
+        series, excluded = self.module.align_new_bond_performance_series(
+            candidate,
+            rows,
+            1440,
+        )
+
+        self.assertIsNone(excluded)
+        self.assertEqual(series["granularity"], "daily")
+        self.assertEqual(series["close_definition"], "miniqmt_daily_bar_close")
+        self.assertEqual(series["point_count"], 4)
+        self.assertEqual(
+            [point["close"] for point in series["points"]],
+            [101.5, 104.2, 103.8, 106.6],
+        )
+        self.assertEqual(series["points"][0]["datetime"], "2026-08-25")
+        self.assertEqual(series["points"][-1]["datetime"], "2026-08-28")
+        self.assertTrue(series["listing_day_complete"])
+
+    def test_new_bond_performance_payload_uses_selected_codes_and_read_only_cache(self):
+        module = self.module
+        candidates = [
+            {
+                "code": "123278",
+                "market_code": "123278.SZ",
+                "name": "合金转债",
+                "stock_code": "300697.SZ",
+                "stock_name": "电工合金",
+                "listing_date": "20260818",
+                "issue_scale_billion": 5.45,
+                "rating": "AA-",
+            },
+            {
+                "code": "123280",
+                "market_code": "123280.SZ",
+                "name": "三鑫转债",
+                "stock_code": "300453.SZ",
+                "stock_name": "三鑫医疗",
+                "listing_date": "20260819",
+                "issue_scale_billion": 5.3,
+                "rating": "AA-",
+            },
+        ]
+        rows = [
+            {"index": f"{trading_date}094500", "close": 100 + index}
+            for index, trading_date in enumerate(
+                ("20260818", "20260819", "20260820", "20260821")
+            )
+        ]
+
+        class PerformanceBridge:
+            def get(self, path, params, timeout=10.0):
+                del timeout
+                self_path = path
+                if not self_path.endswith("market_data_ex"):
+                    raise AssertionError(path)
+                self.assertEqual(params["period"], "1m")
+                self.assertEqual(params["stocks"], "123278.SZ")
+                return {"data": {"123278.SZ": rows}}
+
+            def assertEqual(self, left, right):
+                if left != right:
+                    raise AssertionError(f"{left!r} != {right!r}")
+
+        fixed_now = datetime(
+            2026,
+            8,
+            31,
+            16,
+            0,
+            tzinfo=ZoneInfo("Asia/Shanghai"),
+        )
+        module.NEW_BOND_PERFORMANCE_CACHE.clear()
+        with (
+            mock.patch.object(module, "china_now", return_value=fixed_now),
+            mock.patch.object(module, "latest_bond_reference_list", return_value=candidates),
+            mock.patch.object(
+                module.MONITOR,
+                "BridgeClient",
+                lambda *args, **kwargs: PerformanceBridge(),
+            ),
+        ):
+            payload = module.new_bond_performance_payload(
+                1,
+                30,
+                "123278.SZ",
+            )
+            cached = module.new_bond_performance_payload(
+                1,
+                30,
+                "123278.SZ",
+            )
+
+        self.assertEqual(payload["mode"], "read_only")
+        self.assertEqual(payload["selected_codes"], ["123278.SZ"])
+        self.assertEqual(len(payload["universe"]), 2)
+        self.assertEqual(len(payload["series"]), 1)
+        self.assertTrue(cached["cached"])
+
+    def test_new_bond_performance_payload_reads_daily_cache_for_daily_level(self):
+        module = self.module
+        candidates = [
+            {
+                "code": "123278",
+                "market_code": "123278.SZ",
+                "name": "合金转债",
+                "stock_code": "300697.SZ",
+                "stock_name": "电工合金",
+                "listing_date": "20260818",
+            }
+        ]
+        rows = [
+            {"index": trading_date, "close": 100 + index}
+            for index, trading_date in enumerate(
+                ("20260818", "20260819", "20260820", "20260821")
+            )
+        ]
+
+        class DailyPerformanceBridge:
+            def get(self, path, params, timeout=10.0):
+                del timeout
+                if not path.endswith("market_data_ex"):
+                    raise AssertionError(path)
+                if params["period"] != "1d":
+                    raise AssertionError(params["period"])
+                if params["start_time"] != "20260818":
+                    raise AssertionError(params["start_time"])
+                return {"data": {"123278.SZ": rows}}
+
+        fixed_now = datetime(
+            2026,
+            8,
+            31,
+            16,
+            0,
+            tzinfo=ZoneInfo("Asia/Shanghai"),
+        )
+        module.NEW_BOND_PERFORMANCE_CACHE.clear()
+        with (
+            mock.patch.object(module, "china_now", return_value=fixed_now),
+            mock.patch.object(module, "latest_bond_reference_list", return_value=candidates),
+            mock.patch.object(
+                module.MONITOR,
+                "BridgeClient",
+                lambda *args, **kwargs: DailyPerformanceBridge(),
+            ),
+        ):
+            payload = module.new_bond_performance_payload(
+                1,
+                1440,
+                "123278.SZ",
+            )
+
+        self.assertEqual(payload["interval_label"], "日线")
+        self.assertEqual(payload["granularity"], "daily")
+        self.assertEqual(payload["coverage"]["raw_daily_row_count"], 4)
+        self.assertEqual(payload["coverage"]["raw_minute_row_count"], 0)
+        self.assertEqual(payload["series"][0]["last_close"], 103)
 
     def append_minute_row(self, minute_offset: int = 1) -> None:
         database = self.runtime / "data" / f"{self.trading_date}.sqlite3"
@@ -248,8 +907,27 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
         self.assertEqual(len(payload["sparks"][0]["points"]), 2)
         self.assertEqual(
             payload["sparks"][0]["source"],
-            "MiniQMT最近交易日1m缓存",
+            "QMT最近交易日1m缓存",
         )
+
+    def test_sparks_use_last_live_price_per_minute_and_exclude_preopen(self):
+        module = self.module
+        now = datetime(2026, 8, 12, 10, 7, tzinfo=ZoneInfo("Asia/Shanghai"))
+        ms = int(now.replace(minute=5).timestamp() * 1000)
+        midnight = int(now.replace(hour=0, minute=0).timestamp() * 1000)
+        rows = [{"time": midnight, "price": 290.64},
+                {"time": ms + 10000, "price": 274},
+                {"time": ms + 50000, "price": 275},
+                {"time": ms + 70000, "price": 276}]
+        with (
+            mock.patch.object(module, "china_now", return_value=now),
+            mock.patch.object(module, "load_local_minute_bars", return_value={"123273.SZ": [{"time": ms, "close": 290.64}]}),
+            mock.patch.object(module, "load_backfill_minute_bars", return_value={}),
+            mock.patch.object(module, "load_live_intraday_samples", return_value={"123273.SZ": rows}),
+        ):
+            spark = module.sparks_payload("123273.SZ")["sparks"][0]
+        self.assertEqual(spark["points"], [275, 276])
+        self.assertEqual(spark["times"], ["1005", "1006"])
 
     def test_sparks_never_falls_back_to_old_date_during_live_session(self):
         current = datetime(
@@ -311,19 +989,32 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
                 {"code": "301127.SZ", **second},
             ]
         )
+        corrected = {
+            "code": "301127.SZ",
+            **second,
+            "time": first_timestamp + 22_000,
+            "previous_close": 25.0,
+        }
+        self.module.persist_live_intraday_samples([corrected])
 
         reloaded = load_dashboard_module(self.runtime)
         points = reloaded.load_live_intraday_samples(
             ["301127.SZ"], self.trading_date
         )["301127.SZ"]
-        self.assertEqual([point["price"] for point in points], [25.2, 25.4])
-        self.assertEqual([point["amount"] for point in points], [110_000, 125_000])
-        self.assertEqual([point["volume"] for point in points], [440, 500])
-        self.assertEqual(points[-1]["previous_close"], 24.8)
+        self.assertEqual(
+            [point["price"] for point in points], [25.2, 25.4, 25.4]
+        )
+        self.assertEqual(
+            [point["amount"] for point in points], [110_000, 125_000, 125_000]
+        )
+        self.assertEqual([point["volume"] for point in points], [440, 500, 500])
+        self.assertEqual(
+            [point["previous_close"] for point in points], [25.0, 25.0, 25.0]
+        )
 
     def test_legacy_live_spark_schema_remains_readable(self):
         database = self.runtime / "legacy-board-spark.sqlite3"
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection, connection:
             connection.execute(
                 """
                 CREATE TABLE board_spark_samples(
@@ -394,7 +1085,7 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
         self.assertEqual(payload["sparks"][0]["points"], [25.1, 25.4])
         self.assertEqual(
             payload["sparks"][0]["source"],
-            "MiniQMT最近交易日1m缓存",
+            "QMT最近交易日1m缓存",
         )
 
     def test_board_market_codes_keeps_only_unambiguous_shanghai_shenzhen(self):
@@ -440,6 +1131,35 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertFalse(payload["degraded"])
         self.assertEqual(payload["reason"], "healthy")
+
+    def test_health_waits_for_continuous_session_but_checks_quotes_at_open(self):
+        self.write_runtime_status(0, "2026-08-12T09:29:59")
+        with closing(sqlite3.connect(self.runtime / "data" / f"{self.trading_date}.sqlite3")) as connection, connection:
+            connection.execute("DELETE FROM minute_observations")
+        auction = self.module.api_health(
+            datetime(2026, 8, 12, 9, 29, 59, tzinfo=ZoneInfo("Asia/Shanghai"))
+        )
+        self.assertTrue(auction["ok"])
+        self.assertFalse(auction["market_data_expected"])
+        self.assertEqual(auction["reason"], "healthy_waiting_for_open")
+        self.assertIsNone(auction["quote_updated_at"])
+        opened = self.module.api_health(
+            datetime(2026, 8, 12, 9, 30, 1, tzinfo=ZoneInfo("Asia/Shanghai"))
+        )
+        self.assertFalse(opened["ok"])
+        self.assertIn("miniqmt_returned_zero_quotes", opened["reasons"])
+        self.assertIn("quote_timestamp_missing", opened["reasons"])
+
+    def test_health_does_not_hide_a_stopped_or_wrong_day_monitor_in_auction(self):
+        self.write_runtime_status(0, "2026-08-12T09:25:00")
+        current = datetime(2026, 8, 12, 9, 25, 5, tzinfo=ZoneInfo("Asia/Shanghai"))
+        with mock.patch.object(self.module, "process_alive", return_value=False):
+            self.assertIn("monitor_process_not_running", self.module.api_health(current)["reasons"])
+        path = self.runtime / "status.json"
+        status = json.loads(path.read_text())
+        status["trading_date"] = "20260811"
+        path.write_text(json.dumps(status))
+        self.assertIn("monitor_trading_date_mismatch", self.module.api_health(current)["reasons"])
 
     def test_health_detects_stale_status_and_quote_during_market(self):
         self.write_runtime_status(309, "2026-08-12T10:10:00")
@@ -488,6 +1208,15 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
         self.assertTrue(payload["cursor_reset"])
         self.assertEqual(payload["cursor_reset_reason"], "cursor_trading_date_changed")
         self.assertEqual([event["id"] for event in payload["events"]], [3, 2, 1])
+
+    def test_events_invalidates_browser_cursor_after_minute_history_repair(self):
+        with closing(sqlite3.connect(self.runtime / "data" / f"{self.trading_date}.sqlite3")) as connection, connection:
+            connection.execute("INSERT INTO meta(key,value) VALUES('event_history_reset_id','2')")
+        reset = self.module.events_payload(scope="all", after_id=2)
+        self.assertTrue(reset["cursor_reset"])
+        self.assertEqual(reset["cursor_reset_reason"], "minute_history_repaired")
+        self.assertEqual([event["id"] for event in reset["events"]], [3, 2, 1])
+        self.assertFalse(self.module.events_payload(scope="all", after_id=reset["latest_id"])["cursor_reset"])
 
     def test_intraday_download_backoff_is_per_symbol_and_exponential(self):
         module = self.module
@@ -1277,7 +2006,7 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
                 ).replace(tzinfo=ZoneInfo("Asia/Shanghai")).timestamp()
                 * 1000
             )
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 connection.execute(
                     "INSERT INTO minute_observations VALUES(?,?,?,?,?,?,?,?,?)",
                     (
@@ -1318,7 +2047,7 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
 
         missing_code_database = self.runtime / "data" / "20260809.sqlite3"
         create_database(missing_code_database, "20260809")
-        with sqlite3.connect(missing_code_database) as connection:
+        with closing(sqlite3.connect(missing_code_database)) as connection, connection:
             connection.execute(
                 "DELETE FROM minute_observations WHERE code='123273.SZ'"
             )
@@ -1680,12 +2409,19 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
             (False, "waiting_for_monitor_to_stop"),
         )
 
+        (self.runtime / "status.json").write_text(
+            json.dumps({"status": "stopped", "trading_date": self.trading_date}),
+            encoding="utf-8",
+        )
+        self.assertTrue(module.intraday_monitor_active(after))
+
     def test_download_permission_allows_the_evening_maintenance_window(self):
         module = self.module
         before = datetime(2026, 8, 12, 15, 11, 59, tzinfo=ZoneInfo("Asia/Shanghai"))
         inside = datetime(2026, 8, 12, 15, 12, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
         after = datetime(2026, 8, 12, 18, 0, 1, tzinfo=ZoneInfo("Asia/Shanghai"))
         closed = datetime(2026, 8, 12, 23, 30, 1, tzinfo=ZoneInfo("Asia/Shanghai"))
+        weekend = datetime(2026, 8, 15, 15, 20, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
         with mock.patch.object(module, "intraday_monitor_active", return_value=False):
             self.assertEqual(
                 module.intraday_download_permission(self.trading_date, before)[1],
@@ -1697,11 +2433,37 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
             )
             self.assertEqual(
                 module.intraday_download_permission(self.trading_date, after)[1],
-                "maintenance_window",
+                "maintenance_window_closed",
             )
             self.assertEqual(
                 module.intraday_download_permission(self.trading_date, closed)[1],
                 "maintenance_window_closed",
+            )
+            self.assertEqual(
+                module.intraday_download_permission(self.trading_date, weekend),
+                (True, "weekend_manual_maintenance_window"),
+            )
+
+    def test_download_permission_allows_lunch_only_when_monitor_is_stopped(self):
+        module = self.module
+        lunch = datetime(2026, 8, 12, 12, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+        afternoon = datetime(2026, 8, 12, 13, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+        with mock.patch.object(module, "intraday_monitor_active", return_value=False):
+            self.assertEqual(module.market_phase(lunch), ("lunch_break", False))
+            self.assertEqual(
+                module.intraday_download_permission(self.trading_date, lunch),
+                (True, "lunch_maintenance_window"),
+            )
+            self.assertTrue(module.intraday_automatic_window_open(lunch))
+            self.assertEqual(
+                module.intraday_download_permission(self.trading_date, afternoon)[1],
+                "waiting_for_market_close",
+            )
+
+        with mock.patch.object(module, "intraday_monitor_active", return_value=True):
+            self.assertEqual(
+                module.intraday_download_permission(self.trading_date, lunch),
+                (False, "waiting_for_monitor_to_stop"),
             )
 
     def test_consecutive_download_failures_pause_further_bridge_downloads(self):
@@ -1953,7 +2715,7 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
     def test_postclose_scan_enqueues_only_gaps_and_only_once_per_day(self):
         module = self.module
         database = self.runtime / "data" / f"{self.trading_date}.sqlite3"
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection, connection:
             timestamp = int(
                 datetime(
                     2026,
@@ -2010,6 +2772,33 @@ class MiniQmtDashboardApiTest(unittest.TestCase):
             enqueued[0][2]["priority"],
             module.INTRADAY_BACKFILL_AUTOMATIC_PRIORITY,
         )
+
+    def test_postclose_scan_accepts_lunch_maintenance_window(self):
+        module = self.module
+        enqueued = []
+        now = datetime(2026, 8, 12, 12, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+        with (
+            mock.patch.object(module, "intraday_monitor_active", return_value=False),
+            mock.patch.object(
+                module,
+                "postclose_intraday_universe",
+                return_value=({"123273.SZ"}, "fixture"),
+            ),
+            mock.patch.object(module, "minute_rows_need_backfill", return_value=True),
+            mock.patch.object(
+                module,
+                "enqueue_intraday_backfill",
+                side_effect=lambda code, date, **kwargs: (
+                    enqueued.append((code, date, kwargs))
+                    or {"deduplicated": False}
+                ),
+            ),
+        ):
+            result = module.scan_postclose_intraday_gaps(now)
+
+        self.assertTrue(result["scheduled"])
+        self.assertEqual(result["universe_source"], "fixture")
+        self.assertEqual(len(enqueued), 1)
 
     def test_postclose_scan_includes_board_stock_and_reuses_ready_cache(self):
         module = self.module
