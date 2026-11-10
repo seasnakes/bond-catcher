@@ -1396,7 +1396,7 @@ function cbQuoteExecutionState(quote, now = Date.now()) {
   const clock = chinaDateTimeParts(now);
   const currentDate = clock.date.replaceAll("-", "");
   const quoteDate = String(quote?.date || quote?.timetag || "").replace(/\D/g, "").slice(0, 8);
-  const weekday = new Date(`${clock.date}T00:00:00+08:00`).getDay();
+  const weekday = chinaWeekday(clock);
   const marketOpen = weekday >= 1 && weekday <= 5 && (
     (clock.time >= "09:30:00" && clock.time <= "11:30:30")
     || (clock.time >= "13:00:00" && clock.time <= "15:00:30")
@@ -3717,7 +3717,7 @@ function scheduleNewBondSecondDayScan(delay = NEW_BOND_AUTO_SCAN_INTERVAL_MS) {
     newBondScanTimer = null;
     const clock = currentChinaDateTimeParts();
     const date = clock.date.replaceAll("-", "");
-    const chinaWeekday = new Date(`${clock.date}T00:00:00+08:00`).getDay();
+    const weekday = chinaWeekday(clock);
     const alreadyScanned = newBondLastResult?.autoScanDate === date;
     const alreadyReconciled = newBondLastReconciliationDate === date;
     const inAutoScanWindow = isNewBondAutoScanWindow(clock.time);
@@ -3728,8 +3728,8 @@ function scheduleNewBondSecondDayScan(delay = NEW_BOND_AUTO_SCAN_INTERVAL_MS) {
     const shouldScanSecondDay = !alreadyScanned && inAutoScanWindow;
     if (
       clock
-      && chinaWeekday !== 0
-      && chinaWeekday !== 6
+      && weekday !== 0
+      && weekday !== 6
       && (shouldReconcile || shouldScanSecondDay)
     ) {
       try {
@@ -4827,6 +4827,10 @@ function currentChinaDateTimeParts() {
   return chinaDateTimeParts(Date.now());
 }
 
+function chinaWeekday(clock) {
+  return new Date(`${clock.date}T00:00:00Z`).getUTCDay();
+}
+
 function normalizeAuctionDate(value) {
   const digits = String(value || "").replace(/\D/g, "").slice(0, 8);
   return /^\d{8}$/.test(digits) ? digits : "";
@@ -4971,7 +4975,7 @@ function scheduleAuctionSampler(delayMs = 30000) {
       auctionSamplerRunning = true;
       try {
         const clock = currentChinaDateTimeParts();
-        const weekday = new Date().getDay();
+        const weekday = chinaWeekday(clock);
         const isWeekday = weekday >= 1 && weekday <= 5;
         const phase = isWeekday ? auctionClockPhase(clock.time) : "closed";
         if (phase === "collecting") {

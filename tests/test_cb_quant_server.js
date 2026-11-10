@@ -33,6 +33,20 @@ test("休市时上一交易日最后报价不能冒充实时模拟成交价", ()
   assert.equal(result.quality, "market_closed_last_quote");
 });
 
+test("北京时间周一盘中的判断不受服务器时区影响", (t) => {
+  const previous = process.env.TZ;
+  t.after(() => {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  });
+  const now = Date.parse("2026-08-31T09:45:00+08:00");
+  for (const zone of ["UTC", "America/New_York", "Asia/Shanghai"]) {
+    process.env.TZ = zone;
+    const state = cbQuoteExecutionState({ date: "20260831", timestamp: now - 10_000 }, now);
+    assert.equal(state.quality, "live_miniqmt_quote", zone);
+  }
+});
+
 test("盘中策略只把前一已完成交易日作为日K新鲜度基准", () => {
   const health = { available_dates: ["20260831", "20260828", "20260827"] };
   assert.equal(
