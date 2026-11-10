@@ -37,12 +37,12 @@ flowchart TB
 | 组件 | 主要职责 | 运行及入口 |
 | --- | --- | --- |
 | 浏览器页面 | 渲染、筛选、编辑、定时读取、图表和确认交互 | 从 Node 5173 加载；正常业务通过本地 API |
-| Node 主服务 | 静态文件、API 聚合、看板状态、竞价采样、新债与天梯归组、研究任务、Python 子进程管理 | [server.js](/Users/seasnake/code/snake/finance/server.js)；`com.seasnake.finance-board` |
-| Python 数据 API | QMT 适配、读监控 SQLite、分钟与日线合并、指标、资料补充、维护队列、交易校验 | [miniqmt-dashboard-api.py](/Users/seasnake/code/snake/finance/scripts/miniqmt-dashboard-api.py)；127.0.0.1:18890；Node 自动拉起并管理其子进程重启 |
-| QMT 兼容网关 | 行情源选择、超时与熔断、字段兼容、昨收修正、交易路由隔离 | [qmt_compat_gateway.py](/Users/seasnake/code/snake/finance/scripts/qmt_compat_gateway.py)；127.0.0.1:18889；独立 LaunchAgent |
-| 大 QMT 适配 | 券商终端中的只读策略，通过本机管道交给外部 ZMQ 中继 | 当前地址 `10.211.55.3:15588`；[中继程序](/Users/seasnake/code/snake/finance/scripts/qmt_pipe_zmq_relay.py) |
+| Node 主服务 | 静态文件、API 聚合、看板状态、竞价采样、新债与天梯归组、研究任务、Python 子进程管理 | [server.js](../../server.js)；`com.seasnake.finance-board` |
+| Python 数据 API | QMT 适配、读监控 SQLite、分钟与日线合并、指标、资料补充、维护队列、交易校验 | [miniqmt-dashboard-api.py](../../scripts/miniqmt-dashboard-api.py)；127.0.0.1:18890；Node 自动拉起并管理其子进程重启 |
+| QMT 兼容网关 | 行情源选择、超时与熔断、字段兼容、昨收修正、交易路由隔离 | [qmt_compat_gateway.py](../../scripts/qmt_compat_gateway.py)；127.0.0.1:18889；独立 LaunchAgent |
+| 大 QMT 适配 | 券商终端中的只读策略，通过本机管道交给外部 ZMQ 中继 | 当前地址 `10.211.55.3:15588`；[中继程序](../../scripts/qmt_pipe_zmq_relay.py) |
 | 独立短线监控 | 全市场轮询、分钟聚合、指标事件、数据落库、盘后校验 | [shortline_monitor.py](/Users/seasnake/Documents/Codex/2026-07-27/miniqmt/outputs/miniqmt_cb_shortline_monitor/shortline_monitor.py)；不在 finance 仓库内 |
-| 消息归档服务 | 页面消息归档、图片保存、版本、过滤、去重与飞书队列 | [prince/server.py](/Users/seasnake/code/snake/finance/scripts/prince/server.py)；127.0.0.1:5188；独立 LaunchAgent，当前未加载 |
+| 消息归档服务 | 页面消息归档、图片保存、版本、过滤、去重与飞书队列 | [prince/server.py](../../scripts/prince/server.py)；127.0.0.1:5188；独立 LaunchAgent，当前未加载 |
 
 Node 当前监听 `*:5173`，网关和 Python API 监听回环地址。实盘写入、模拟盘修改和 AI 等入口有各自的访问限制，不能把这些限制理解为整个站点已经具备统一用户认证。
 
@@ -54,18 +54,18 @@ QMT 网关只保留大 QMT 行情与历史数据路径。MiniQMT 已停用并移
 
 | 模块 | 入口 | 当前能力 |
 | --- | --- | --- |
-| 主看板 | [index.html](/Users/seasnake/code/snake/finance/index.html)、[app.js](/Users/seasnake/code/snake/finance/app.js) | 股票/ETF/港股/转债、板块与叠组、分时缩略图、指数与外围、盘中信号、竞价、新债和连板归组 |
-| 单债详情 | [bond.js](/Users/seasnake/code/snake/finance/bond.js) | 分时/日 K、紫线及其他分钟指标、正股联动、五档、资料、历史分时和补数 |
-| 转债星图 | [bond-heatmap.js](/Users/seasnake/code/snake/finance/bond-heatmap.js)、[bond-landscape.js](/Users/seasnake/code/snake/finance/bond-landscape.js) | 行业/题材/标签分组，面积与颜色编码，分组预览和行情刷新 |
-| 标签管理 | [bond-tags.js](/Users/seasnake/code/snake/finance/bond-tags.js) | 标签增删、批量维护、主标签和人工覆盖 |
-| 次新债表现 | [new-bond-performance.js](/Users/seasnake/code/snake/finance/new-bond-performance.js) | 近 1/2/6 个月新债的 15/30/60 分钟或日线曲线，价格/收益率比较与覆盖说明 |
-| 活跃转债指数 | [active-bond-index.js](/Users/seasnake/code/snake/finance/active-bond-index.js) | 复刻等权指数、成分宽度、成交额和成分债排序；与通达信官方指数分开 |
-| 连板天梯 | [limit-ladder-board.js](/Users/seasnake/code/snake/finance/lib/limit-ladder-board.js) | 已整合为主看板原生叠组；旧独立页面跳回主看板 |
-| 公式选股 | [tdx-formulas.js](/Users/seasnake/code/snake/finance/tdx-formulas.js) | 读取通达信公式任务快照，展示命中、覆盖和进度 |
-| 量化实验室 | [quant.js](/Users/seasnake/code/snake/finance/quant.js) | 六个单券日线策略、三个组合轮动策略、日内组合确认、ATR 网格、本地模拟盘 |
-| AI 分析 | [bond-ai.js](/Users/seasnake/code/snake/finance/bond-ai.js) | 数据预览、关注点、任务进度/取消、历史报告、上下文核对与导出 |
-| 实盘 | [trading.js](/Users/seasnake/code/snake/finance/trading.js) | 账户、持仓、委托、成交读取，以及受控手工限价下单/撤单代码 |
-| 小王子/快讯归档 | [web/prince](/Users/seasnake/code/snake/finance/web/prince) | 独立于主看板的消息、图片、过滤与推送队列查看 |
+| 主看板 | [index.html](../../index.html)、[app.js](../../app.js) | 股票/ETF/港股/转债、板块与叠组、分时缩略图、指数与外围、盘中信号、竞价、新债和连板归组 |
+| 单债详情 | [bond.js](../../bond.js) | 分时/日 K、紫线及其他分钟指标、正股联动、五档、资料、历史分时和补数 |
+| 转债星图 | [bond-heatmap.js](../../bond-heatmap.js)、[bond-landscape.js](../../bond-landscape.js) | 行业/题材/标签分组，面积与颜色编码，分组预览和行情刷新 |
+| 标签管理 | [bond-tags.js](../../bond-tags.js) | 标签增删、批量维护、主标签和人工覆盖 |
+| 次新债表现 | [new-bond-performance.js](../../new-bond-performance.js) | 近 1/2/6 个月新债的 15/30/60 分钟或日线曲线，价格/收益率比较与覆盖说明 |
+| 活跃转债指数 | [active-bond-index.js](../../active-bond-index.js) | 复刻等权指数、成分宽度、成交额和成分债排序；与通达信官方指数分开 |
+| 连板天梯 | [limit-ladder-board.js](../../lib/limit-ladder-board.js) | 已整合为主看板原生叠组；旧独立页面跳回主看板 |
+| 公式选股 | [tdx-formulas.js](../../tdx-formulas.js) | 读取通达信公式任务快照，展示命中、覆盖和进度 |
+| 量化实验室 | [quant.js](../../quant.js) | 六个单券日线策略、三个组合轮动策略、日内组合确认、ATR 网格、本地模拟盘 |
+| AI 分析 | [bond-ai.js](../../bond-ai.js) | 数据预览、关注点、任务进度/取消、历史报告、上下文核对与导出 |
+| 实盘 | [trading.js](../../trading.js) | 账户、持仓、委托、成交读取，以及受控手工限价下单/撤单代码 |
+| 小王子/快讯归档 | [web/prince](../../web/prince) | 独立于主看板的消息、图片、过滤与推送队列查看 |
 
 **数据源及使用口径**
 
@@ -90,12 +90,12 @@ QMT 网关只保留大 QMT 行情与历史数据路径。MiniQMT 已停用并移
 
 | 数据类别 | 位置 | 维护方式 |
 | --- | --- | --- |
-| 共享看板状态 | [board-state.json](/Users/seasnake/code/snake/finance/data/board-state.json) | 板块、标的、叠组；服务端锁、原子写、`baseUpdatedAt` 冲突检测；不是每个浏览器一份权威状态 |
-| 参考与人工资料 | [data](/Users/seasnake/code/snake/finance/data) | A 股目录、标签底稿/生成结果/人工覆盖、指数研究快照、AI 摘要和新债参考修正 |
+| 共享看板状态 | [board-state.json](../../data/board-state.json) | 板块、标的、叠组；服务端锁、原子写、`baseUpdatedAt` 冲突检测；不是每个浏览器一份权威状态 |
+| 参考与人工资料 | [data](../../data) | A 股目录、标签底稿/生成结果/人工覆盖、指数研究快照、AI 摘要和新债参考修正 |
 | 页面本地偏好 | 浏览器 localStorage | 显示开关、布局与本地编辑副本/备份；不能代替服务端共享状态 |
-| 主项目运行数据 | [runtime](/Users/seasnake/code/snake/finance/runtime) | 报价快照、竞价当日与按日归档、新债池、生命周期、行业映射、天梯池/归属/备份、行情源选择 |
-| 研究与执行记录 | [runtime](/Users/seasnake/code/snake/finance/runtime) | 模拟盘 JSON、AI 报告、组合因子缓存、公式快照、市场 SQLite、交易审计 JSONL |
-| 看板补数 | [intraday-backfill-jobs.json](/Users/seasnake/code/snake/finance/runtime/intraday-backfill-jobs.json)、[intraday-backfill-cache](/Users/seasnake/code/snake/finance/runtime/intraday-backfill-cache) | 持久化任务与按代码/日期保存的分钟数据 |
+| 主项目运行数据 | [runtime](../../runtime) | 报价快照、竞价当日与按日归档、新债池、生命周期、行业映射、天梯池/归属/备份、行情源选择 |
+| 研究与执行记录 | [runtime](../../runtime) | 模拟盘 JSON、AI 报告、组合因子缓存、公式快照、市场 SQLite、交易审计 JSONL |
+| 看板补数 | [intraday-backfill-jobs.json](../../runtime/intraday-backfill-jobs.json)、[intraday-backfill-cache](../../runtime/intraday-backfill-cache) | 持久化任务与按代码/日期保存的分钟数据 |
 | 监控数据 | [外部监控 runtime](/Users/seasnake/Documents/Codex/2026-07-27/miniqmt/outputs/miniqmt_cb_shortline_monitor/runtime) | 每日 SQLite、status/service、指标预热状态、报告、CSV、看板采样数据库等 |
 | 消息存档 | [finance-prince 数据目录](</Users/seasnake/Library/Application Support/finance-prince>) | SQLite 原文与版本、媒体、过滤记录、幂等发件队列及本地配置 |
 
@@ -143,10 +143,10 @@ QMT 网关只保留大 QMT 行情与历史数据路径。MiniQMT 已停用并移
 
 | 能力 | 输入与引擎 | 成交/数据边界 |
 | --- | --- | --- |
-| 六个单券日线策略 | MA20、MACD、EMA5/20、日线紫线、布林、唐奇安；[cb-quant-engine.js](/Users/seasnake/code/snake/finance/lib/cb-quant-engine.js) | 收盘出信号，下一根日 K 开盘模拟成交；缺日可尝试分钟聚合补齐 |
-| 三个组合轮动 | 双低、三低、六因子；[cb-portfolio-engine.js](/Users/seasnake/code/snake/finance/lib/cb-portfolio-engine.js) | 历史截面排名与再平衡；必要字段缺失则排除，历史余额只向后结转；强赎/下修公告时点过滤仍不完整 |
-| 日内组合确认 | 09:25 股债竞价、分钟指标、已留存事件；[cb-intraday-engine.js](/Users/seasnake/code/snake/finance/lib/cb-intraday-engine.js) | AUCTION → SETUP → TRIGGERED → POSITION → 止盈/止损/尾盘退出；下一分钟模拟成交，结构止损、R 倍数止盈和折扣凯利预算 |
-| ATR 动态网格 | 已完成的前序日线 ATR 与当日分钟；[cb-atr-grid-engine.js](/Users/seasnake/code/snake/finance/lib/cb-atr-grid-engine.js) | ATR 控制网格宽度，日内均线调整基准；缺盘口时明确使用下一分钟开盘近似 |
+| 六个单券日线策略 | MA20、MACD、EMA5/20、日线紫线、布林、唐奇安；[cb-quant-engine.js](../../lib/cb-quant-engine.js) | 收盘出信号，下一根日 K 开盘模拟成交；缺日可尝试分钟聚合补齐 |
+| 三个组合轮动 | 双低、三低、六因子；[cb-portfolio-engine.js](../../lib/cb-portfolio-engine.js) | 历史截面排名与再平衡；必要字段缺失则排除，历史余额只向后结转；强赎/下修公告时点过滤仍不完整 |
+| 日内组合确认 | 09:25 股债竞价、分钟指标、已留存事件；[cb-intraday-engine.js](../../lib/cb-intraday-engine.js) | AUCTION → SETUP → TRIGGERED → POSITION → 止盈/止损/尾盘退出；下一分钟模拟成交，结构止损、R 倍数止盈和折扣凯利预算 |
+| ATR 动态网格 | 已完成的前序日线 ATR 与当日分钟；[cb-atr-grid-engine.js](../../lib/cb-atr-grid-engine.js) | ATR 控制网格宽度，日内均线调整基准；缺盘口时明确使用下一分钟开盘近似 |
 | 本地模拟盘 | 页面设置 → Node 策略周期 → 有效行情 → 纸面账户 | 独立 JSON 现金/持仓/成交；只接受符合日期、时段和新鲜度要求的行情；重启后需手动恢复运行 |
 
 这些入口位于 `/api/cb-quant/*`，不进入真实账户下单链路。回测费用、滑点、数据覆盖与缺失需一并看；现有研究不代表完整逐笔撮合、历史条款时点或样本外稳定性已经验证。
@@ -155,7 +155,7 @@ QMT 网关只保留大 QMT 行情与历史数据路径。MiniQMT 已停用并移
 
 选择转债、日期及最近 1–5 日范围 → 只读本地日线/分钟 → 个债资料接口补充正股、转股价和公告 → 校验日期/单位/覆盖并冻结快照 → 加入固定理论摘要与关注点 → 创建后台任务 → 调用隔离的 Codex 文本进程 → 保存原始正文、完整输入、模型与提示词版本 → 页面查看/取消/导出。
 
-实现由 [cb_ai_snapshot.py](/Users/seasnake/code/snake/finance/scripts/cb_ai_snapshot.py)、[cb-ai-context.js](/Users/seasnake/code/snake/finance/lib/cb-ai-context.js)、[cb-ai-service.js](/Users/seasnake/code/snake/finance/lib/cb-ai-service.js) 和 [codex-text-provider.js](/Users/seasnake/code/snake/finance/lib/codex-text-provider.js) 组成。代码默认模型为 `gpt-6-astra`、推理强度 `high`，可通过环境覆盖；本次未执行新分析核验模型可用性。
+实现由 [cb_ai_snapshot.py](../../scripts/cb_ai_snapshot.py)、[cb-ai-context.js](../../lib/cb-ai-context.js)、[cb-ai-service.js](../../lib/cb-ai-service.js) 和 [codex-text-provider.js](../../lib/codex-text-provider.js) 组成。代码默认模型为 `gpt-6-astra`、推理强度 `high`，可通过环境覆盖；本次未执行新分析核验模型可用性。
 
 分析进程复用本机登录，在独立临时目录中接收文本快照，关闭浏览、应用与命令工具。生成报告不连接交易操作，也不自动持续盯盘。历史分析限制数据截至分析日；当前余额、发行规模、历史余额、发行评级和最新评级分开处理。保存任务保留最近 50 个已结束报告；服务重启会把未完成任务标记中断。
 
@@ -163,7 +163,7 @@ QMT 网关只保留大 QMT 行情与历史数据路径。MiniQMT 已停用并移
 
 账户与交易通道当前停用；实盘页面不再请求旧 MiniQMT 服务。迁移账户查询需另行实现和验收，不能把行情恢复视为账户功能恢复。
 
-手工操作代码：本机同源访问 → 输入解锁语句获得临时会话 → 校验账户标签、资金/可卖量、实时价格、数量及限价 → 生成 30 秒预览令牌 → 完整确认语 → 一次性消费令牌 → 调用订单/撤单 → 记录审计。默认解锁会话 10 分钟、单笔金额上限 2 万元、价格偏离上限 5%。核心是 [trading_execution.py](/Users/seasnake/code/snake/finance/scripts/trading_execution.py)。
+手工操作代码：本机同源访问 → 输入解锁语句获得临时会话 → 校验账户标签、资金/可卖量、实时价格、数量及限价 → 生成 30 秒预览令牌 → 完整确认语 → 一次性消费令牌 → 调用订单/撤单 → 记录审计。默认解锁会话 10 分钟、单笔金额上限 2 万元、价格偏离上限 5%。核心是 [trading_execution.py](../../scripts/trading_execution.py)。
 
 交易选择器不随行情切源变化，也不因超时自动换后端重发。当前大 QMT 查询链路的接入不代表大 QMT 真实交易迁移已完成。本次未解锁、预览或发出任何交易请求。
 
@@ -254,9 +254,9 @@ Level2 任务目前属于网盘归档链路，不能据此认为普通五档监�
 **开发、验证、部署与回滚流程**
 
 1. 在开发分支按完整业务切片修改，先识别现有工作区改动，保留用户看板数据。
-2. 运行改动相关检查，再执行 [verify.sh](/Users/seasnake/code/snake/finance/scripts/verify.sh)：JavaScript 语法、Python 编译、根测试目录中的 Node/Python 测试和独立端口本地冒烟。提交 JavaScript 前还需遵守 AGENTS 的语法与 diff 检查。
+2. 运行改动相关检查，再执行 [verify.sh](../../scripts/verify.sh)：JavaScript 语法、Python 编译、根测试目录中的 Node/Python 测试和独立端口本地冒烟。提交 JavaScript 前还需遵守 AGENTS 的语法与 diff 检查。
 3. 消息服务的 `tests/prince` 及仓库外 Monitor 测试需要单独运行；不能把根测试命令通过当作这些子系统已全部覆盖。
-4. 明确暂存源文件，创建提交与 PR。[GitHub Actions](/Users/seasnake/code/snake/finance/.github/workflows/ci.yml) 在 PR、main push 和手动触发时运行 `repository-verification`。是否在远端设置必需检查，本次未核验。
+4. 明确暂存源文件，创建提交与 PR。[GitHub Actions](../../.github/workflows/ci.yml) 在 PR、main push 和手动触发时运行 `repository-verification`。是否在远端设置必需检查，本次未核验。
 5. 本机部署依赖当前检出的源文件、Python 环境、外部 Monitor、系统凭据及 LaunchAgent。没有前端打包步骤；Node 进程的代码更新通常需重启服务才能生效，不能只凭文件已修改认定进程已加载。
 6. Windows 大 QMT 策略/中继有独立准备与部署脚本，变更不能仅靠 Mac Node 重启生效。固定版本、部署哈希、回退包和只读验收见 QMT 迁移文档。
 7. 回滚需要分别考虑源码、看板状态、运行数据与 Windows 适配；天梯按日备份、标签人工覆盖和外部 SQLite 都有各自的保留要求。
@@ -288,7 +288,7 @@ Level2 任务目前属于网盘归档链路，不能据此认为普通五档监�
 
 **Skill 与开源依赖补充**
 
-完整清单见 [Skill、开源组件与实际部署版本](/Users/seasnake/code/snake/finance/docs/architecture/skills-and-open-source-2026-11-01.md)。其中列出 23 个 QMT Bridge Skills、研究/采集/飞书/Level2 技能、八项自动化的具体 Skill 映射，以及实际安装版本和上游来源。
+完整清单见 [Skill、开源组件与实际部署版本](../../docs/architecture/skills-and-open-source-2026-11-01.md)。其中列出 23 个 QMT Bridge Skills、研究/采集/飞书/Level2 技能、八项自动化的具体 Skill 映射，以及实际安装版本和上游来源。
 
 架构上另有“用户或调度 → Codex Agent → Skill → 脚本/CLI/API → 服务与产物”这一层。主看板通常直接调用代码或 CLI，不会为每次请求加载全部 Skills。AI 分析页面使用固定摘要并关闭宿主技能自动发现。
 
@@ -296,13 +296,13 @@ Level2 任务目前属于网盘归档链路，不能据此认为普通五档监�
 
 **详细依据与维护入口**
 
-- [项目 README](/Users/seasnake/code/snake/finance/README.md)
-- [QMT 迁移与管道中继](/Users/seasnake/code/snake/finance/docs/architecture/qmt-migration.md)
+- [项目 README](../../README.md)
+- [QMT 迁移与管道中继](../../docs/architecture/qmt-migration.md)
 - [独立短线监控 README](/Users/seasnake/Documents/Codex/2026-07-27/miniqmt/outputs/miniqmt_cb_shortline_monitor/README.md)与[实际启动程序](/Users/seasnake/Documents/Codex/2026-07-27/miniqmt/outputs/miniqmt_cb_shortline_monitor/service_control.py)
-- [数据管理方案](/Users/seasnake/code/snake/finance/docs/architecture/data-management.md)与[模块化路线图](/Users/seasnake/code/snake/finance/docs/architecture/2026-08-modularization-roadmap.md)
-- [量化实验室说明](/Users/seasnake/code/snake/finance/docs/architecture/cb-quant-lab.md)与[当前量化路由](/Users/seasnake/code/snake/finance/server.js:2313)
-- [AI 分析实现说明](/Users/seasnake/code/snake/finance/docs/architecture/cb-ai-analysis.md)
-- [连板天梯流程](/Users/seasnake/code/snake/finance/docs/2026-09-07-limit-ladder.md)
-- [通达信导入](/Users/seasnake/code/snake/finance/docs/runbooks/tdx-selection-import.md)、[公式任务](/Users/seasnake/code/snake/finance/docs/runbooks/tdx-formula-selection.md)、[本地公式实验](/Users/seasnake/code/snake/finance/docs/runbooks/local-formula-demo.md)
-- [消息归档及暂停记录](/Users/seasnake/code/snake/finance/docs/runbooks/prince-archive.md)、[当前扩展说明](/Users/seasnake/code/snake/finance/extensions/prince-observer/README.md)、[离线 AI 编辑](/Users/seasnake/code/snake/finance/docs/runbooks/news-ai-enrichment.md)
-- [开发与 CI 工作流](/Users/seasnake/code/snake/finance/docs/development-workflow.md)
+- [数据管理方案](../../docs/architecture/data-management.md)与[模块化路线图](../../docs/architecture/2026-08-modularization-roadmap.md)
+- [量化实验室说明](../../docs/architecture/cb-quant-lab.md)与[当前量化路由](../../server.js)（`handleCbQuant`）
+- [AI 分析实现说明](../../docs/architecture/cb-ai-analysis.md)
+- [连板天梯流程](../../docs/2026-09-07-limit-ladder.md)
+- [通达信导入](../../docs/runbooks/tdx-selection-import.md)、[公式任务](../../docs/runbooks/tdx-formula-selection.md)、[本地公式实验](../../docs/runbooks/local-formula-demo.md)
+- [消息归档及暂停记录](../../docs/runbooks/prince-archive.md)、[当前扩展说明](../../extensions/prince-observer/README.md)、[离线 AI 编辑](../../docs/runbooks/news-ai-enrichment.md)
+- [开发与 CI 工作流](../../docs/development-workflow.md)
