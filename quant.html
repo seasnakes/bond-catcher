@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>可转债量化实验室</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./quant.css" />
+  </head>
+  <body>
+    <main class="quant-shell">
+      <header class="quant-header">
+        <div>
+          <p class="quant-eyebrow">Finance Board · QMT</p>
+          <h1>可转债量化实验室</h1>
+          <p id="serviceStatus">正在连接日线、竞价、主力监控与分钟行情…</p>
+        </div>
+        <nav aria-label="页面导航">
+          <a href="./index.html">返回主看板</a>
+          <a href="./trading.html">实盘监控</a>
+        </nav>
+      </header>
+
+      <aside class="quant-boundary" aria-label="交易边界">
+        <strong>日线回测 + 日内回放 + ATR网格 + 纸面模拟</strong>
+        <span>原有日线策略完整保留；日内模式中竞价只定开盘状态，紫线/均价、主力监控、动量量能共同确认，凯利只控制风险；ATR网格独立使用前一交易日完成后的波动率。全程不连接真实账户，不调用下单、撤单接口。</span>
+        <span class="quant-pill">转债 T+0</span>
+        <span class="quant-pill">下一分钟成交</span>
+        <span class="quant-pill">不接实盘</span>
+      </aside>
+
+      <section class="quant-tabs" role="tablist" aria-label="量化功能">
+        <button id="dailyTab" class="is-active" type="button" role="tab" aria-selected="true">日线回测</button>
+        <button id="replayTab" type="button" role="tab" aria-selected="false">日内回放</button>
+        <button id="gridTab" type="button" role="tab" aria-selected="false">ATR网格</button>
+        <button id="paperTab" type="button" role="tab" aria-selected="false">模拟盘</button>
+      </section>
+
+      <section id="dailyPanel" class="quant-panel" role="tabpanel">
+        <form id="dailyForm" class="quant-form">
+          <div class="quant-form-heading">
+            <div>
+              <h2>原有日线策略回测</h2>
+              <p>保留 MA20、MACD、EMA、紫线、布林和唐奇安策略；收盘出信号，下一根日K开盘成交。</p>
+            </div>
+            <div class="quant-actions"><button id="runDailyButton" class="primary-button" type="submit">运行日线回测</button></div>
+          </div>
+          <div class="quant-form-grid replay-settings">
+            <label><span>转债代码</span><span class="bond-code-combobox"><input id="dailyCode" value="127067.SZ" required autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="dailyCodeSuggestions" /><span id="dailyCodeSuggestions" class="bond-code-suggestions" role="listbox" hidden></span></span></label>
+            <label><span>策略</span><select id="dailyStrategy"><option value="all">全部策略对比</option></select></label>
+            <label><span>开始日期</span><input id="dailyStart" type="date" /></label>
+            <label><span>结束日期</span><input id="dailyEnd" type="date" /></label>
+            <label><span>模拟资金</span><input id="dailyCash" type="number" min="10000" step="10000" value="100000" /></label>
+            <label><span>单次仓位 %</span><input id="dailyPosition" type="number" min="1" max="100" step="1" value="20" /></label>
+            <label><span>双边佣金（万分）</span><input id="dailyCommission" type="number" min="0" max="100" step="0.1" value="1" /></label>
+            <label><span>单边滑点（bp）</span><input id="dailySlippage" type="number" min="0" max="100" step="1" value="2" /></label>
+          </div>
+        </form>
+        <div id="dailyEmpty" class="quant-empty">
+          <strong>原有功能已恢复</strong>
+          <span>日内功能是新增模式，不会替代日线回测和策略对比。</span>
+        </div>
+        <section id="dailyResult" class="quant-result" hidden>
+          <header class="result-header"><div><p>历史日线回测</p><h2 id="dailyTitle">--</h2></div><span id="dailyQuality">--</span></header>
+          <div id="dailyMetricCards" class="metric-grid"></div>
+          <div class="chart-card"><header><strong>策略权益曲线</strong><span>含同期买入持有基准</span></header><canvas id="dailyEquityCanvas" height="300" aria-label="日线策略权益曲线"></canvas></div>
+          <div id="dailyCompareCard" class="table-card" hidden>
+            <header><strong>策略对比</strong><span>统一成交与成本口径</span></header>
+            <div class="table-scroll"><table><thead><tr><th>策略</th><th>总收益</th><th>年化</th><th>最大回撤</th><th>夏普</th><th>交易数</th></tr></thead><tbody id="dailyCompareBody"></tbody></table></div>
+          </div>
+          <div class="table-card"><header><strong>回测成交</strong><span id="dailyTradeCaption">0笔</span></header><div class="table-scroll"><table><thead><tr><th>日期</th><th>方向</th><th>价格</th><th>数量</th><th>费用</th><th>实现盈亏</th><th>原因</th></tr></thead><tbody id="dailyTradeBody"></tbody></table></div></div>
+          <details class="model-note" open><summary>数据补齐、成交模型与限制</summary><ul id="dailyNotes"></ul></details>
+        </section>
+
+        <form id="portfolioForm" class="quant-form portfolio-form">
+          <div class="quant-form-heading">
+            <div>
+              <h2>全市场转债组合轮动</h2>
+              <p>独立复现 EasyXT 的双低、三低与六因子规则；按历史截面排名，T日收盘出信号，T+1开盘成交。</p>
+            </div>
+            <div class="quant-actions"><button id="runPortfolioButton" class="primary-button" type="submit">运行组合回测并自动补数</button></div>
+          </div>
+          <div class="quant-form-grid portfolio-settings">
+            <label><span>组合策略</span><select id="portfolioStrategy"></select></label>
+            <label><span>开始日期</span><input id="portfolioStart" type="date" value="2026-07-01" required /></label>
+            <label><span>结束日期</span><input id="portfolioEnd" type="date" value="2026-08-28" required /></label>
+            <label><span>模拟资金</span><input id="portfolioCash" type="number" min="10000" step="10000" value="100000" /></label>
+            <label><span>持有数量</span><input id="portfolioTopN" type="number" min="1" max="50" step="1" value="10" /></label>
+            <label><span>价格上限</span><input id="portfolioMaxPrice" type="number" min="80" max="500" step="1" value="130" /></label>
+            <label><span>溢价率上限 %</span><input id="portfolioMaxPremium" type="number" min="-10" max="500" step="1" value="50" /></label>
+            <label><span>余额上限（亿元）</span><input id="portfolioMaxBalance" type="number" min="0.1" max="1000" step="0.1" value="100" /></label>
+            <label><span>调仓间隔（交易日）</span><input id="portfolioRebalance" type="number" min="1" max="60" step="1" value="1" /></label>
+            <label><span>双边佣金（万分）</span><input id="portfolioCommission" type="number" min="0" max="100" step="0.1" value="1" /></label>
+            <label><span>单边滑点（bp）</span><input id="portfolioSlippage" type="number" min="0" max="100" step="1" value="2" /></label>
+          </div>
+          <p class="form-hint">首次运行会自动补齐历史转股价值、溢价率、剩余余额和候选券日K并落入本地缓存；通常需要十几秒，后续同区间会更快。</p>
+        </form>
+        <div id="portfolioEmpty" class="quant-empty compact-empty">
+          <strong>组合策略已与单券日线、日内回放并列保留</strong>
+          <span>必需历史字段缺失时明确排除并显示覆盖率，不会拿今天的余额倒填过去。</span>
+        </div>
+        <section id="portfolioResult" class="quant-result" hidden>
+          <header class="result-header"><div><p>历史全市场组合回测</p><h2 id="portfolioTitle">--</h2></div><span id="portfolioQuality">--</span></header>
+          <div id="portfolioMetricCards" class="metric-grid"></div>
+          <div class="chart-card"><header><strong>组合权益曲线</strong><span>含佣金、滑点与现金仓位</span></header><canvas id="portfolioEquityCanvas" height="300" aria-label="组合策略权益曲线"></canvas></div>
+          <div class="table-card"><header><strong>最新截面排名</strong><span id="portfolioRankCaption">前30名</span></header><div class="table-scroll"><table><thead><tr><th>排名</th><th>转债</th><th>收盘</th><th>溢价率</th><th>余额（亿元）</th><th>趋势</th><th>5日动量</th><th>综合分</th></tr></thead><tbody id="portfolioRankBody"></tbody></table></div></div>
+          <div class="table-card"><header><strong>组合成交</strong><span id="portfolioTradeCaption">0笔</span></header><div class="table-scroll"><table><thead><tr><th>日期</th><th>转债</th><th>方向</th><th>价格</th><th>数量</th><th>费用</th><th>实现盈亏</th><th>原因</th></tr></thead><tbody id="portfolioTradeBody"></tbody></table></div></div>
+          <details class="model-note" open><summary>字段覆盖、自动补数与限制</summary><ul id="portfolioNotes"></ul></details>
+        </section>
+      </section>
+
+      <section id="replayPanel" class="quant-panel" role="tabpanel" hidden>
+        <form id="replayForm" class="quant-form">
+          <div class="quant-form-heading">
+            <div>
+              <h2>竞价 → Setup → 组合确认 → 风控退出</h2>
+              <p>信号只使用当时已经完成的数据；触发后按下一分钟开盘成交，同一分钟止损优先。</p>
+            </div>
+            <div class="quant-actions"><button id="runReplayButton" class="primary-button" type="submit">运行日内回放</button></div>
+          </div>
+          <div class="quant-form-grid replay-settings">
+            <label><span>转债代码</span><span class="bond-code-combobox"><input id="replayCode" value="127067.SZ" required autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="replayCodeSuggestions" /><span id="replayCodeSuggestions" class="bond-code-suggestions" role="listbox" hidden></span></span></label>
+            <label><span>交易日</span><input id="replayDate" type="date" value="2026-08-28" required /></label>
+            <label><span>模拟资金</span><input id="replayCash" type="number" min="10000" step="10000" value="100000" /></label>
+            <label><span>先验胜率 %</span><input id="replayWinRate" type="number" min="1" max="99" step="0.5" value="52" /></label>
+            <label><span>凯利折扣 %</span><input id="replayKellyFraction" type="number" min="0" max="100" step="5" value="25" /></label>
+            <label><span>单笔风险上限 %</span><input id="replayRiskCap" type="number" min="0.05" max="3" step="0.05" value="0.5" /></label>
+            <label><span>仓位上限 %</span><input id="replayPositionCap" type="number" min="1" max="100" step="1" value="20" /></label>
+            <label><span>最宽止损 %</span><input id="replayMaxStop" type="number" min="0.5" max="3" step="0.1" value="2" /></label>
+            <label><span>第一止盈 R</span><input id="replayTake1R" type="number" min="0.5" max="3" step="0.25" value="1" /></label>
+            <label><span>第二止盈 R</span><input id="replayTake2R" type="number" min="1" max="6" step="0.25" value="2" /></label>
+            <label><span>双边佣金（万分）</span><input id="replayCommission" type="number" min="0" max="100" step="0.1" value="1" /></label>
+            <label><span>单边滑点（bp）</span><input id="replaySlippage" type="number" min="0" max="100" step="1" value="2" /></label>
+          </div>
+        </form>
+
+        <div id="replayEmpty" class="quant-empty">
+          <strong>默认已填入 2026-08-28 恒逸转2</strong>
+          <span>回放会同时核对竞价配对、分钟指标和主力监控事件，不使用日线大周期信号。</span>
+        </div>
+
+        <section id="replayResult" class="quant-result" hidden>
+          <header class="result-header">
+            <div><p>日内事件回放</p><h2 id="replayTitle">--</h2></div>
+            <span id="replayQuality">--</span>
+          </header>
+          <div id="replayMetricCards" class="metric-grid"></div>
+          <div class="decision-grid">
+            <article id="auctionCard" class="decision-card"></article>
+            <article id="kellyCard" class="decision-card"></article>
+          </div>
+          <div class="chart-card">
+            <header>
+              <strong>日内价格与风控线</strong>
+              <span><i class="legend-price"></i>价格 <i class="legend-purple"></i>紫线 <i class="legend-average"></i>分时均价</span>
+            </header>
+            <canvas id="intradayCanvas" height="340" aria-label="日内价格、紫线、均价与风控点"></canvas>
+          </div>
+          <div class="timeline-card">
+            <header><strong>决策时间线</strong><span>竞价只定状态，信号需跨类别确认</span></header>
+            <div id="decisionTimeline" class="decision-timeline"></div>
+          </div>
+          <div class="table-card">
+            <header><strong>模拟成交</strong><span id="replayFillCaption">--</span></header>
+            <div class="table-scroll">
+              <table>
+                <thead><tr><th>时间</th><th>方向</th><th>价格</th><th>数量</th><th>费用</th><th>实现盈亏</th><th>原因</th></tr></thead>
+                <tbody id="replayFillBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <details class="model-note" open>
+            <summary>口径、数据质量与限制</summary>
+            <ul id="replayNotes"></ul>
+          </details>
+        </section>
+      </section>
+
+      <section id="gridPanel" class="quant-panel" role="tabpanel" hidden>
+        <form id="gridForm" class="quant-form">
+          <div class="quant-form-heading">
+            <div>
+              <h2>ATR 动态网格 · 日内历史回放</h2>
+              <p>复现 EasyXT 独立 ATR 网格回测口径：前一交易日 ATR 定网宽，日内 MA 调基准，信号在下一分钟纸面成交。</p>
+            </div>
+            <div class="quant-actions"><button id="runGridButton" class="primary-button" type="submit">运行ATR网格并自动补数</button></div>
+          </div>
+          <div class="quant-form-grid grid-settings">
+            <label><span>转债代码</span><span class="bond-code-combobox"><input id="gridCode" value="127067.SZ" required autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="gridCodeSuggestions" /><span id="gridCodeSuggestions" class="bond-code-suggestions" role="listbox" hidden></span></span></label>
+            <label><span>交易日</span><input id="gridDate" type="date" title="打开页面时自动读取 QMT 最新可用交易日；也可以手动选择历史交易日。" /></label>
+            <label><span>模拟资金</span><input id="gridCash" type="number" min="10000" step="10000" value="80000" /></label>
+            <label><span>初始底仓（张）</span><input id="gridInitialPosition" type="number" min="0" step="10" value="0" /></label>
+            <label><span>单次交易（张）</span><input id="gridPositionSize" type="number" min="10" step="10" value="40" /></label>
+            <label><span>最大持仓（张）</span><input id="gridMaxPosition" type="number" min="10" step="10" value="240" /></label>
+            <label><span>ATR周期（日）</span><input id="gridAtrPeriod" type="number" min="2" max="120" step="1" value="14" /></label>
+            <label><span>ATR倍数</span><input id="gridAtrMultiplier" type="number" min="0.01" max="10" step="0.01" value="0.5" /></label>
+            <label><span>最小网格 %</span><input id="gridMinSpacing" type="number" min="0.01" max="10" step="0.01" value="0.1" /></label>
+            <label><span>最大网格 %</span><input id="gridMaxSpacing" type="number" min="0.01" max="20" step="0.01" value="0.8" /></label>
+            <label><span>日内MA周期</span><input id="gridMaPeriod" type="number" min="2" max="500" step="1" value="20" /></label>
+            <label><span title="现价相对日内MA的偏离绝对值超过该百分比时更新MA基准；有成交后仍优先以上一笔成交价作为下一格参考。">趋势阈值 % ⓘ</span><input id="gridTrendThreshold" type="number" min="0" max="20" step="0.05" value="0.3" /></label>
+            <label><span>双边佣金（万分）</span><input id="gridCommission" type="number" min="0" max="100" step="0.1" value="0.5" /></label>
+            <label><span title="成交价的不利偏移：买入价上调、卖出价下调。1bp=0.01%。">单边滑点（bp）ⓘ</span><input id="gridSlippage" type="number" min="0" max="100" step="1" value="2" /></label>
+          </div>
+          <p class="form-hint">分钟K或日K缺失时会先触发现有 QMT 补数；ATR 严格排除目标交易日，若完整日K不足14期会明确降级为最小网格，不会静默伪造ATR。</p>
+          <p class="form-hint parameter-hint"><strong>参数说明：</strong>趋势阈值决定未成交阶段的MA基准何时更新，有成交后优先以上一笔成交价作为下一格参考；单边滑点按不利方向修正成交价，2bp=0.02%，完成一次买入和卖出约合4bp，佣金另计。</p>
+        </form>
+
+        <div id="gridEmpty" class="quant-empty">
+          <strong>ATR 动态网格已经单独恢复</strong>
+          <span>它属于日内波动率策略，不再混在双低、三低等全市场日线轮动策略里。</span>
+        </div>
+
+        <section id="gridResult" class="quant-result" hidden>
+          <header class="result-header"><div><p>ATR动态网格回放</p><h2 id="gridTitle">--</h2></div><span id="gridQuality">--</span></header>
+          <div id="gridMetricCards" class="metric-grid"></div>
+          <div class="chart-card"><header><strong>标的走势与网格买卖点</strong><span><i class="legend-grid-price"></i>价格 <i class="legend-grid-reference"></i>参考价 <i class="legend-grid-band"></i>触发带 <i class="legend-grid-buy"></i>买点 <i class="legend-grid-sell"></i>卖点</span></header><canvas id="gridPriceCanvas" height="340" aria-label="ATR网格标的价格、网格参考价、上下触发带和买卖点"></canvas></div>
+          <div class="chart-card"><header><strong>日内账户权益</strong><span>保留期末底仓，按最后一分钟收盘估值</span></header><canvas id="gridEquityCanvas" height="300" aria-label="ATR网格日内权益曲线"></canvas></div>
+          <div class="table-card"><header><strong>网格模拟成交</strong><span id="gridTradeCaption">0笔</span></header><div class="table-scroll"><table><thead><tr><th>序号</th><th>信号/成交</th><th>方向</th><th>信号价/成交价</th><th>数量</th><th>网格宽度</th><th>费用</th><th>实现盈亏</th><th>原因</th></tr></thead><tbody id="gridTradeBody"></tbody></table></div></div>
+          <details class="model-note" open><summary>ATR口径、自动补数与成交限制</summary><ul id="gridNotes"></ul></details>
+        </section>
+      </section>
+
+      <section id="paperPanel" class="quant-panel" role="tabpanel" hidden>
+        <form id="paperForm" class="quant-form">
+          <div class="quant-form-heading">
+            <div>
+              <h2>日线 / 日内事件 / ATR网格模拟盘</h2>
+              <p>可继续运行原有日线策略，也可切换到事件共振或ATR动态网格；所有成交都只写入本地纸面账户。</p>
+            </div>
+            <div class="paper-runtime"><span id="paperRuntimeDot"></span><strong id="paperRuntimeText">已停止</strong><small id="paperCycleText">尚未运行</small></div>
+          </div>
+          <div class="quant-form-grid paper-settings">
+            <label class="wide-field"><span>监控转债（最多8只）</span><input id="paperCodes" value="127067.SZ" autocomplete="off" /></label>
+            <label><span>模拟策略</span><select id="paperStrategy"></select></label>
+            <label><span>轮询秒数</span><input id="paperCycleSeconds" type="number" min="5" max="3600" value="60" /></label>
+            <label><span>日线单次仓位 %</span><input id="paperAllocation" type="number" min="1" max="100" value="20" /></label>
+            <label><span>网格单次（张）</span><input id="paperGridPositionSize" type="number" min="10" step="10" value="100" /></label>
+            <label><span>网格持仓上限（张）</span><input id="paperGridMaxPosition" type="number" min="10" step="10" value="500" /></label>
+            <label><span>网格ATR周期</span><input id="paperGridAtrPeriod" type="number" min="2" max="120" step="1" value="14" /></label>
+            <label><span>网格ATR倍数</span><input id="paperGridAtrMultiplier" type="number" min="0.01" max="10" step="0.01" value="0.5" /></label>
+            <label><span>最小/最大网格 %</span><span class="inline-inputs"><input id="paperGridMinSpacing" type="number" min="0.01" max="10" step="0.01" value="0.1" /><input id="paperGridMaxSpacing" type="number" min="0.01" max="20" step="0.01" value="0.8" /></span></label>
+            <label><span>网格MA周期</span><input id="paperGridMaPeriod" type="number" min="2" max="500" step="1" value="20" /></label>
+            <label><span>网格趋势阈值 %</span><input id="paperGridTrendThreshold" type="number" min="0" max="20" step="0.05" value="0.3" /></label>
+            <label><span>先验胜率 %</span><input id="paperWinRate" type="number" min="1" max="99" step="0.5" value="52" /></label>
+            <label><span>凯利折扣 %</span><input id="paperKellyFraction" type="number" min="0" max="100" step="5" value="25" /></label>
+            <label><span>单笔风险 %</span><input id="paperRiskCap" type="number" min="0.05" max="3" step="0.05" value="0.5" /></label>
+            <label><span>仓位上限 %</span><input id="paperPositionCap" type="number" min="1" max="100" value="20" /></label>
+            <label><span>最宽止损 %</span><input id="paperMaxStop" type="number" min="0.5" max="3" step="0.1" value="2" /></label>
+            <label><span>止盈 1 / 2R</span><span class="inline-inputs"><input id="paperTake1R" type="number" min="0.5" max="3" step="0.25" value="1" /><input id="paperTake2R" type="number" min="1" max="6" step="0.25" value="2" /></span></label>
+            <label><span>佣金（万分）</span><input id="paperCommission" type="number" min="0" max="100" step="0.1" value="1" /></label>
+            <label><span>滑点（bp）</span><input id="paperSlippage" type="number" min="0" max="100" value="2" /></label>
+            <label><span>重置初始资金</span><input id="paperInitialCash" type="number" min="10000" step="10000" value="100000" /></label>
+          </div>
+          <div class="paper-controls">
+            <button id="paperResetButton" class="danger-button" type="button">重置账户</button>
+            <button id="paperStopButton" class="secondary-button" type="button">停止轮询</button>
+            <button id="paperCycleButton" class="secondary-button" type="button">立即跑一轮</button>
+            <button id="paperStartButton" class="primary-button" type="button">启动模拟盘</button>
+          </div>
+        </form>
+
+        <section class="quant-result">
+          <div id="paperMetricCards" class="metric-grid"></div>
+          <div class="chart-card paper-chart-card">
+            <header><strong>模拟账户权益</strong><span id="paperSource">纸面账户 · 未连接真实账户</span></header>
+            <canvas id="paperEquityCanvas" height="220" aria-label="模拟账户权益曲线"></canvas>
+          </div>
+          <form id="manualPaperOrder" class="manual-order">
+            <strong>手工模拟委托</strong>
+            <label><span>代码</span><input id="manualCode" value="127067.SZ" required /></label>
+            <label><span>方向</span><select id="manualSide"><option value="buy">买入</option><option value="sell">卖出</option></select></label>
+            <label><span>数量</span><input id="manualQuantity" type="number" min="10" step="10" placeholder="空=按20%上限" /></label>
+            <button class="secondary-button" type="submit">按有效QMT行情模拟成交</button>
+          </form>
+          <div class="table-card">
+            <header><strong>当前持仓与风控点</strong><span id="positionCaption">0只</span></header>
+            <div class="table-scroll"><table>
+              <thead><tr><th>转债</th><th>数量/可卖</th><th>成本/现价</th><th>止损</th><th>止盈1/2</th><th>浮动盈亏</th><th>更新时间</th></tr></thead>
+              <tbody id="paperPositionBody"></tbody>
+            </table></div>
+          </div>
+          <div class="paper-ledgers">
+            <div class="table-card">
+              <header><strong>模拟成交</strong><span id="fillCaption">0笔</span></header>
+              <div class="table-scroll"><table><thead><tr><th>时间</th><th>代码</th><th>方向</th><th>价格/数量</th><th>费用</th><th>实现盈亏</th></tr></thead><tbody id="paperFillBody"></tbody></table></div>
+            </div>
+            <div class="table-card">
+                  <header><strong>策略信号</strong><span id="signalCaption">0条</span></header>
+                  <div class="table-scroll"><table><thead><tr><th>信号时间</th><th>代码</th><th>方向</th><th>状态</th><th>原因</th></tr></thead><tbody id="paperSignalBody"></tbody></table></div>
+            </div>
+          </div>
+        </section>
+      </section>
+      <div id="toast" class="quant-toast" role="status" hidden></div>
+    </main>
+    <script src="./quant.js"></script>
+  </body>
+</html>
