@@ -17,3 +17,15 @@ windows.local.json
 windows.gateway.env
 monitor/runtime/
 monitor/smoke-runtime/
+
+# Editor, agent and test tool state
+.pytest_cache/
+.specstory/
+.vscode/
+.cursorindexingignore
+
+# One-off drafts and local databases
+draft_*_folder/
+*.sqlite3
+*.sqlite3-*
+*.tmp
