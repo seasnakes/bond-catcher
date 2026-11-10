@@ -3,14 +3,23 @@ set -eu
 
 TASK_ROOT="${FINANCE_ROOT_PATH:-${0:A:h:h}}"
 TASK_LOG="$TASK_ROOT/finance-board.log"
+TASK_LOG_ARCHIVE_DIR="${FINANCE_LOG_ARCHIVE_DIR:-$TASK_ROOT/runtime/logs}"
 TASK_NODE="${FINANCE_NODE_PATH:-/Users/seasnake/.nvm/versions/node/v22.22.1/bin/node}"
+if [[ ! -x "$TASK_NODE" ]]; then
+  TASK_NODE="$(command -v node || true)"
+fi
+if [[ -z "$TASK_NODE" ]]; then
+  print -u2 "node not found; set FINANCE_NODE_PATH"
+  exit 1
+fi
 TASK_MAX_LOG_BYTES="${FINANCE_MAX_LOG_BYTES:-$((100 * 1024 * 1024))}"
 TASK_LOG_BACKUPS="${FINANCE_LOG_BACKUPS:-5}"
 
 if [[ -f "$TASK_LOG" ]] && (( $(stat -f %z "$TASK_LOG") >= TASK_MAX_LOG_BYTES )); then
-  TASK_ARCHIVE="$TASK_ROOT/finance-board-$(date +%Y%m%d-%H%M%S).log"
+  mkdir -p -- "$TASK_LOG_ARCHIVE_DIR"
+  TASK_ARCHIVE="$TASK_LOG_ARCHIVE_DIR/finance-board-$(date +%Y%m%d-%H%M%S).log"
   mv -- "$TASK_LOG" "$TASK_ARCHIVE"
-  TASK_ARCHIVES=("$TASK_ROOT"/finance-board-*.log(N.om))
+  TASK_ARCHIVES=("$TASK_LOG_ARCHIVE_DIR"/finance-board-*.log(N.om))
   if (( ${#TASK_ARCHIVES} > TASK_LOG_BACKUPS )); then
     for TASK_EXPIRED in ${TASK_ARCHIVES[$((TASK_LOG_BACKUPS + 1)),-1]}; do
       rm -f -- "$TASK_EXPIRED"
