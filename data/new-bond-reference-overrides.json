@@ -1,0 +1,13 @@
+{
+  "description": "新债资料源暂未返回正股关系时的最小人工补充；动态资料可用后仍以动态资料为准。",
+  "overrides": {
+    "118073.SH": {
+      "stockCode": "688480.SH",
+      "stockName": "赛恩斯"
+    },
+    "123279.SZ": {
+      "stockCode": "301626.SZ",
+      "stockName": "苏州天脉"
+    }
+  }
+}

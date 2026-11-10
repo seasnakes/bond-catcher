@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>次新债表现</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./new-bond-performance.css" />
+  </head>
+  <body>
+    <main class="new-bond-shell">
+      <header class="new-bond-header">
+        <div>
+          <nav aria-label="页面导航">
+            <a href="./index.html">← 主看板</a>
+            <a href="./bond-heatmap.html">转债星图</a>
+            <a href="./quant.html">量化实验室</a>
+          </nav>
+          <h1>次新债表现</h1>
+          <p id="dataStatus">正在读取上市资料与 QMT 分钟缓存…</p>
+        </div>
+        <button id="refreshButton" type="button">刷新数据</button>
+      </header>
+
+      <section class="control-strip" aria-label="图表设置">
+        <fieldset>
+          <legend>上市周期</legend>
+          <div id="windowControls" class="segmented-controls">
+            <button type="button" data-window="1" aria-pressed="true">1个月</button>
+            <button type="button" data-window="2" aria-pressed="false">2个月</button>
+            <button type="button" data-window="6" aria-pressed="false">6个月</button>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>收盘取样</legend>
+          <div id="intervalControls" class="segmented-controls">
+            <button type="button" data-interval="15" aria-pressed="false">15分钟</button>
+            <button type="button" data-interval="30" aria-pressed="true">30分钟</button>
+            <button type="button" data-interval="60" aria-pressed="false">60分钟</button>
+            <button type="button" data-interval="1440" aria-pressed="false">日线</button>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>纵坐标</legend>
+          <div id="axisControls" class="segmented-controls">
+            <button type="button" data-axis="price" aria-pressed="true">价格</button>
+            <button type="button" data-axis="return" aria-pressed="false">收益率</button>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>连接方式</legend>
+          <div id="curveControls" class="segmented-controls">
+            <button type="button" data-curve="smooth" aria-pressed="true">平滑</button>
+            <button type="button" data-curve="straight" aria-pressed="false">直连</button>
+          </div>
+        </fieldset>
+        <div class="alignment-note">
+          <strong>首尾对齐</strong>
+          <span>最新取样点对齐到右端，中间按实际日历进程拉伸；日线直接连接 QMT 每日收盘价，平滑仅改变点间外观，不修改真实收盘点和悬浮数值。</span>
+        </div>
+      </section>
+
+      <section class="metric-grid" aria-label="次新债统计">
+        <article><span>可比较转债</span><strong id="seriesCount">--</strong><small id="candidateCount">候选 --</small></article>
+        <article><span>区间收益中位数</span><strong id="medianReturn">--</strong><small>首个取样收盘归一为 0%</small></article>
+        <article><span>区间上涨</span><strong id="risingCount">--</strong><small id="risingRatio">--</small></article>
+        <article><span id="coverageMetricLabel">上市首日分钟完整</span><strong id="completeStartCount">--</strong><small id="coverageMetricHint">至少 228 根且覆盖开收盘</small></article>
+      </section>
+
+      <section class="performance-card">
+        <header>
+          <div>
+            <h2>上市进程价格曲线</h2>
+            <p>纵轴默认显示实际收盘价（元）；分钟级取每个时间桶最后收盘，日线级直接取每日收盘。</p>
+          </div>
+          <span id="chartCaption">--</span>
+        </header>
+        <div id="seriesLegend" class="series-legend" aria-label="曲线图例"></div>
+        <div id="chartWrap" class="chart-wrap">
+          <canvas id="performanceCanvas" role="img" aria-label="次新债上市进程价格与收益曲线"></canvas>
+          <div id="chartTooltip" class="chart-tooltip" role="tooltip" hidden></div>
+          <div id="chartEmpty" class="chart-empty" hidden>当前选择没有达到 4 个有效交易日的分钟数据</div>
+        </div>
+      </section>
+
+      <section class="bond-picker-card">
+        <header>
+          <div>
+            <h2>比较标的</h2>
+            <p>周期内上市超过 3 天的转债；最多同时选择 12 只。</p>
+          </div>
+          <label><span>筛选</span><input id="bondSearch" type="search" placeholder="名称 / 代码 / 正股" autocomplete="off" /></label>
+        </header>
+        <div class="table-scroll">
+          <table>
+            <thead>
+                <tr><th>显示</th><th>转债</th><th>上市日期</th><th>正股</th><th>有效交易日</th><th>首个取样</th><th>最新取样</th><th>区间收益</th><th id="coverageColumnHeading">分钟覆盖</th></tr>
+            </thead>
+            <tbody id="bondTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <script src="./new-bond-performance-core.js" defer></script>
+    <script src="./new-bond-performance.js" defer></script>
+  </body>
+</html>
