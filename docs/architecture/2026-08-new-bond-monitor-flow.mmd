@@ -1,0 +1,34 @@
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif", "fontSize": "18px", "primaryColor": "#f8fafc", "primaryTextColor": "#1f2937", "primaryBorderColor": "#cbd5e1", "lineColor": "#64748b", "secondaryColor": "#eff6ff", "tertiaryColor": "#f0fdf4"}, "flowchart": {"curve": "basis", "nodeSpacing": 42, "rankSpacing": 54, "padding": 18}}}%%
+flowchart TD
+    A["东方财富新债资料"] --> C
+    B["QMT 交易日历"] --> C
+
+    C["08:30–09:29 自动识别<br/>上市第二个交易日"] --> D["统一新债登记入口"]
+
+    D --> E["加入“小热次”<br/>主看板标的范围"]
+    D --> F["写入补充债池清单<br/>保留 45 天"]
+
+    E --> G["MiniQMT 实时报价"]
+    G --> H["缩略分时"]
+    G --> I["右侧分时详情"]
+    G --> J["盘后缺口检查与分钟线回补"]
+
+    K["MiniQMT 标准转债列表"] --> L["合并去重后的监控债池"]
+    F --> L
+
+    L --> M["09:15 启动加载<br/>盘中每 30 秒热更新"]
+    M --> N["full_tick 后台实时采集"]
+    N --> O["当天 SQLite 数据库"]
+    O --> P["分钟观测"]
+    O --> Q["监控事件与盘后复盘"]
+
+    classDef source fill:#f8fafc,stroke:#94a3b8,color:#1f2937;
+    classDef decision fill:#eff6ff,stroke:#60a5fa,color:#1e3a8a;
+    classDef registry fill:#f0fdf4,stroke:#4ade80,color:#14532d;
+    classDef runtime fill:#fff7ed,stroke:#fb923c,color:#7c2d12;
+    classDef storage fill:#f5f3ff,stroke:#a78bfa,color:#4c1d95;
+    class A,B,K source;
+    class C decision;
+    class D,E,F,L registry;
+    class G,H,I,J,M,N runtime;
+    class O,P,Q storage;
